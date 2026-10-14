@@ -1,0 +1,33 @@
+from app.schemas import MarketSnapshot
+
+
+def analyse_snapshot(snapshot: MarketSnapshot) -> dict:
+    total = snapshot.bid_quantity + snapshot.ask_quantity
+
+    imbalance = (
+        (snapshot.bid_quantity - snapshot.ask_quantity) / total
+        if total > 0
+        else 0.0
+    )
+
+    spread = round(snapshot.ask_price - snapshot.bid_price, 4)
+
+    if imbalance > 0.20:
+        interpretation = "More displayed bid quantity"
+    elif imbalance < -0.20:
+        interpretation = "More displayed offer quantity"
+    else:
+        interpretation = "Displayed quantities are relatively balanced"
+
+    return {
+        "symbol": snapshot.symbol,
+        "last_price": snapshot.last_price,
+        "spread": spread,
+        "book_imbalance": round(imbalance, 4),
+        "interpretation": interpretation,
+        "trade_action": "NONE",
+        "mode": "PAPER_ONLY",
+        "note": (
+            "Research indicator only; no trading order is generated."
+        ),
+    }
