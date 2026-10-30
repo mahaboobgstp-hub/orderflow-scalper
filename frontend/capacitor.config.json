@@ -1,0 +1,7 @@
+
+{
+  "appId": "com.orderflowscalper.app",
+  "appName": "OrderFlow Scalper",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
