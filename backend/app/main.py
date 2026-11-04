@@ -1,114 +1,100 @@
-from datetime import datetime, timezone
-from collections import deque
-from threading import Lock
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException
 
-app = FastAPI(
-    title="OrderFlow Scalper",
-    description="Order-book research and paper-trading API",
-    version="0.2.0",
-)
-
-# Temporary in-memory history: keeps the latest 500 snapshots.
-snapshot_history = deque(maxlen=500)
-history_lock = Lock()
+from app.market_data.binance_stream import BinanceOrderBookStream
 
 
-class MarketSnapshot(BaseModel):
-    symbol: str = "IDFCFIRSTB"
-    last_price: float = Field(gt=0)
-    bid_price: float = Field(gt=0)
-    ask_price: float = Field(gt=0)
-    bid_quantity: int = Field(ge=0)
-    ask_quantity: int = Field(ge=0)
+# --------------------------------------------------
+# Market Data Engine
+# --------------------------------------------------
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Start the market data engine when FastAPI starts.
+    Stop it gracefully when FastAPI shuts down.
+    """
 
-def analyse_snapshot(snapshot: MarketSnapshot):
-    total = snapshot.bid_quantity + snapshot.ask_quantity
-
-    imbalance = (
-        (snapshot.bid_quantity - snapshot.ask_quantity) / total
-        if total > 0
-        else 0.0
+    market_stream = BinanceOrderBookStream(
+        symbol="BTCUSDT"
     )
 
-    spread = round(snapshot.ask_price - snapshot.bid_price, 4)
+    app.state.market_stream = market_stream
 
-    if imbalance > 0.20:
-        interpretation = "More displayed bid quantity"
-    elif imbalance < -0.20:
-        interpretation = "More displayed offer quantity"
-    else:
-        interpretation = "Displayed quantities are relatively balanced"
+    await market_stream.start()
 
-    return {
-        "symbol": snapshot.symbol,
-        "last_price": snapshot.last_price,
-        "bid_price": snapshot.bid_price,
-        "ask_price": snapshot.ask_price,
-        "bid_quantity": snapshot.bid_quantity,
-        "ask_quantity": snapshot.ask_quantity,
-        "spread": spread,
-        "book_imbalance": round(imbalance, 4),
-        "interpretation": interpretation,
-        "trade_action": "NONE",
-        "mode": "PAPER_ONLY",
-    }
+    try:
+        yield
+    finally:
+        await market_stream.stop()
 
+
+# --------------------------------------------------
+# FastAPI Application
+# --------------------------------------------------
+
+app = FastAPI(
+    title="OrderFlow Scalper API",
+    description="Market data and trading research backend",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+
+# --------------------------------------------------
+# Basic Health Check
+# --------------------------------------------------
 
 @app.get("/")
-def home():
+async def root():
     return {
-        "app": "OrderFlow Scalper",
-        "mode": "PAPER_ONLY",
-        "message": "Backend is running",
+        "application": "OrderFlow Scalper",
+        "status": "running",
+        "mode": "DEMO_DATA",
     }
 
 
 @app.get("/health")
-def health():
+async def health():
     return {
         "status": "ok",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "service": "FastAPI",
     }
 
 
-@app.post("/api/analyse")
-def analyse(snapshot: MarketSnapshot):
-    result = analyse_snapshot(snapshot)
-    result["timestamp"] = datetime.now(timezone.utc).isoformat()
+# --------------------------------------------------
+# Market Data Endpoints
+# --------------------------------------------------
 
-    with history_lock:
-        snapshot_history.append(result.copy())
+@app.get("/api/market-data/status")
+async def market_data_status():
+    """
+    Check whether the market data stream is connected.
+    """
 
-    return result
+    stream = app.state.market_stream
+
+    return await stream.get_status()
 
 
-@app.get("/api/history")
-def get_history(limit: int = 50):
-    limit = max(1, min(limit, 500))
+@app.get("/api/market-data/order-book")
+async def get_order_book():
+    """
+    Return the current local BTCUSDT order book.
+    """
 
-    with history_lock:
-        records = list(snapshot_history)[-limit:]
-        records.reverse()
+    stream = app.state.market_stream
+
+    order_book = await stream.get_order_book()
+
+    if not order_book:
+        raise HTTPException(
+            status_code=503,
+            detail="Order book is not synchronized yet.",
+        )
 
     return {
-        "count": len(records),
-        "max_records": 500,
-        "mode": "PAPER_ONLY",
-        "history": records,
-    }
-
-
-@app.delete("/api/history")
-def clear_history():
-    with history_lock:
-        snapshot_history.clear()
-
-    return {
-        "message": "Snapshot history cleared",
-        "count": 0,
-        "mode": "PAPER_ONLY",
+        "symbol": "BTCUSDT",
+        "order_book": order_book,
     }
