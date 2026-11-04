@@ -2,20 +2,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
-from app.market_data.binance_stream import BinanceOrderBookStream
+from app.market_data.backend_stream import BinanceOrderBookStream
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Start the market data stream with FastAPI.
+    Start the market-data stream with FastAPI.
     Stop it cleanly when FastAPI shuts down.
     """
 
-    stream = BinanceOrderBookStream(
-        symbol="BTCUSDT"
-    )
-
+    stream = BinanceOrderBookStream(symbol="BTCUSDT")
     app.state.market_stream = stream
 
     await stream.start()
@@ -34,16 +31,13 @@ app = FastAPI(
 )
 
 
-# --------------------------------------------------
-# Basic endpoints
-# --------------------------------------------------
-
 @app.get("/")
 async def root():
     return {
         "application": "OrderFlow Scalper",
         "status": "running",
         "mode": "DEMO_MARKET_DATA",
+        "trading_mode": "PAPER_ONLY",
     }
 
 
@@ -52,24 +46,19 @@ async def health():
     return {
         "status": "ok",
         "service": "FastAPI",
+        "trading_mode": "PAPER_ONLY",
     }
 
-
-# --------------------------------------------------
-# Market Data endpoints
-# --------------------------------------------------
 
 @app.get("/api/market-data/status")
 async def market_data_status():
     stream = app.state.market_stream
-
     return await stream.get_status()
 
 
 @app.get("/api/market-data/order-book")
 async def get_order_book():
     stream = app.state.market_stream
-
     order_book = await stream.get_order_book()
 
     if order_book is None:
