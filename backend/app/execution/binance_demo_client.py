@@ -66,7 +66,32 @@ class BinanceDemoClient:
             )
 
         return response.json()
+    async def _public_get(self, path: str, params: dict | None = None) -> dict:
+        url = f"{self.base_url}{path}"
 
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, params=params or {})
+
+        if response.is_error:
+            try:
+                detail = response.json()
+            except ValueError:
+                detail = response.text[:500]
+
+            raise BinanceDemoError(
+                f"Binance Demo public API error ({response.status_code}): {detail}"
+            )
+
+        return response.json()
+
+    async def get_exchange_info(self) -> dict:
+        return await self._public_get("/fapi/v1/exchangeInfo")
+
+    async def get_symbol_price(self, symbol: str) -> dict:
+        return await self._public_get(
+            "/fapi/v1/ticker/price",
+            {"symbol": symbol.upper()},
+        )
     async def get_account(self) -> dict:
         return await self._signed_request(
             "GET",
