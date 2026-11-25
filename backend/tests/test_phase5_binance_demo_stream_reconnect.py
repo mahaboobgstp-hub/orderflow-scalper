@@ -80,10 +80,11 @@ class BinanceStreamReconnectTests(unittest.IsolatedAsyncioTestCase):
             stop_event=stream._stop_event,
         )
         connections = [FakeConnection(first), FakeConnection(second)]
-        with patch("app.market_data.backend_stream.websockets.connect", side_effect=connections), \
+        with patch("app.market_data.backend_stream.websockets.connect", side_effect=connections) as mock_connect, \
              patch.object(stream, "_fetch_snapshot", new=AsyncMock(side_effect=[snapshot(100), snapshot(200)])):
             await stream._run_forever()
 
+        self.assertEqual(mock_connect.call_count, 2)
         # _run_forever clears connection/sync flags after its stop event,
         # but the recovered snapshot must have been applied before shutdown.
         self.assertFalse(stream.connected)
