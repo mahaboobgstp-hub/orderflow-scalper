@@ -12,7 +12,7 @@
 | 8 | Aggressive trade flow & momentum detector | Implemented; isolated reconstruction tests passed; full repo runtime pending |
 | 9 | Volatility, market regime & broader context | Implemented with dummy OHLCV provider; tests/runtime pending |
 | 10 | Risk management & position sizing | Implemented calculation/advisory guard; tests/runtime pending |
-| 11 | Paper execution engine | Not started |
+| 11 | Paper trading engine | Implemented in-memory simulation; tests/runtime pending |
 | 12 | Advanced position management (TSL/TTP) | Not started |
 | 13 | Backtesting & performance analytics | Not started |
 | 14 | Production deployment, monitoring & recovery | Not started |
