@@ -79,8 +79,12 @@ class OrderBookImbalanceDetector:
         if book.get("stale", True):
             raise ValueError("Order book is stale; imbalance analysis refused.")
         age = book.get("age_seconds")
-        if age is None or float(age) > self.max_book_age_seconds:
-            raise ValueError("Order book exceeds allowed age; analysis refused.")
+        try:
+            age_value = float(age)
+        except (TypeError, ValueError):
+            raise ValueError("Order book age is missing or invalid; analysis refused.") from None
+        if not math.isfinite(age_value) or age_value < 0 or age_value > self.max_book_age_seconds:
+            raise ValueError("Order book exceeds allowed age or has invalid age; analysis refused.")
         if book.get("integrity_error"):
             raise ValueError(f"Order book integrity error: {book['integrity_error']}")
         requested_levels = max(1, min(int(levels), 20))
@@ -102,7 +106,10 @@ class OrderBookImbalanceDetector:
         top_score = self._ratio(top_bid_qty, top_ask_qty)
         weighted_score = self._ratio(bid_weighted, ask_weighted)
         key = f"{exchange}:{symbol}"
-        now = time.time()
+        # Monotonic time prevents wall-clock adjustments from corrupting persistence
+        # windows and pressure velocity calculations. Wall time is only for output.
+        now = time.monotonic()
+        analyzed_at_ms = int(time.time() * 1000)
         history = self._record(key, weighted_score, now)
         pressure_change_per_second = None
         pressure_acceleration_per_second2 = None
@@ -129,14 +136,21 @@ class OrderBookImbalanceDetector:
         # Confidence-quality is not predictive confidence. It grades data depth,
         # persistence, and agreement among raw/top/weighted measures.
         depth_quality = min(len(bids), len(asks), requested_levels) / requested_levels
-        directions = [score for score in (raw_score, top_score, weighted_score) if abs(score) > 1e-9]
-        agreement = 1.0 if not directions or all(score * weighted_score > 0 for score in directions) else 0.0
+        direction_epsilon = 1e-9
+        if abs(weighted_score) <= direction_epsilon:
+            # Neutral weighted pressure only agrees when all independent measures
+            # are also neutral; a zero raw/top measure is not confirmation.
+            agreement = 1.0 if all(abs(score) <= direction_epsilon for score in (raw_score, top_score)) else 0.0
+        else:
+            # Require raw and top-of-book metrics to confirm the weighted side.
+            # Zero or opposite values are lack of confirmation, not agreement.
+            agreement = 1.0 if all(score * weighted_score > 0 for score in (raw_score, top_score)) else 0.0
         quality = round(100 * (0.5 * depth_quality + 0.3 * persistence + 0.2 * agreement), 2)
         return {
             "detector": "phase5_order_book_imbalance",
             "exchange": exchange,
             "symbol": symbol,
-            "analyzed_at_ms": int(now * 1000),
+            "analyzed_at_ms": analyzed_at_ms,
             "levels_requested": requested_levels,
             "levels_used": {"bids": len(bids), "asks": len(asks)},
             "metrics": {
