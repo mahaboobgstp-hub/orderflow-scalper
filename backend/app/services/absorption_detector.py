@@ -68,8 +68,8 @@ class AbsorptionLiquidityDetector:
         buy_vwap_progress=(mid-buy_avg)/buy_avg*100 if buy_avg else 0.0
         sell_vwap_progress=(sell_avg-mid)/sell_avg*100 if sell_avg else 0.0
         # Aggressor-direction price progress measured against the opposite side of the touch.
-        buy_progress_pct=max(0.0,(mid-best_bid)/mid*100) if mid else 0.0
-        sell_progress_pct=max(0.0,(best_ask-mid)/mid*100) if mid else 0.0
+        buy_progress_pct=max(0.0,(mid-buy_avg)/buy_avg*100) if buy_avg else 0.0
+        sell_progress_pct=max(0.0,(sell_avg-mid)/sell_avg*100) if sell_avg else 0.0
         # Current displayed liquidity at the touch, and concentration in first 5 levels.
         bid5=sorted(bids,key=lambda x:x[0],reverse=True)[:5]; ask5=sorted(asks,key=lambda x:x[0])[:5]
         bid_depth=sum(q for p,q in bid5); ask_depth=sum(q for p,q in ask5)
