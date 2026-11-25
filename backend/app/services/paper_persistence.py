@@ -97,3 +97,6 @@ class PaperPersistenceWorker:
                 exit_reason=trade["close_reason"],trade_data=trade)
             await self.repo.system_log("INFO","Paper position closed","paper_lifecycle",
                 {"symbol":symbol,"close_reason":trade["close_reason"],"net_pnl":trade["net_pnl"]})
+            logger.info("Persisted paper close for %s", symbol)
+        else:
+            logger.warning("Unknown paper persistence event type: %s", kind)
