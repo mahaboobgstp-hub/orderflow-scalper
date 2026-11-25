@@ -59,7 +59,10 @@ class LiquidityZoneDetector:
         if not book.get("synchronized",False): raise ValueError("Order book is unsynchronized; zone analysis refused.")
         if book.get("stale",True): raise ValueError("Order book is stale; zone analysis refused.")
         age=book.get("age_seconds")
-        if age is None or float(age)>self.max_book_age_seconds: raise ValueError("Order book exceeds maximum age.")
+        try: age_value=float(age)
+        except (TypeError,ValueError): raise ValueError("Invalid order-book age.") from None
+        if not math.isfinite(age_value) or age_value<0 or age_value>self.max_book_age_seconds:
+            raise ValueError("Order book exceeds maximum age or has invalid age.")
         if book.get("integrity_error"): raise ValueError(f"Book integrity error: {book['integrity_error']}")
         bids=self._valid_levels(book.get("bids")); asks=self._valid_levels(book.get("asks"))
         if not bids or not asks: raise ValueError("Both book sides must have valid levels.")
