@@ -13,25 +13,42 @@ from app.execution.order_service import (
     OrderRejected,
 )
 from app.market_data.backend_stream import BinanceOrderBookStream
+from app.exchanges.manager import (
+    ExchangeConnectionManager,
+    BinancePublicAdapter,
+    BybitPublicAdapter,
+    DeltaPublicAdapter,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Existing Binance Futures Demo order-book stream is preserved.
     stream = BinanceOrderBookStream(symbol="BTCUSDT")
     app.state.market_stream = stream
 
+    # Phase 2: independent public-market-data connectivity adapters.
+    exchange_manager = ExchangeConnectionManager([
+        BinancePublicAdapter(enabled=settings.binance_public_enabled, symbol="BTCUSDT"),
+        BybitPublicAdapter(enabled=settings.bybit_public_enabled, symbol=settings.bybit_public_symbol),
+        DeltaPublicAdapter(enabled=settings.delta_public_enabled, symbol=settings.delta_public_symbol),
+    ])
+    app.state.exchange_manager = exchange_manager
+
     await stream.start()
+    await exchange_manager.start()
 
     try:
         yield
     finally:
+        await exchange_manager.stop()
         await stream.stop()
 
 
 app = FastAPI(
     title="OrderFlow Scalper API",
-    description="Binance Demo market data and demo execution backend",
-    version="0.2.0",
+    description="Multi-exchange public connectivity and Binance demo execution backend",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -60,6 +77,11 @@ async def health():
         "mode": "BINANCE_FUTURES_DEMO",
         "demo_execution_enabled": settings.execution_enabled,
     }
+
+
+@app.get("/api/exchanges/status")
+async def exchange_connectivity_status():
+    return await app.state.exchange_manager.status()
 
 
 @app.get("/api/market-data/status")
