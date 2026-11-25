@@ -41,3 +41,11 @@ Controller tracks trade entries, exits, wins/losses, realized P&L, elapsed durat
 
 ## Safety note
 This development framework does not create real exchange orders, does not use live execution APIs, and does not prove strategy profitability. Testing and runtime validation are deferred by operator instruction until the planned development tasks are complete.
+
+## Task 6 — Full Persistence & Restart Recovery (coding milestone)
+
+- Recovery reports whether it was attempted, whether restoration succeeded, source used (full account snapshot, open-position fallback, or fresh account), and restored open-position count.
+- Snapshot-vs-database OPEN symbol mismatches are surfaced as a warning; the full account snapshot remains authoritative when valid.
+- Fallback recovery explicitly warns that account cash, closed-trade history, and session metrics may be incomplete when only open-position rows are available.
+- Corrected the application lifespan indentation around nine-layer engine/runtime construction so it remains within startup initialization.
+- **No tests, restart simulations, deployment, or runtime validation have been performed.**
