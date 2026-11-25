@@ -33,7 +33,7 @@ class LiquidityZoneDetector:
         for r in raw:
             if not isinstance(r,(list,tuple)) or len(r)<2: continue
             try: p,q=float(r[0]),float(r[1])
-            except (TypeError,ValueError): continue
+            except (TypeError,ValueError,OverflowError): continue
             if math.isfinite(p) and math.isfinite(q) and p>0 and q>0: out.append((p,q))
         return out
 
@@ -73,7 +73,7 @@ class LiquidityZoneDetector:
         if book.get("stale",True): raise ValueError("Order book is stale; zone analysis refused.")
         age=book.get("age_seconds")
         try: age_value=float(age)
-        except (TypeError,ValueError): raise ValueError("Invalid order-book age.") from None
+        except (TypeError,ValueError,OverflowError): raise ValueError("Invalid order-book age.") from None
         if not math.isfinite(age_value) or age_value<0 or age_value>self.max_book_age_seconds:
             raise ValueError("Order book exceeds maximum age or has invalid age.")
         if book.get("integrity_error"): raise ValueError(f"Book integrity error: {book['integrity_error']}")
