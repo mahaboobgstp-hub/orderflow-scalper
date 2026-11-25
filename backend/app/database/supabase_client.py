@@ -54,7 +54,8 @@ class SupabaseDatabase:
             try:
                 interval = max(20, int(os.getenv("SUPABASE_HEARTBEAT_INTERVAL_SECONDS", "60")))
             except ValueError:
-                interval = 60\n            await asyncio.sleep(interval)
+                interval = 60
+            await asyncio.sleep(interval)
             if self._closed:
                 return
             if not self.connected:
