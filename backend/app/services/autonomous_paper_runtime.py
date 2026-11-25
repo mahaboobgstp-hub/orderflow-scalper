@@ -48,7 +48,7 @@ class AutonomousPaperRuntime:
                     watch=set(self.watchlist)
                     watched=[m for m in markets if m.get("symbol") in watch]
                     min_score=float(self.config.get("min_opportunity_score",70))
-                    filtered=[m for m in markets if float(m.get("suitability_score",0))>=min_score]
+                    filtered=[m for m in markets if float(m.get("suitability_score",0))>=min_score]]
                     # Update mark prices from scanner ticker data only; never submit orders.
                     for market in markets:
                         symbol=market.get("symbol"); price=market.get("last_price")
