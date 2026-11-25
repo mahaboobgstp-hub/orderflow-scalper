@@ -9,6 +9,7 @@ from app.market_data.unified_engine import UnifiedMarketDataEngine
 from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BybitPublicAdapter, DeltaPublicAdapter
 from app.services.coin_scanner import CoinMarketScanner
 from app.services.imbalance_detector import OrderBookImbalanceDetector
+from app.services.absorption_detector import AbsorptionLiquidityDetector
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,6 +17,7 @@ async def lifespan(app: FastAPI):
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
     app.state.coin_scanner=CoinMarketScanner()
     app.state.imbalance_detector=OrderBookImbalanceDetector()
+    app.state.absorption_detector=AbsorptionLiquidityDetector()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
