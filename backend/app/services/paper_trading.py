@@ -88,6 +88,10 @@ class PaperTradingEngine:
         self.session_started_ms = int(snapshot.get("session_started_ms") or int(time.time()*1000))
         return True
 
+    def _emit_persistence(self, event):
+        event["account_snapshot"] = self.persistence_snapshot()
+        _persist_event(event)
+
     def submit(self,req:dict[str,Any]):
         symbol=str(req.get("symbol","")).upper().strip(); side=str(req.get("side","")).lower(); qty=self._finite(req.get("quantity")); price=self._finite(req.get("price")); leverage=self._finite(req.get("leverage",1))
         if not symbol or len(symbol)>30: raise ValueError("Valid symbol required.")
@@ -103,7 +107,7 @@ class PaperTradingEngine:
         order={"order_id":str(uuid.uuid4()),"symbol":symbol,"side":side,"quantity":qty,"entry_price":price,"leverage":leverage,"notional":notional,"margin":margin,"entry_fee":fee,"status":"FILLED_SIMULATED","created_at_ms":timestamp,"mode":"PAPER_ONLY"}
         position={"position_id":str(uuid.uuid4()),"symbol":symbol,"side":side,"quantity":qty,"entry_price":price,"leverage":leverage,"notional":notional,"margin":margin,"entry_fee":fee,"opened_at_ms":timestamp,"mode":"PAPER_ONLY","best_price":price,"ttp_activated":False,"tsl_price":None,"ttp_price":None,**mg}
         self.cash-=margin+fee; self.positions[symbol]=position; self.mark_prices[symbol]=price; self.orders.append(order)
-        _persist_event({"type":"order_open","order":dict(order),"position":dict(position)})
+        self._emit_persistence({"type":"order_open","order":dict(order),"position":dict(position)})
         return {"order":order,"position":self._position_view(position)}
     def mark(self,symbol:str,price:float):
         symbol=symbol.upper(); p=self._finite(price)
@@ -123,7 +127,7 @@ class PaperTradingEngine:
                 pos["ttp_price"]=pos["best_price"]*(1-d) if side=="long" else pos["best_price"]*(1+d)
         reason=self._exit_reason(pos,p)
         if reason: return {"symbol":symbol,"mark_price":p,"position_open":False,"auto_closed":True,"closed_trade":self._close_position(symbol,p,reason)}
-        _persist_event({"type":"position_mark","position":dict(pos),"price":p})
+        self._emit_persistence({"type":"position_mark","position":dict(pos),"price":p})
         return {"symbol":symbol,"mark_price":p,"position_open":True,"auto_closed":False,"position":self._position_view(pos)}
     def close(self,symbol:str,price:float):
         symbol=symbol.upper(); pos=self.positions.get(symbol); close_price=self._finite(price)
@@ -151,7 +155,7 @@ class PaperTradingEngine:
         self.cash+=pos["margin"]+gross-exit_fee
         record={"trade_id":str(uuid.uuid4()),"symbol":symbol,"side":pos["side"],"quantity":pos["quantity"],"entry_price":pos["entry_price"],"exit_price":price,"leverage":pos["leverage"],"gross_pnl":round(gross,8),"entry_fee":round(pos["entry_fee"],8),"exit_fee":round(exit_fee,8),"net_pnl":round(net,8),"opened_at_ms":pos["opened_at_ms"],"closed_at_ms":int(time.time()*1000),"close_reason":reason,"mode":"PAPER_ONLY"}
         self.closed_trades.append(record); del self.positions[symbol]; self.mark_prices[symbol]=price
-        _persist_event({"type":"position_close","trade":dict(record),"closed_at":datetime.now(timezone.utc).isoformat()})
+        self._emit_persistence({"type":"position_close","trade":dict(record),"closed_at":datetime.now(timezone.utc).isoformat()})
         return record
     def update_management(self,symbol,settings):
         symbol=symbol.upper(); pos=self.positions.get(symbol)
@@ -160,7 +164,7 @@ class PaperTradingEngine:
         merged={k:settings.get(k,pos.get(k)) for k in keys}
         for k in ("stop_loss_price","take_profit_price","tsl_distance_pct","ttp_activation_pct","ttp_trail_pct"): merged[k]=self._finite(merged[k])
         self._validate_management(pos["side"],pos["entry_price"],merged); pos.update(merged)
-        _persist_event({"type":"management_update","position":dict(pos)})
+        self._emit_persistence({"type":"management_update","position":dict(pos)})
         return {"symbol":symbol,"updated":True,"position":self._position_view(pos)}
     def history(self,limit=100):
         n=max(1,min(int(limit),500))
