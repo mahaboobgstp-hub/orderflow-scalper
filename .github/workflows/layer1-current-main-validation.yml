@@ -8,6 +8,7 @@ on:
       - "backend/tests/test_phase5_binance_demo_stream_sync.py"
       - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
       - "backend/tests/test_phase5_binance_demo_stream_integrity.py"
+      - "backend/tests/test_phase5_imbalance_detector.py"
       - ".github/workflows/layer1-current-main-validation.yml"
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - "backend/tests/test_phase5_binance_demo_stream_sync.py"
       - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
       - "backend/tests/test_phase5_binance_demo_stream_integrity.py"
+      - "backend/tests/test_phase5_imbalance_detector.py"
       - ".github/workflows/layer1-current-main-validation.yml"
 
 jobs:
@@ -30,9 +32,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt pytest
       - name: Compile
-        run: python -m compileall -q backend/app/market_data/backend_stream.py backend/tests/test_phase5_binance_demo_stream_sync.py backend/tests/test_phase5_binance_demo_stream_reconnect.py backend/tests/test_phase5_binance_demo_stream_integrity.py
+        run: python -m compileall -q backend/app/market_data/backend_stream.py backend/tests/test_phase5_binance_demo_stream_sync.py backend/tests/test_phase5_binance_demo_stream_reconnect.py backend/tests/test_phase5_binance_demo_stream_integrity.py backend/tests/test_phase5_imbalance_detector.py
       - name: Run focused Layer 1 tests
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -vv tests/test_phase5_binance_demo_stream_sync.py tests/test_phase5_binance_demo_stream_reconnect.py tests/test_phase5_binance_demo_stream_integrity.py
+        run: pytest -vv tests/test_phase5_binance_demo_stream_sync.py tests/test_phase5_binance_demo_stream_reconnect.py tests/test_phase5_binance_demo_stream_integrity.py tests/test_phase5_imbalance_detector.py
