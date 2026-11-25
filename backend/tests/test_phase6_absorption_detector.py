@@ -225,5 +225,19 @@ class Phase6DetectorTests(unittest.TestCase):
                 self.assertEqual(result["flow_exhaustion"],"FLOW_WEAKENING")
 
 
+    def test_rejects_float_and_boolean_trade_timestamps_and_boolean_trade_values(self):
+        detector=AbsorptionLiquidityDetector()
+        now_ms=1_000_000
+        valid=self._fixed_tape("buy",100.05,now_ms,count=5)
+        invalid_timestamp_values=(1000000.5,1000000.0,True,False,float("nan"),float("inf"),"1000000.5","bad")
+        invalid=[{"side":"buy","price":100.05,"quantity":1.0,"received_timestamp_ms":value} for value in invalid_timestamp_values]
+        invalid.extend([
+            {"side":"buy","price":True,"quantity":1.0,"received_timestamp_ms":now_ms},
+            {"side":"buy","price":100.05,"quantity":True,"received_timestamp_ms":now_ms},
+        ])
+        result=self._analyze_at(detector,book(),valid+invalid,now_ms)
+        self.assertEqual(result["trade_count"],5)
+        self.assertEqual(result["metrics"]["aggressive_buy_quantity"],5.0)
+
 if __name__=="__main__":
     unittest.main()
