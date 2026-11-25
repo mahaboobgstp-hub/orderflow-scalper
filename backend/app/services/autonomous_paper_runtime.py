@@ -6,7 +6,7 @@ from typing import Any
 class AutonomousPaperRuntime:
     def __init__(self, scanner, paper_engine, config:dict[str,Any], watchlist:list[str],
                  market_data=None, imbalance=None, absorption=None, zones=None, trade_flow=None,
-                 risk_engine=None, decision_engine=None, broader_symbol="BTCUSDT"):
+                 risk_engine=None, decision_engine=None, repository=None, broader_symbol="BTCUSDT"):
         self.scanner=scanner; self.paper_engine=paper_engine
         self.market_data=market_data; self.imbalance=imbalance; self.absorption=absorption
         self.zones=zones; self.trade_flow=trade_flow; self.risk_engine=risk_engine
@@ -14,7 +14,7 @@ class AutonomousPaperRuntime:
         self.config=dict(config); self.watchlist=list(watchlist); self.broader_symbol=broader_symbol
         self._task=None; self._running=False; self._paused=False
         self._last_scan=None; self._last_error=None; self._scan_count=0; self._started_at=None; self._last_scan_time=None
-        self._decisions=[]; self._last_decisions_by_symbol={}
+        self._decisions=[]; self._last_decisions_by_symbol={}; self._logged_signatures={}
 
     def status(self):
         return {"connected":True,"state":"RUNNING" if self._running and not self._paused else "PAUSED" if self._running else "STOPPED",
