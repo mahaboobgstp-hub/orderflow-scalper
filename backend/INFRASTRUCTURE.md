@@ -46,7 +46,7 @@ Never expose Supabase server credentials or control token in browser/frontend en
 - Startup/shutdown and HTTP 5xx events are written to `system_logs`.
 - DB connection failures are reported and do not crash the API process; this is intentional so the service can be diagnosed. DB-dependent features must remain unavailable until verified.
 
-The repository module provides server-side write helpers for decisions, signals, orders, positions, risk events, closed trades, snapshots, metrics and system logs. Trade-event persistence still requires wiring into the paper engine and autonomous signal lifecycle before it is considered complete.
+The repository module provides server-side write helpers for decisions, signals, orders, positions, risk events, closed trades, snapshots, metrics and system logs. Paper simulator lifecycle events now feed an async persistence queue: simulated order/position opens, mark-price/trailing updates, management changes, and closes are persisted to orders, positions, trade_history, risk_events, and system_logs. Queue counters are exposed at `GET /api/paper/persistence/status`. The queue is best-effort and bounded; events can be lost if the queue fills or DB writes fail. Paper account state itself is still in-memory and does not yet recover positions/account cash after a process restart.
 
 ## Safety
 - Autonomous entry signal integration remains disabled until the nine-layer engine is validated.
