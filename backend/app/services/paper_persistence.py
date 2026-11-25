@@ -157,7 +157,7 @@ class PaperPersistenceWorker:
             logger.info("Persisted paper close for %s", symbol)
         else:
             logger.warning("Unknown paper persistence event type: %s", kind)
-        if kind in {"order_open", "position_mark", "management_update", "position_close"}:
+        if kind in {"order_open", "position_mark", "management_update", "position_close", "account_reset"}:
             snapshot = e.get("account_snapshot")
             if isinstance(snapshot, dict):
                 ok = await self.repo.save_paper_state(snapshot)
