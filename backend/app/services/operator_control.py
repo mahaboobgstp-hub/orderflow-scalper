@@ -27,7 +27,7 @@ state: dict[str, Any] = {
         "trailing_take_profit_enabled": True,
         "trailing_take_profit_activation_pct": 1.0,
         "trailing_take_profit_pct": 0.5,
-        "break_even_enabled": True,
+        "break_even_enabled": True,\n        "trading_direction": "BOTH",\n        "entry_mode": "AUTONOMOUS_PAPER",\n        "min_opportunity_score": 70,\n        "min_liquidity_usd": 50000,\n        "min_24h_volume_usd": 1000000,\n        "scanner_interval_seconds": 60,\n        "max_watchlist_symbols": 100,\n        "market_regime_filter_enabled": True,\n        "strategy_enabled": {"order_book_imbalance": True, "absorption": True, "liquidity_zones": True, "trade_flow_momentum": True, "market_regime": True},
     },
     "watchlist": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
     "events": [],
@@ -85,7 +85,7 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
             "max_total_exposure_pct": (1, 100), "max_trades_per_day": (1, 500),
             "max_consecutive_losses": (1, 20), "min_risk_reward": (0.1, 20),
             "cooldown_seconds": (0, 86400), "trailing_stop_pct": (0.05, 50),
-            "trailing_take_profit_activation_pct": (0.05, 50), "trailing_take_profit_pct": (0.05, 50),
+            "trailing_take_profit_activation_pct": (0.05, 50), "trailing_take_profit_pct": (0.05, 50), "min_opportunity_score": (0, 100),\n            "min_liquidity_usd": (0, 10000000000), "min_24h_volume_usd": (0, 10000000000),\n            "scanner_interval_seconds": (5, 600), "max_watchlist_symbols": (1, 200),
         }
         if key in limits and not limits[key][0] <= float(value) <= limits[key][1]:
             raise HTTPException(status_code=422, detail=f"{key} must be between {limits[key][0]} and {limits[key][1]}.")
