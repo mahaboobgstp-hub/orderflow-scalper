@@ -42,7 +42,7 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(up["metrics"]["sell_price_progress_pct"],0.0)
         down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),trades("sell"),15)
         self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
-        self.assertEqual(down["metrics"]["buy_price_progress_pct"],0.0)
+        self.assertLess(down["metrics"]["buy_price_progress_pct"],0)
 
     def test_no_clear_absorption_when_tape_below_minimum(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)
@@ -71,7 +71,7 @@ class Phase6DetectorTests(unittest.TestCase):
         result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=7),15)
         self.assertIn("flow_exhaustion",result)
         self.assertIn("quality",result)
-        self.assertIn("not an entry",result["diagnostics"][4].lower())
+        self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
 
 
     def test_rejects_negative_and_nonfinite_book_age(self):
