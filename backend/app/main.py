@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from typing import Any
 from app.config import settings
 from app.database.supabase_client import database
+from app.database.repository import repository
 from app.execution.binance_demo_client import BinanceDemoClient, BinanceDemoError
 from app.execution.order_service import DemoOrderService, OrderRejected
 from app.market_data.backend_stream import BinanceOrderBookStream
@@ -59,12 +60,15 @@ async def lifespan(app: FastAPI):
     try:
         await stream.start(); await manager.start()
         app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3,'supabase_connected':database.connected})
+        await repository.system_log('INFO','Backend startup completed','lifecycle',{'database_connected':database.connected,'mode':'PAPER_ONLY'})
         yield
     except Exception as exc:
         app.state.monitoring_service.record('ERROR','startup_or_runtime_error',{'error_type':type(exc).__name__})
         logger.exception('Application lifecycle error')
         raise
     finally:
+        try: await repository.system_log('INFO','Backend shutdown initiated','lifecycle',{'mode':'PAPER_ONLY'})
+        except Exception: logger.exception('Supabase shutdown log error')
         try: await database.write_heartbeat('offline', {'shutdown': True})
         except Exception: logger.exception('Supabase shutdown heartbeat error')
         try: await database.close()
