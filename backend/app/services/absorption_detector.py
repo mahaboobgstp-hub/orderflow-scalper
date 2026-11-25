@@ -116,7 +116,12 @@ class AbsorptionLiquidityDetector:
         elif buy_absorbed: label="POSSIBLE_BUY_ABSORPTION" # buy aggression may be absorbed by passive sellers
         elif sell_absorbed: label="POSSIBLE_SELL_ABSORPTION" # sell aggression may be absorbed by passive buyers
         else: label="NO_CLEAR_ABSORPTION"
-        confidence_quality=min(100, round(30*(len(normalized)/self.min_trades if normalized else 0)+25*(prior is not None)+25*(book.get("synchronized") is True)+20*(book.get("stale") is False),2))
+        base_quality=min(100, round(30*(len(normalized)/self.min_trades if normalized else 0)+25*(prior is not None)+25*(book.get("synchronized") is True)+20*(book.get("stale") is False),2))
+        # Displayed depth is measured in the same base-asset quantity as the
+        # aggressive tape. A thin book relative to recent volume lowers evidence
+        # quality, while candidate labels remain research hypotheses.
+        depth_coverage_ratio=min(1.0,self._safe_ratio(bid_depth+ask_depth,total_qty)) if total_qty>0 else 0.0
+        confidence_quality=round(base_quality*depth_coverage_ratio,2)
         exhaustion="INSUFFICIENT_TRADE_DATA"
         if len(normalized)>=self.min_trades:
             recent=normalized[-max(3,len(normalized)//3):]
@@ -135,8 +140,8 @@ class AbsorptionLiquidityDetector:
             "buy_absorption_candidate":buy_absorbed,"sell_absorption_candidate":sell_absorbed,
             "top5_bid_depth":round(bid_depth,8),"top5_ask_depth":round(ask_depth,8)},
             "liquidity_observation":{"previous_sample_available":prior is not None,"replenishment":replenishment,"depletion":depletion},
-            "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"note":"Evidence-quality heuristic, not a prediction or win probability."},
-            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","Progress is signed by aggressor direction; scoring penalizes absolute midpoint movement in either direction.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
+            "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"depth_coverage_ratio":round(depth_coverage_ratio,6),"note":"Evidence-quality heuristic includes top-five displayed depth relative to recent aggressive volume; not a prediction or win probability."},
+            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","Progress is signed by aggressor direction; scoring penalizes absolute midpoint movement in either direction.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","Thin books may still produce hypotheses; depth coverage lowers evidence quality but is not a hard candidate gate.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
     def status(self):
         return {"phase":6,"engine":"absorption_liquidity_behavior_detector","tracked_symbols":len(self._history),
                 "min_trades":self.min_trades,"absorption_threshold":self.absorption_threshold,
