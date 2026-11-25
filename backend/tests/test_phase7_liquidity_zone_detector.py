@@ -237,3 +237,20 @@ def test_reentry_state_survives_small_zone_center_drift():
 def test_nonfinite_constructor_configuration_is_rejected(argument, invalid):
     with pytest.raises(ValueError):
         LiquidityZoneDetector(**{argument: invalid})
+
+
+def test_overflowing_price_quantity_and_book_levels_are_ignored():
+    now=int(time.time()*1000)
+    huge=10**400
+    book=make_book()
+    book["bids"].append([huge,2])
+    book["asks"].append([100.03,huge])
+    tape=[
+        {"price":100.00,"quantity":2,"received_timestamp_ms":now-200},
+        {"price":100.01,"quantity":2,"received_timestamp_ms":now-100},
+        {"price":huge,"quantity":2,"received_timestamp_ms":now},
+        {"price":100.02,"quantity":huge,"received_timestamp_ms":now},
+    ]
+    result=LiquidityZoneDetector().analyze(book,tape,30)
+    assert result["zones"]
+    assert all(z["low"]<100.1 and z["high"]<100.1 for z in result["zones"])
