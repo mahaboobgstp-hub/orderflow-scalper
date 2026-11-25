@@ -14,7 +14,7 @@ class PaperTradingEngine:
         try: n=float(v); return n if math.isfinite(n) else None
         except (TypeError,ValueError): return None
     def status(self):
-        return {"phase":11,"engine":"paper_trading_simulator","mode":"PAPER_ONLY","real_orders":False,"initial_equity":self.initial_equity,"cash_balance":round(self.cash,8),"open_positions":len(self.positions),"open_orders":0,"closed_trades":len(self.closed_trades),"fee_rate":self.fee_rate,"started_at_ms":self.session_started_ms,"warning":"In-memory simulation. State is lost on backend restart; simulated prices are supplied by API caller."}
+        return {"phase":12,"engine":"paper_trading_simulator","mode":"PAPER_ONLY","real_orders":False,"initial_equity":self.initial_equity,"cash_balance":round(self.cash,8),"open_positions":len(self.positions),"open_orders":0,"closed_trades":len(self.closed_trades),"fee_rate":self.fee_rate,"started_at_ms":self.session_started_ms,"management_features":["fixed_stop_loss","fixed_take_profit","trailing_stop_loss","trailing_take_profit"],"warning":"In-memory simulation. State is lost on backend restart; simulated prices are supplied by API caller."}
     def _pnl(self,p,price):
         return (price-p["entry_price"])*p["quantity"]*(1 if p["side"]=="long" else -1)
     def _position_view(self,p):
