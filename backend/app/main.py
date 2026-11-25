@@ -94,12 +94,15 @@ async def request_monitoring(request, call_next):
         duration_ms=(time.perf_counter()-started)*1000
         if hasattr(app.state,"monitoring_service"):
             app.state.monitoring_service.record("ERROR" if response.status_code>=500 else "INFO","http_request",{"method":request.method,"path":request.url.path,"status_code":response.status_code,"duration_ms":round(duration_ms,2)})
-        if response.status_code>=500: logger.error("HTTP %s %s returned %s",request.method,request.url.path,response.status_code)
+        if response.status_code>=500:
+            logger.error("HTTP %s %s returned %s",request.method,request.url.path,response.status_code)
+            await repository.system_log("ERROR","HTTP request returned server error","http",{"method":request.method,"path":request.url.path,"status_code":response.status_code,"duration_ms":round(duration_ms,2)})
         return response
     except Exception as exc:
         if hasattr(app.state,"monitoring_service"):
             app.state.monitoring_service.record("ERROR","request_exception",{"method":request.method,"path":request.url.path,"error_type":type(exc).__name__})
         logger.exception("Unhandled request exception")
+        await repository.system_log("ERROR","Unhandled request exception","http",{"method":request.method,"path":request.url.path,"error_type":type(exc).__name__})
         raise
 
 
