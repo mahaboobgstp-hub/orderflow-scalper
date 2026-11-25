@@ -58,7 +58,8 @@ class BacktestEngine:
                 if stop_distance>0:
                     risk_cash=max(0,equity)*float(cfg["risk_per_trade_pct"])/100
                     raw_qty=risk_cash/stop_distance
-                    notional_limit=min(equity*float(cfg["max_notional_pct"])/100,equity*float(cfg["leverage"]))\n                    qty=min(raw_qty,notional_limit/price)
+                    notional_limit=min(equity*float(cfg["max_notional_pct"])/100,equity*float(cfg["leverage"]))
+                    qty=min(raw_qty,notional_limit/price)
                     entry_fill=price*(1+slip if signal=="long" else 1-slip)
                     notional=entry_fill*qty; entry_fee=notional*fee
                     if qty>0 and entry_fee<equity:
