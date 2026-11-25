@@ -358,7 +358,9 @@ async def infrastructure_status():
     diagnostics = app.state.monitoring_service.diagnostics(app)
     return {
         "service": "orderflow-scalper-api",
-        "status": "ready" if diagnostics["status"] == "ok" else "degraded",
+        "status": "ready" if diagnostics["status"] == "ok" and database_status.get("connected") else "degraded",
+        "core_components_ready": diagnostics["status"] == "ok",
+        "database_required_for_testing": True,
         "mode": "PAPER_ONLY",
         "live_execution_enabled": False,
         "deployment": {
