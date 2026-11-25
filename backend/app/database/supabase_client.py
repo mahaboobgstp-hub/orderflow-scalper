@@ -99,6 +99,14 @@ class SupabaseDatabase:
         self.last_error = None
         return result
 
+    async def update(self, table: str, payload: dict[str, Any], *, filters: dict[str, str],
+                      returning: bool = False) -> Any:
+        result = await self._request("PATCH", table, params=filters, payload=payload,
+                                   prefer="return=representation" if returning else "return=minimal")
+        self.connected = True
+        self.last_error = None
+        return result
+
     async def upsert(self, table: str, payload: dict[str, Any] | list[dict[str, Any]],
                      *, on_conflict: str | None = None, returning: bool = False) -> Any:
         params = {"on_conflict": on_conflict} if on_conflict else None
