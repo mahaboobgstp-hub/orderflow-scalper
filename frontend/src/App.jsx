@@ -168,7 +168,7 @@ export default function App() {
     const fmtDate=(v)=>v ? new Date(v).toLocaleString() : "--";
     return <>
       {header("Test Center","Observe actual paper-session events, orders, decisions, risk and recovery data")}
-      <div className="status-strip"><span className="status-chip paper">PAPER ONLY</span><span className="status-chip">{testSession?.state || "SESSION STATUS UNAVAILABLE"}</span><span className="subtle">No live exchange orders are possible from this console.</div>
+      <div className="status-strip"><span className="status-chip paper">PAPER ONLY</span><span className="status-chip">{testSession?.state || "SESSION STATUS UNAVAILABLE"}</span><span className="subtle">No live exchange orders are possible from this console.</span></div>
       <div className="stats-grid">
         {stat("Validation Session",testSession?.state || "Unavailable","Controller status")}
         {stat("Trades Started",testSession?.trades_started ?? "--","Session entry count")}
