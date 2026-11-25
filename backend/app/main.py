@@ -58,8 +58,8 @@ async def lifespan(app: FastAPI):
     await persistence_worker.start()
     app.state.backtesting_engine=BacktestEngine()
     validation_session=ControlledPaperSession({"enabled":False}); app.state.controlled_paper_session=validation_session
-decision_engine=NineLayerDecisionEngine(operator_control_state["config"]); app.state.nine_layer_decision_engine=decision_engine
-runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"],market_data=app.state.unified_market_data,imbalance=app.state.imbalance_detector,absorption=app.state.absorption_detector,zones=app.state.liquidity_zone_detector,trade_flow=app.state.trade_flow_momentum_detector,risk_engine=app.state.risk_management_engine,decision_engine=decision_engine,repository=repository,validation_session=validation_session); app.state.autonomous_paper_runtime=runtime
+    decision_engine=NineLayerDecisionEngine(operator_control_state["config"]); app.state.nine_layer_decision_engine=decision_engine
+    runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"],market_data=app.state.unified_market_data,imbalance=app.state.imbalance_detector,absorption=app.state.absorption_detector,zones=app.state.liquidity_zone_detector,trade_flow=app.state.trade_flow_momentum_detector,risk_engine=app.state.risk_management_engine,decision_engine=decision_engine,repository=repository,validation_session=validation_session); app.state.autonomous_paper_runtime=runtime
     set_runtime(runtime)
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
