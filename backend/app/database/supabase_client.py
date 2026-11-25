@@ -28,15 +28,19 @@ class SupabaseDatabase:
         self._closed = False
 
     def _new_client(self) -> httpx.AsyncClient:
+        headers = {
+            "apikey": self.key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        # Supabase's new sb_secret keys are opaque API keys, not JWTs.
+        # Send them only as apikey; Bearer is retained for legacy JWT keys.
+        if not self.key.startswith("sb_secret_"):
+            headers["Authorization"] = f"Bearer {self.key}"
         return httpx.AsyncClient(
             base_url=f"{self.url}/rest/v1/",
             timeout=httpx.Timeout(8.0, connect=5.0),
-            headers={
-                "apikey": self.key,
-                "Authorization": f"Bearer {self.key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            headers=headers,
         )
 
     async def start(self) -> bool:
