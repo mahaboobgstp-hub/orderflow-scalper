@@ -5,7 +5,7 @@
 - [x] Phase 1 — Existing Code Audit & Architecture Verification
 - [x] Phase 2 — Multi-Exchange Connectivity Infrastructure
 - [x] Phase 3 — Unified Market Data Engine (normalization layer committed; runtime exchange validation pending)
-- [ ] Phase 4 — Coin Scanner & Market Selection Engine
+- [x] Phase 4 — Coin Scanner & Market Selection Engine (code committed; runtime API test pending)
 - [ ] Phase 5 — Order Book Imbalance Detector
 - [ ] Phase 6 — Absorption & Liquidity Behavior Engine
 - [ ] Phase 7 — Liquidity Zone & Breakout Detector
