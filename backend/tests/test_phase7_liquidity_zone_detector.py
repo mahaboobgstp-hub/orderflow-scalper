@@ -1,0 +1,46 @@
+import time
+import pytest
+from app.services.liquidity_zone_detector import LiquidityZoneDetector
+
+def make_book(mid=100.0):
+    return {"exchange":"bybit","symbol":"ETHUSDT","bids":[[mid-0.01,10],[mid-0.02,8]],"asks":[[mid+0.01,11],[mid+0.02,7]],
+        "synchronized":True,"stale":False,"age_seconds":0.1,"integrity_error":None}
+
+def trades(prices):
+    now=int(time.time()*1000)
+    return [{"price":p,"quantity":2,"side":"buy","received_timestamp_ms":now-i*100} for i,p in enumerate(prices)]
+
+def test_zone_cluster_and_output_fields():
+    d=LiquidityZoneDetector()
+    result=d.analyze(make_book(100.02),trades([100,100.01,100.02,100.03]),lookback_seconds=30)
+    assert result["zone_count"]>=1
+    z=result["zones"][0]
+    assert z["low"]<=z["center"]<=z["high"]
+    assert "touch_count" in z and "interaction_state" in z
+    assert result["current_displayed_depth_references"]["bid_liquidity_levels"]
+
+def test_breakout_up_classification():
+    d=LiquidityZoneDetector()
+    t=trades([100,100.01,100.02,100.03])
+    d.analyze(make_book(100.02),t,30)
+    result=d.analyze(make_book(100.20),t,30)
+    assert any(z["interaction_state"]=="BREAKOUT_UP" for z in result["zones"])
+
+def test_reentry_reset_state():
+    d=LiquidityZoneDetector()
+    t=trades([100,100.01,100.02,100.03])
+    d.analyze(make_book(100.02),t,30)
+    d.analyze(make_book(100.20),t,30)
+    result=d.analyze(make_book(100.02),t,30)
+    assert any(z["interaction_state"]=="ZONE_RETEST_OR_REENTRY" for z in result["zones"])
+
+def test_unsynchronized_or_stale_book_rejected():
+    d=LiquidityZoneDetector()
+    bad=make_book(); bad["synchronized"]=False
+    with pytest.raises(ValueError): d.analyze(bad,[],30)
+    bad=make_book(); bad["stale"]=True
+    with pytest.raises(ValueError): d.analyze(bad,[],30)
+
+def test_empty_trade_history_returns_empty_zones():
+    result=LiquidityZoneDetector().analyze(make_book(),[],30)
+    assert result["zones"]==[]
