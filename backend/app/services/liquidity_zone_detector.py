@@ -96,8 +96,23 @@ class LiquidityZoneDetector:
             else: position="INSIDE_ZONE"
             proximity_pct=min(abs(mid-low),abs(mid-high))/mid*100
             approaching=position!="INSIDE_ZONE" and proximity_pct<=self.zone_band_pct
-            # State transitions: current interaction state plus change from prior observation.
+            # Match exact IDs first, then a uniquely nearest prior center within
+            # one clustering tolerance. This keeps re-entry state through small
+            # cluster drift without ambiguously merging neighboring zones.
             prev=prior.get(zone_id)
+            if prev is None:
+                tolerance=mid*self.zone_band_pct/100
+                candidates=[]
+                for old_id, old_state in prior.items():
+                    try: old_center=float(old_id)
+                    except (TypeError, ValueError): continue
+                    distance=abs(center-old_center)
+                    if distance<=tolerance:
+                        candidates.append((distance,old_state))
+                candidates.sort(key=lambda item:item[0])
+                if candidates and (len(candidates)==1 or candidates[0][0]<candidates[1][0]):
+                    prev=candidates[0][1]
+            # State transitions: current interaction state plus change from prior observation.
             if position=="INSIDE_ZONE":
                 state="ZONE_RETEST_OR_REENTRY" if prev in ("BREAKOUT_UP","BREAKOUT_DOWN","REJECTION_UP","REJECTION_DOWN") else "IN_ZONE"
             elif position=="ABOVE_ZONE":
