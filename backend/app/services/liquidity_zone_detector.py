@@ -96,9 +96,16 @@ class LiquidityZoneDetector:
                 state="BREAKOUT_UP" if mid>upper_break else "ABOVE_ZONE"
             else:
                 state="BREAKOUT_DOWN" if mid<lower_break else "BELOW_ZONE"
-            # A rejection is inferred only from a current near-zone position and a
-            # recent price range returning away; trade data alone cannot confirm it.
-            if approaching: state="APPROACHING"
+            # Heuristic only: captured tape interacted with this zone and the
+            # latest captured trade is outside its buffered boundary. This is not
+            # candle-close or exchange-confirmed rejection.
+            tape_touched = any(low <= price <= high for _, price in tape)
+            last_tape_price = tape[-1][1] if tape else None
+            possible_rejection = bool(tape_touched and last_tape_price is not None and
+                (last_tape_price < lower_break or last_tape_price > upper_break))
+            if possible_rejection:
+                state="POSSIBLE_REJECTION"
+            elif approaching: state="APPROACHING"
             zone_type="SUPPORT" if center<mid else "RESISTANCE"
             zones.append({"zone_id":zone_id,"type":zone_type,"low":round(low,8),"high":round(high,8),
                 "center":round(center,8),"trade_volume_in_cluster":round(c["volume"],8),"touch_count":c["touches"],
