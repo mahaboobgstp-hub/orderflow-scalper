@@ -126,7 +126,13 @@ async def root():
     return {"application":"OrderFlow Scalper","status":"running","mode":"BINANCE_FUTURES_DEMO","demo_execution_enabled":settings.execution_enabled}
 @app.get("/health")
 async def health():
-    return {"status":"ok","service":"FastAPI","mode":"BINANCE_FUTURES_DEMO","demo_execution_enabled":settings.execution_enabled}
+    return app.state.monitoring_service.health()
+@app.get("/api/monitoring/diagnostics")
+async def monitoring_diagnostics():
+    return app.state.monitoring_service.diagnostics(app)
+@app.get("/api/monitoring/events")
+async def monitoring_events(limit:int=Query(default=100,ge=1,le=500)):
+    return app.state.monitoring_service.recent_events(limit)
 @app.get("/api/exchanges/status")
 async def exchange_connectivity_status(): return await app.state.exchange_manager.status()
 @app.get("/api/market-data/status")
