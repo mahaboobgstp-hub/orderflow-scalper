@@ -53,6 +53,10 @@ class LiquidityZoneDetector:
         return eligible[:self.max_zones]
 
     def analyze(self,book:dict[str,Any],trades:list[dict[str,Any]],lookback_seconds:float=300.0)->dict[str,Any]:
+        try: lookback_value=float(lookback_seconds)
+        except (TypeError,ValueError): raise ValueError("Invalid lookback duration.") from None
+        if not math.isfinite(lookback_value) or lookback_value<=0: raise ValueError("Lookback duration must be finite and positive.")
+        lookback_value=min(lookback_value,3600.0)
         if not isinstance(book,dict): raise ValueError("Normalized order book is required.")
         exchange=str(book.get("exchange","")).lower(); symbol=str(book.get("symbol","")).upper()
         if not exchange or not symbol: raise ValueError("Exchange and symbol are required.")
@@ -69,8 +73,8 @@ class LiquidityZoneDetector:
         bid=max(p for p,q in bids); ask=min(p for p,q in asks)
         if bid>=ask: raise ValueError("Crossed or locked book is invalid.")
         mid=(bid+ask)/2
-        clusters=self._cluster_trades(trades,mid,lookback_seconds)
-        now_ms=int(time.time()*1000); cutoff=now_ms-max(1,min(float(lookback_seconds),3600))*1000
+        clusters=self._cluster_trades(trades,mid,lookback_value)
+        now_ms=int(time.time()*1000); cutoff=now_ms-lookback_value*1000
         tape=[]
         for t in trades or []:
             if not isinstance(t,dict): continue
@@ -124,7 +128,7 @@ class LiquidityZoneDetector:
                     "ask_liquidity_levels":[{"price":p,"quantity":q} for p,q in sorted(askwalls)]}
         zones.sort(key=lambda z:z["distance_to_zone_pct"])
         return {"detector":"phase7_liquidity_zone_breakout","exchange":exchange,"symbol":symbol,
-            "analysis_timestamp_ms":int(time.time()*1000),"lookback_seconds":lookback_seconds,
+            "analysis_timestamp_ms":int(time.time()*1000),"lookback_seconds":lookback_value,
             "current_price_reference":{"mid":round(mid,8),"best_bid":round(bid,8),"best_ask":round(ask,8)},
             "zone_count":len(zones),"zones":zones,"current_displayed_depth_references":depth_refs,
             "interaction_legend":{"APPROACHING":"Price is near the zone, but not inside it.","IN_ZONE":"Price is trading within the inferred zone.",
