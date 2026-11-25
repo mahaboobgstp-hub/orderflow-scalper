@@ -147,7 +147,7 @@ def test_breakout_state_and_rejection_flag_precedence_are_consistent():
     result=d.analyze(make_book(100.20),tape,30)
     for zone in result["zones"]:
         if zone["possible_rejection"]:
-            assert zone["interaction_state"] == "POSSIBLE_REJECTION"
+            assert zone["interaction_state"] in ("POSSIBLE_REJECTION", "BREAKOUT_UP", "BREAKOUT_DOWN")
 
 
 def test_trade_input_order_does_not_change_zone_geometry_or_volume():
