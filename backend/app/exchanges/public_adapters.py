@@ -31,6 +31,9 @@ class PublicExchangeAdapter(ABC):
     async def _subscribe(self, websocket: Any) -> None:
         """Send venue-specific public subscription, when required."""
 
+    async def _on_connected(self, websocket: Any) -> None:
+        """One-time setup immediately after connection."""
+    
     async def _heartbeat(self, websocket: Any) -> None:
         """Protocol heartbeat. WebSocket ping/pong frames are enabled by client."""
 
@@ -68,6 +71,7 @@ class PublicExchangeAdapter(ABC):
                     self.last_error = None
                     backoff = 1
                     logger.info("%s public websocket connected", self.name)
+                    await self._on_connected(ws)
                     await self._subscribe(ws)
                     async for message in ws:
                         if self._stop.is_set():
@@ -143,8 +147,8 @@ class DeltaPublicAdapter(PublicExchangeAdapter):
             "payload": {"channels": [{"name": "ob_l2", "symbols": [self.symbol]}]},
         }))
 
-    async def _heartbeat(self, websocket: Any) -> None:
-        # Delta's public testnet supports heartbeat enablement.
+    async def _on_connected(self, websocket: Any) -> None:
+        # Delta public testnet documents this heartbeat enable message.
         await websocket.send(json.dumps({"type": "enable_heartbeat"}))
 
 
