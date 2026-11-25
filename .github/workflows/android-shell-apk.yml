@@ -8,6 +8,8 @@ on:
       - 'frontend/capacitor.config.json'
       - 'frontend/package.json'
       - '.github/workflows/android-shell-apk.yml'
+permissions:
+  contents: write
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -28,6 +30,8 @@ jobs:
           java-version: '17'
       - name: Install shell dependencies
         run: npm install
+      - name: Build placeholder web assets
+        run: npm run build
       - name: Generate Android platform
         run: npx cap add android
       - name: Sync Capacitor
@@ -40,3 +44,12 @@ jobs:
           name: OrderFlow-Scalper-Remote-Shell-APK
           path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: remote-shell-build-${{ github.run_number }}
+          name: OrderFlow Scalper Remote Shell Build ${{ github.run_number }}
+          files: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
