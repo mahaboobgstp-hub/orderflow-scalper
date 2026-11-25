@@ -156,9 +156,15 @@ class BinanceOrderBookStream:
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
-                            self._apply_event(event)
+                            applied = self._apply_event(
+                                event,
+                                initial_snapshot_bridge=True,
+                            )
 
-                        self.synchronized = True
+                        # Synchronization is valid only if the bridge event
+                        # was actually applied to the snapshot.
+                        if applied:
+                            self.synchronized = True
 
                 logger.info(
                     "Order book synchronized: %s update_id=%s",
@@ -240,60 +246,76 @@ class BinanceOrderBookStream:
         event: dict[str, Any],
     ) -> bool:
         """
-        Binance depth events contain:
-        U = first update ID
-        u = final update ID
+        Validate Binance Futures snapshot-to-stream synchronization.
 
-        The first event after the snapshot must bridge
-        the snapshot update ID.
+        The first accepted event must cover snapshot lastUpdateId + 1:
+        U <= lastUpdateId + 1 <= u. Events fully covered by the snapshot
+        are ignored.
         """
-
         if self.last_update_id is None:
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
-
-        # Ignore events already covered by the snapshot.
-        if final_update_id < self.last_update_id:
+        try:
+            first_update_id = int(event["U"])
+            final_update_id = int(event["u"])
+        except (KeyError, TypeError, ValueError):
             return False
 
+        if first_update_id > final_update_id:
+            return False
+
+        bridge_update_id = self.last_update_id + 1
         return (
-            first_update_id
-            <= self.last_update_id
-            <= final_update_id
+            final_update_id >= bridge_update_id
+            and first_update_id <= bridge_update_id
         )
 
     def _apply_event(
         self,
         event: dict[str, Any],
+        initial_snapshot_bridge: bool = False,
     ) -> bool:
         """
         Apply a depth event.
 
-        Returns False when a sequence gap is detected.
+        The first snapshot-bridging event is validated using U/u only; its
+        pu value describes the WebSocket stream's prior event and must not
+        be compared to the REST snapshot ID. Subsequent events use pu
+        continuity (or U/u continuity when pu is absent).
+        Returns False when a sequence gap or malformed sequence is detected.
         """
-
         if self.last_update_id is None:
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
+        try:
+            first_update_id = int(event["U"])
+            final_update_id = int(event["u"])
+        except (KeyError, TypeError, ValueError):
+            return False
 
-        # Ignore old events.
+        if first_update_id > final_update_id:
+            return False
+
+        # Ignore old/duplicate events.
         if final_update_id <= self.last_update_id:
             return True
 
-        # For subsequent events, pu should match the
-        # previous event's final update ID.
-        previous_final_id = event.get("pu")
-
-        if previous_final_id is not None:
-            if int(previous_final_id) != self.last_update_id:
+        if initial_snapshot_bridge:
+            if not self._event_bridges_snapshot(event):
                 return False
-
-        elif first_update_id > self.last_update_id + 1:
-            return False
+        else:
+            # For subsequent Futures depth events, pu must match the
+            # previous final update ID. If pu is absent, use the U/u gap
+            # rule as a defensive fallback.
+            previous_final_id = event.get("pu")
+            if previous_final_id is not None:
+                try:
+                    if int(previous_final_id) != self.last_update_id:
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            elif first_update_id > self.last_update_id + 1:
+                return False
 
         self._update_levels(
             self.bids,
