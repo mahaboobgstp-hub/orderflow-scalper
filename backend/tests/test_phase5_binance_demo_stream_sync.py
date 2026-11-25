@@ -1,4 +1,6 @@
+import asyncio
 import unittest
+from unittest.mock import patch
 
 from app.market_data.backend_stream import BinanceOrderBookStream
 
@@ -125,6 +127,30 @@ class BinanceDemoDepthSyncTests(unittest.TestCase):
         self.assertTrue(stream._apply_event(old))
         self.assertEqual(stream.last_update_id, 101)
         self.assertEqual(stream.bids[100.0], 2.0)
+
+    def test_valid_update_advances_freshness_but_duplicate_does_not(self):
+        stream = stream_with_snapshot(100)
+        bridge = depth_event(100, 101, bids=[["100.0", "2.0"]])
+        stream.connected = True
+        with patch("app.market_data.backend_stream.time.monotonic", return_value=100.0):
+            self.assertTrue(stream._apply_event(bridge, initial_snapshot_bridge=True))
+        stream.synchronized = True
+        self.assertEqual(stream._last_event_received_at, 100.0)
+
+        contiguous = depth_event(102, 103, pu=101, bids=[["100.0", "3.0"]])
+        with patch("app.market_data.backend_stream.time.monotonic", return_value=101.0):
+            self.assertTrue(stream._apply_event(contiguous))
+        self.assertEqual(stream._last_event_received_at, 101.0)
+
+        duplicate = depth_event(102, 103, pu=101, bids=[["100.0", "99.0"]])
+        with patch("app.market_data.backend_stream.time.monotonic", return_value=105.0):
+            self.assertTrue(stream._apply_event(duplicate))
+            self.assertEqual(stream._last_event_received_at, 101.0)
+            stale_book = asyncio.run(stream.get_order_book())
+
+        self.assertIsNone(stale_book)
+        self.assertEqual(stream.last_update_id, 103)
+        self.assertEqual(stream.bids[100.0], 3.0)
 
 
 if __name__ == "__main__":
