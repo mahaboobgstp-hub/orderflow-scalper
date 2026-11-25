@@ -1,0 +1,38 @@
+name: Layer 1 Current Main Integrity Validation
+
+on:
+  push:
+    branches: [validation/layer1-integrity-mainline]
+    paths:
+      - "backend/app/market_data/backend_stream.py"
+      - "backend/tests/test_phase5_binance_demo_stream_sync.py"
+      - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
+      - "backend/tests/test_phase5_binance_demo_stream_integrity.py"
+      - ".github/workflows/layer1-current-main-validation.yml"
+  pull_request:
+    paths:
+      - "backend/app/market_data/backend_stream.py"
+      - "backend/tests/test_phase5_binance_demo_stream_sync.py"
+      - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
+      - "backend/tests/test_phase5_binance_demo_stream_integrity.py"
+      - ".github/workflows/layer1-current-main-validation.yml"
+
+jobs:
+  layer1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile
+        run: python -m compileall -q backend/app/market_data/backend_stream.py backend/tests/test_phase5_binance_demo_stream_sync.py backend/tests/test_phase5_binance_demo_stream_reconnect.py backend/tests/test_phase5_binance_demo_stream_integrity.py
+      - name: Run focused Layer 1 tests
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -vv tests/test_phase5_binance_demo_stream_sync.py tests/test_phase5_binance_demo_stream_reconnect.py tests/test_phase5_binance_demo_stream_integrity.py
