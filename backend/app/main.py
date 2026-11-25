@@ -173,7 +173,16 @@ async def health():
 
 @app.get("/api/database/status")
 async def database_status():
-    return await database.status(refresh=True)
+    # Diagnostic endpoint performs a real DB check and heartbeat write so that
+    # connectivity status is based on an actual write, not only a successful read.
+    await database.check_connection()
+    heartbeat_written = False
+    if database.connected:
+        heartbeat_written = await database.write_heartbeat("diagnostic", {"trigger": "database_status_endpoint"})
+    result = await database.status(refresh=False)
+    result["heartbeat_write_verified"] = heartbeat_written
+    result["diagnostic_mode"] = "read_and_write"
+    return result
 @app.get("/api/monitoring/diagnostics")
 async def monitoring_diagnostics():
     return app.state.monitoring_service.diagnostics(app)
