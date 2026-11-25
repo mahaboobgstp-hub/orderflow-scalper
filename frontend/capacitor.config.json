@@ -4,10 +4,10 @@
   "webDir": "dist",
   "bundledWebRuntime": false,
   "server": {
-    "url": "https://orderflow-scalper-jmgxaolqc-mahaboobs-projects-c4dc881b.vercel.app",
+    "url": "https://orderflow-scalper-ivory.vercel.app",
     "cleartext": false,
     "allowNavigation": [
-      "orderflow-scalper-jmgxaolqc-mahaboobs-projects-c4dc881b.vercel.app"
+      "orderflow-scalper-ivory.vercel.app"
     ]
   }
 }
