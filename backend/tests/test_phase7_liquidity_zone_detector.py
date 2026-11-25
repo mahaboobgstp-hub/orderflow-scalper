@@ -119,3 +119,42 @@ def test_zone_limit_is_respected():
     prices=[99.80,99.90,100.00,100.10,100.20,100.30,100.40]
     result=d.analyze(make_book(100.0),trades(prices),30)
     assert result["zone_count"]<=2
+
+
+@pytest.mark.parametrize("lookback", [0, -1, float("nan"), float("inf"), "bad"])
+def test_invalid_lookback_is_rejected(lookback):
+    with pytest.raises((ValueError, TypeError)):
+        LiquidityZoneDetector().analyze(make_book(), trades([100.0, 100.01]), lookback)
+
+
+def test_breakout_boundary_is_not_triggered_at_exact_buffer():
+    d=LiquidityZoneDetector(breakout_buffer_pct=0.05)
+    t=trades([100,100.01,100.02,100.03])
+    first=d.analyze(make_book(100.02),t,30)
+    z=first["zones"][0]
+    result=d.analyze(make_book(z["breakout_buffer_high"]),t,30)
+    assert all(zone["interaction_state"] != "BREAKOUT_UP" for zone in result["zones"])
+
+
+def test_breakout_state_and_rejection_flag_precedence_are_consistent():
+    d=LiquidityZoneDetector()
+    now=int(time.time()*1000)
+    tape=[
+        {"price":100.00,"quantity":2,"received_timestamp_ms":now-200},
+        {"price":100.01,"quantity":2,"received_timestamp_ms":now-100},
+        {"price":100.20,"quantity":2,"received_timestamp_ms":now},
+    ]
+    result=d.analyze(make_book(100.20),tape,30)
+    for zone in result["zones"]:
+        if zone["possible_rejection"]:
+            assert zone["interaction_state"] == "POSSIBLE_REJECTION"
+
+
+def test_trade_input_order_does_not_change_zone_geometry_or_volume():
+    base=trades([100,100.01,100.02,100.03,100.04])
+    d1=LiquidityZoneDetector()
+    d2=LiquidityZoneDetector()
+    a=d1.analyze(make_book(100.02),base,30)["zones"]
+    b=d2.analyze(make_book(100.02),list(reversed(base)),30)["zones"]
+    geometry=lambda zs: sorted((z["low"],z["high"],z["center"],z["trade_volume_in_cluster"]) for z in zs)
+    assert geometry(a)==geometry(b)
