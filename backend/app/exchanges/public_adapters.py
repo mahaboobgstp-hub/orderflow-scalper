@@ -61,7 +61,8 @@ class PublicExchangeAdapter(ABC):
 
 class BinancePublicAdapter(PublicExchangeAdapter):
     def __init__(self,enabled,symbol="BTCUSDT",on_message=None):
-        super().__init__("binance",enabled,f"wss://fstream.binance.com/public/ws/{symbol.lower()}@depth@100ms",symbol,on_message)
+        streams=f"{symbol.lower()}@depth@100ms/{symbol.lower()}@aggTrade"
+        super().__init__("binance",enabled,f"wss://fstream.binance.com/stream?streams={streams}",symbol,on_message)
     async def _subscribe(self,websocket): return
 
 class BybitPublicAdapter(PublicExchangeAdapter):
