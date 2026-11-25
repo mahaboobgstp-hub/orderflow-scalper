@@ -11,6 +11,15 @@ from typing import Any
 class LiquidityZoneDetector:
     def __init__(self, max_book_age_seconds: float = 3.0, zone_band_pct: float = 0.08,
                  breakout_buffer_pct: float = 0.05, max_zones: int = 12):
+        for name, value in (("max_book_age_seconds", max_book_age_seconds),
+                            ("zone_band_pct", zone_band_pct),
+                            ("breakout_buffer_pct", breakout_buffer_pct)):
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"Invalid {name}.") from None
+            if not math.isfinite(numeric):
+                raise ValueError(f"{name} must be finite.")
         self.max_book_age_seconds=max(0.1,float(max_book_age_seconds))
         self.zone_band_pct=max(0.01,min(float(zone_band_pct),0.5))
         self.breakout_buffer_pct=max(0.01,min(float(breakout_buffer_pct),0.5))
