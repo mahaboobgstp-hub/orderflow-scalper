@@ -14,13 +14,17 @@ def trades(side="buy",qty=1.0,count=8,price=100.05):
 
 class Phase6DetectorTests(unittest.TestCase):
     def test_high_aggressive_buy_with_limited_progress_is_absorption_candidate(self):
-        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy"),15)
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("buy"),15)
+        result=detector.analyze(book(),trades("buy"),15)
         self.assertEqual(result["classification"],"POSSIBLE_BUY_ABSORPTION")
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],8.0)
 
     def test_sell_side_absorption_candidate(self):
-        result=AbsorptionLiquidityDetector().analyze(book(),trades("sell"),15)
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("sell"),15)
+        result=detector.analyze(book(),trades("sell"),15)
         self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
         self.assertTrue(result["metrics"]["sell_absorption_candidate"])
 
@@ -51,7 +55,7 @@ class Phase6DetectorTests(unittest.TestCase):
         result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=7),15)
         self.assertIn("flow_exhaustion",result)
         self.assertIn("quality",result)
-        self.assertIn("not an entry",result["diagnostics"][2].lower())
+        self.assertIn("not an entry",result["diagnostics"][4].lower())
 
 
     def test_rejects_negative_and_nonfinite_book_age(self):
