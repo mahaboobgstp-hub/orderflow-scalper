@@ -38,6 +38,23 @@ class AbsorptionLiquidityDetector:
     def _safe_ratio(a,b):
         return a/b if b>0 else 0.0
 
+    @staticmethod
+    def _parse_timestamp_ms(value):
+        """Accept integer millisecond timestamps only; never truncate floats or bools."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if text and (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+                try:
+                    return int(text)
+                except ValueError:
+                    return None
+        return None
+
+
     def analyze(self,book:dict[str,Any],trades:list[dict[str,Any]],lookback_seconds:float=15.0)->dict[str,Any]:
         if not isinstance(book,dict): raise ValueError("Normalized order book is required.")
         exchange=str(book.get("exchange","")).lower(); symbol=str(book.get("symbol","")).upper()
@@ -63,8 +80,13 @@ class AbsorptionLiquidityDetector:
         normalized=[]
         for t in trades or []:
             if not isinstance(t,dict): continue
-            try: price=float(t.get("price",0)); qty=float(t.get("quantity",0)); ts=int(t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0)
+            raw_price=t.get("price",0); raw_quantity=t.get("quantity",0)
+            raw_timestamp=t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0
+            if isinstance(raw_price,bool) or isinstance(raw_quantity,bool): continue
+            try: price=float(raw_price); qty=float(raw_quantity)
             except (TypeError,ValueError,OverflowError): continue
+            ts=self._parse_timestamp_ms(raw_timestamp)
+            if ts is None: continue
             side=str(t.get("side","")).lower()
             if side not in ("buy","sell") or price<=0 or qty<=0 or not math.isfinite(price) or not math.isfinite(qty): continue
             if ts>=cutoff and ts<=now_ms+5000: normalized.append({"price":price,"quantity":qty,"side":side,"ts":ts})
