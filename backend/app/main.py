@@ -21,6 +21,7 @@ from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
 import logging
 import os
+import time
 
 logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO').upper(),format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger=logging.getLogger('orderflow-scalper')
@@ -62,6 +63,22 @@ async def lifespan(app: FastAPI):
         except Exception: logger.exception('Market stream shutdown error')
 
 app=FastAPI(title="OrderFlow Scalper API",description="Multi-exchange public market-data and Binance demo execution backend",version="0.5.0")
+@app.middleware("http")
+async def request_monitoring(request, call_next):
+    started=time.perf_counter()
+    try:
+        response=await call_next(request)
+        duration_ms=(time.perf_counter()-started)*1000
+        if hasattr(app.state,"monitoring_service"):
+            app.state.monitoring_service.record("ERROR" if response.status_code>=500 else "INFO","http_request",{"method":request.method,"path":request.url.path,"status_code":response.status_code,"duration_ms":round(duration_ms,2)})
+        if response.status_code>=500: logger.error("HTTP %s %s returned %s",request.method,request.url.path,response.status_code)
+        return response
+    except Exception as exc:
+        if hasattr(app.state,"monitoring_service"):
+            app.state.monitoring_service.record("ERROR","request_exception",{"method":request.method,"path":request.url.path,"error_type":type(exc).__name__})
+        logger.exception("Unhandled request exception")
+        raise
+
 
 class RiskSizingRequest(BaseModel):
     symbol:str=Field(default="UNKNOWN",min_length=1,max_length=30)
