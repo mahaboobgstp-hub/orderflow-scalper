@@ -15,6 +15,7 @@ from app.services.trade_flow_momentum import TradeFlowMomentumDetector
 from app.services.market_context_dummy_api import DummyMarketContextAPI
 from app.services.market_regime_context import MarketRegimeContextEngine
 from app.services.risk_management import RiskManagementEngine
+from app.services.paper_trading import PaperTradingEngine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI):
     app.state.market_context_dummy_api=DummyMarketContextAPI()
     app.state.market_regime_context_engine=MarketRegimeContextEngine()
     app.state.risk_management_engine=RiskManagementEngine()
+    app.state.paper_trading_engine=PaperTradingEngine()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
@@ -58,6 +60,19 @@ class PortfolioRiskRequest(BaseModel):
     open_positions:int=Field(default=0,ge=0)
     consecutive_losses:int=Field(default=0,ge=0)
     risk_per_trade_pct:float|None=Field(default=None,ge=0.01,le=5)
+class PaperOrderRequest(BaseModel):
+    symbol:str=Field(min_length=1,max_length=30)
+    side:str
+    quantity:float=Field(gt=0)
+    price:float=Field(gt=0)
+    leverage:float=Field(default=1.0,ge=1,le=5)
+class PaperMarkPriceRequest(BaseModel):
+    symbol:str=Field(min_length=1,max_length=30)
+    price:float=Field(gt=0)
+class PaperCloseRequest(BaseModel):
+    price:float=Field(gt=0)
+class PaperResetRequest(BaseModel):
+    initial_equity:float=Field(gt=0)
 class DemoOrderRequest(BaseModel):
     symbol:str=Field(default="BTCUSDT",min_length=3,max_length=20)
     side:str
@@ -197,3 +212,29 @@ async def risk_position_size(request:RiskSizingRequest):
 async def risk_portfolio_check(request:PortfolioRiskRequest):
     try: return app.state.risk_management_engine.evaluate_portfolio(**request.model_dump())
     except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+
+# Phase 11 — Paper-only simulator endpoints; never call exchange execution
+@app.get("/api/paper/status")
+async def paper_status():
+    return app.state.paper_trading_engine.status()
+@app.get("/api/paper/account")
+async def paper_account():
+    return app.state.paper_trading_engine.account()
+@app.post("/api/paper/orders")
+async def paper_submit_order(request:PaperOrderRequest):
+    try: return app.state.paper_trading_engine.submit(request.model_dump())
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+@app.post("/api/paper/mark-price")
+async def paper_mark_price(request:PaperMarkPriceRequest):
+    try: return app.state.paper_trading_engine.mark(request.symbol,request.price)
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+@app.post("/api/paper/close/{symbol}")
+async def paper_close_position(symbol:str,request:PaperCloseRequest):
+    try: return app.state.paper_trading_engine.close(symbol,request.price)
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+@app.get("/api/paper/history")
+async def paper_history(limit:int=Query(default=100,ge=1,le=500)):
+    return app.state.paper_trading_engine.history(limit)
+@app.post("/api/paper/reset")
+async def paper_reset(request:PaperResetRequest):
+    return app.state.paper_trading_engine.reset(request.initial_equity)
