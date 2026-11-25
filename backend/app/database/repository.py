@@ -41,8 +41,16 @@ class OrderFlowRepository:
             "state_json": state or {},
         }
         try:
-            rows = await self.db.select("engine_state", columns="id", limit=1)
+            rows = await self.db.select("engine_state", columns="id,state_json", limit=1, order="updated_at.desc")
             if rows:
+                # Preserve paper_account snapshots when lifecycle/heartbeat updates
+                # write operational metadata without an explicit account payload.
+                prior_state = rows[0].get("state_json") or {}
+                incoming_state = state or {}
+                if isinstance(prior_state, dict) and isinstance(incoming_state, dict):
+                    merged_state = dict(prior_state)
+                    merged_state.update(incoming_state)
+                    payload["state_json"] = merged_state
                 await self.db.update("engine_state", payload, filters={"id": f"eq.{rows[0]['id']}"})
             else:
                 await self.db.insert("engine_state", payload)
