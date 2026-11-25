@@ -97,7 +97,7 @@ class AbsorptionLiquidityDetector:
         buy_progress_pct=0.0; sell_progress_pct=0.0
         prior_sample_age_ms=(now_ms-prior["timestamp"]) if prior else None
         # Temporal progress requires a recent prior midpoint sample.
-        has_recent_baseline=prior is not None and 0 < prior_sample_age_ms <= lookback*1000
+        has_recent_baseline=prior is not None and 0 <= prior_sample_age_ms <= lookback*1000
         if has_recent_baseline and prior["mid"]>0:
             buy_progress_pct=max(0.0,(mid-prior["mid"])/prior["mid"]*100)
             sell_progress_pct=max(0.0,(prior["mid"]-mid)/prior["mid"]*100)
