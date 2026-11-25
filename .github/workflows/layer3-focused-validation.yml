@@ -31,4 +31,4 @@ jobs:
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -vv tests/test_phase7_liquidity_zone_detector.py
+        run: pytest -vv tests/test_phase7_liquidity_zone_detector.py tests/test_phase7_api_integration.py
