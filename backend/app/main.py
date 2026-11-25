@@ -26,6 +26,7 @@ from app.services.monitoring import MonitoringService
 from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
 from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
+from app.services.controlled_paper_session import ControlledPaperSession
 import logging
 import os
 import time
@@ -56,8 +57,9 @@ async def lifespan(app: FastAPI):
     set_persistence_enqueue(persistence_worker.enqueue)
     await persistence_worker.start()
     app.state.backtesting_engine=BacktestEngine()
-    decision_engine=NineLayerDecisionEngine(operator_control_state["config"]); app.state.nine_layer_decision_engine=decision_engine
-runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"],market_data=app.state.unified_market_data,imbalance=app.state.imbalance_detector,absorption=app.state.absorption_detector,zones=app.state.liquidity_zone_detector,trade_flow=app.state.trade_flow_momentum_detector,risk_engine=app.state.risk_management_engine,decision_engine=decision_engine,repository=repository); app.state.autonomous_paper_runtime=runtime
+    validation_session=ControlledPaperSession({"enabled":False}); app.state.controlled_paper_session=validation_session
+decision_engine=NineLayerDecisionEngine(operator_control_state["config"]); app.state.nine_layer_decision_engine=decision_engine
+runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"],market_data=app.state.unified_market_data,imbalance=app.state.imbalance_detector,absorption=app.state.absorption_detector,zones=app.state.liquidity_zone_detector,trade_flow=app.state.trade_flow_momentum_detector,risk_engine=app.state.risk_management_engine,decision_engine=decision_engine,repository=repository,validation_session=validation_session); app.state.autonomous_paper_runtime=runtime
     set_runtime(runtime)
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
@@ -282,6 +284,35 @@ async def analyze_trade_flow(exchange:str,symbol:str,lookback_seconds:float=Quer
 @app.get("/api/decision-engine/status")
 async def decision_engine_status():
     return {"engine":"nine_layer_decision_engine","mode":"PAPER_ONLY","live_exchange_execution":False,"decision_engine_config":app.state.nine_layer_decision_engine.config,"runtime":app.state.autonomous_paper_runtime.status()}
+
+@app.get("/api/paper/validation/status")
+async def paper_validation_status():
+    return app.state.controlled_paper_session.status()
+
+@app.post("/api/paper/validation/start")
+async def paper_validation_start():
+    account=app.state.paper_trading_engine.account()
+    controller=app.state.controlled_paper_session
+    controller.config_values["enabled"]=True
+    try:
+        return controller.start(float(account.get("equity",0)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400,detail=str(exc))
+
+@app.post("/api/paper/validation/pause")
+async def paper_validation_pause():
+    try: return app.state.controlled_paper_session.pause("OPERATOR_PAUSE")
+    except ValueError as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@app.post("/api/paper/validation/resume")
+async def paper_validation_resume():
+    try: return app.state.controlled_paper_session.resume()
+    except ValueError as exc: raise HTTPException(status_code=400,detail=str(exc))
+
+@app.post("/api/paper/validation/stop")
+async def paper_validation_stop():
+    try: return app.state.controlled_paper_session.stop("OPERATOR_STOP")
+    except ValueError as exc: raise HTTPException(status_code=400,detail=str(exc))
 
 @app.get("/api/scanner/coins")
 async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bool=False):
