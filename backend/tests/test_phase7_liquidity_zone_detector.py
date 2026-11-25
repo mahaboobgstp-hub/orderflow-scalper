@@ -44,3 +44,33 @@ def test_unsynchronized_or_stale_book_rejected():
 def test_empty_trade_history_returns_empty_zones():
     result=LiquidityZoneDetector().analyze(make_book(),[],30)
     assert result["zones"]==[]
+
+def test_possible_rejection_flag_is_defined_and_heuristic():
+    d=LiquidityZoneDetector()
+    # Tape includes zone interaction then a later timestamp outside the buffer.
+    now=int(time.time()*1000)
+    t=[
+        {"price":100.00,"quantity":2,"side":"buy","received_timestamp_ms":now-300},
+        {"price":100.01,"quantity":2,"side":"buy","received_timestamp_ms":now-200},
+        {"price":100.20,"quantity":2,"side":"buy","received_timestamp_ms":now-100},
+    ]
+    result=d.analyze(make_book(100.20),t,30)
+    assert result["zones"]
+    assert all("possible_rejection" in z for z in result["zones"])
+    assert any(z["possible_rejection"] for z in result["zones"])
+
+
+@pytest.mark.parametrize("age",["bad",float("nan"),float("inf"),-0.1])
+def test_invalid_book_age_rejected(age):
+    bad=make_book()
+    bad["age_seconds"]=age
+    with pytest.raises(ValueError):
+        LiquidityZoneDetector().analyze(bad,[],30)
+
+
+def test_malformed_trade_records_are_ignored():
+    result=LiquidityZoneDetector().analyze(make_book(),[
+        None,{},{"price":"nan","quantity":3,"received_timestamp_ms":int(time.time()*1000)},
+        {"price":100,"quantity":"bad","received_timestamp_ms":int(time.time()*1000)}
+    ],30)
+    assert result["zones"]==[]
