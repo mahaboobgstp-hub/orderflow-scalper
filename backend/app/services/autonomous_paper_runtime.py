@@ -19,7 +19,7 @@ class AutonomousPaperRuntime:
 
     def status(self):
         return {"connected":True,"state":"RUNNING" if self._running and not self._paused else "PAUSED" if self._running else "STOPPED",
-            "mode":"PAPER_ONLY","automatic_order_execution":False,"scan_count":self._scan_count,
+            "mode":"PAPER_ONLY","automatic_exchange_order_execution":False,"automatic_paper_execution":True,"scan_count":self._scan_count,
             "last_scan_time":self._last_scan_time,"last_error":self._last_error,
             "last_scan_summary":self._last_scan,"watchlist_count":len(self.watchlist),
             "decision_engine":"nine_layer_decision_engine" if self.decision_engine else "NOT_CONFIGURED",
@@ -182,7 +182,7 @@ class AutonomousPaperRuntime:
                     self._last_scan={"scanned":scan.get("total_symbols_scanned",0),"candidate_count":scan.get("candidate_count",0),
                         "shortlist_count":len(filtered),"watchlist_candidates":[{"symbol":m.get("symbol"),"score":m.get("suitability_score"),"price":m.get("last_price")} for m in watched],
                         "top_candidates":[{"symbol":m.get("symbol"),"score":m.get("suitability_score"),"price":m.get("last_price")} for m in filtered[:10]],
-                        "entry_status":"Nine-layer decisions calculated; execution remains guarded during development",
+                        "entry_status":"Nine-layer decisions and guarded paper execution integrated; live exchange execution disabled",
                         "decision_summary":{"evaluated":len(decision_rows),"buy":sum(x["decision"]=="BUY" for x in decision_rows),"sell":sum(x["decision"]=="SELL" for x in decision_rows),"hold":sum(x["decision"]=="HOLD" for x in decision_rows),"reject":sum(x["decision"]=="REJECT" for x in decision_rows)}}
                     self._last_scan_time=time.time(); self._scan_count+=1; self._last_error=None
                 except Exception as exc:
