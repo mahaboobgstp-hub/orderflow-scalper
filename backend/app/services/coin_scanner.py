@@ -54,7 +54,7 @@ class CoinMarketScanner:
                 spread_score=self._clamp((self.max_spread_pct/max(spread_pct,0.0001))*15) if spread_pct>0 else 15
                 volatility_score=self._clamp((range_pct/max(self.min_24h_range_pct,0.1))*10)
                 activity_score=self._clamp((trades/10000)*20)
-                momentum_score=self._clamp((self._number(t.get("priceChangePercent"))+10)*1.5)
+                momentum_score=self._clamp((self._number(t.get("priceChangePercent"))+10)*0.75,0,15)
                 score=round(liquidity_score+spread_score+volatility_score+activity_score+momentum_score,2)
                 reasons=[]; rejects=[]
                 if qv<self.min_quote_volume_usdt: rejects.append("Low 24h quote volume")
@@ -65,7 +65,7 @@ class CoinMarketScanner:
                 markets.append({"symbol":symbol,"last_price":last,"quote_volume_24h":qv,
                     "trade_count_24h":int(trades),"spread_pct":round(spread_pct,5),
                     "range_24h_pct":round(range_pct,3),"price_change_24h_pct":round(self._number(t.get("priceChangePercent")),3),
-                    "suitability_score":score,"status":"REJECT" if rejects else "CANDIDATE",
+                    "suitability_score":score,"score_components":{"liquidity":round(liquidity_score,2),"spread":round(spread_score,2),"volatility":round(volatility_score,2),"trade_activity":round(activity_score,2),"momentum":round(momentum_score,2)},"status":"REJECT" if rejects else "CANDIDATE",
                     "reasons":reasons,"rejection_reasons":rejects})
             markets.sort(key=lambda x:x["suitability_score"],reverse=True)
             # Activity acceleration is measured with two adjacent 5m klines for a
@@ -76,7 +76,7 @@ class CoinMarketScanner:
                 try:
                     rows=await self._get(client,"/fapi/v1/klines",{"symbol":symbol,"interval":"5m","limit":3})
                     if len(rows)>=3:
-                        prev=self._number(rows[-3][5]); recent=self._number(rows[-2][5])
+                        prev=self._number(rows[-3][7]); recent=self._number(rows[-2][7])
                         if prev>0: return symbol,round(recent/prev,3)
                 except Exception:
                     return symbol,None
