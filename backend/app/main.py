@@ -10,6 +10,7 @@ from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapte
 from app.services.coin_scanner import CoinMarketScanner
 from app.services.imbalance_detector import OrderBookImbalanceDetector
 from app.services.absorption_detector import AbsorptionLiquidityDetector
+from app.services.liquidity_zone_detector import LiquidityZoneDetector
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     app.state.coin_scanner=CoinMarketScanner()
     app.state.imbalance_detector=OrderBookImbalanceDetector()
     app.state.absorption_detector=AbsorptionLiquidityDetector()
+    app.state.liquidity_zone_detector=LiquidityZoneDetector()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
@@ -90,6 +92,21 @@ async def analyze_absorption(exchange:str,symbol:str,lookback_seconds:float=Quer
     trades=app.state.unified_market_data.get_recent_trades(exchange,symbol,limit)
     try:
         return app.state.absorption_detector.analyze(book,trades,lookback_seconds=lookback_seconds)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc))
+@app.get("/api/liquidity-zones/status")
+async def liquidity_zones_status():
+    return app.state.liquidity_zone_detector.status()
+@app.get("/api/liquidity-zones/{exchange}/{symbol}")
+async def analyze_liquidity_zones(exchange:str,symbol:str,lookback_seconds:float=Query(default=300.0,ge=10.0,le=3600.0),limit:int=Query(default=500,ge=1,le=500)):
+    if exchange.lower() not in {"binance","bybit","delta"}:
+        raise HTTPException(status_code=400,detail="Unsupported exchange.")
+    book=app.state.unified_market_data.get_book(exchange,symbol)
+    if book is None:
+        raise HTTPException(status_code=404,detail="No normalized order book available for this exchange/symbol.")
+    trades=app.state.unified_market_data.get_recent_trades(exchange,symbol,limit)
+    try:
+        return app.state.liquidity_zone_detector.analyze(book,trades,lookback_seconds=lookback_seconds)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc))
 @app.get("/api/scanner/coins")
