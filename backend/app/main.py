@@ -62,6 +62,8 @@ async def lifespan(app: FastAPI):
         logger.exception('Application lifecycle error')
         raise
     finally:
+        try: await runtime.stop()
+        except Exception: logger.exception("Autonomous runtime shutdown error")
         try: await manager.stop()
         except Exception: logger.exception('Exchange manager shutdown error')
         try: await stream.stop()
