@@ -87,7 +87,7 @@ class CoinMarketScanner:
                 ratio=activity.get(m["symbol"])
                 m["volume_acceleration_ratio_5m"]=ratio
                 if ratio is not None:
-                    m["activity_acceleration_score"]=self._clamp((ratio-0.5)*20)
+                    m["activity_acceleration_score"]=self._clamp(ratio*10,0,20)
                     m["suitability_score"]=round(m["suitability_score"]+m["activity_acceleration_score"],2)
                     m["activity_acceleration_label"]="Accelerating" if ratio>=1.25 else "Cooling" if ratio<=0.8 else "Stable"
                 else:
