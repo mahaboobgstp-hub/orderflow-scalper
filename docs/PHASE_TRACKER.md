@@ -14,5 +14,5 @@
 | 10 | Risk management & position sizing | Implemented calculation/advisory guard; tests/runtime pending |
 | 11 | Paper trading engine | Implemented in-memory simulation; tests/runtime pending |
 | 12 | Advanced position management (fixed SL/TP, TSL/TTP) | Implemented; tests/runtime pending |
-| 13 | Backtesting & performance analytics | Not started |
+| 13 | Backtesting & performance analytics | Implemented; offline baseline; validation pending |
 | 14 | Production deployment, monitoring & recovery | Not started |
