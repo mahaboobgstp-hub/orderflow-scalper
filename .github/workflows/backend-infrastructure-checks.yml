@@ -1,0 +1,26 @@
+name: Backend infrastructure checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Compile backend Python files
+        run: python -m compileall -q backend/app backend/tests
+      - name: Run repository contract tests
+        env:
+          PYTHONPATH: backend
+        run: python -m unittest discover -s backend/tests -v
+      - name: Build Docker image
+        run: docker build -t orderflow-scalper-backend:ci .
