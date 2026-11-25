@@ -6,6 +6,7 @@ on:
     paths:
       - "backend/app/services/liquidity_zone_detector.py"
       - "backend/tests/test_phase7_liquidity_zone_detector.py"
+      - "backend/tests/test_phase7_api_integration.py"
       - ".github/workflows/layer3-focused-validation.yml"
   pull_request:
     paths:
