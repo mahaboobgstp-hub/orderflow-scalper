@@ -150,6 +150,11 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
                 raise HTTPException(status_code=422, detail=f"{key} must be numeric.")
             if key in numeric_limits and not numeric_limits[key][0] <= float(value) <= numeric_limits[key][1]:
                 raise HTTPException(status_code=422, detail=f"{key} must be between {numeric_limits[key][0]} and {numeric_limits[key][1]}.")
+    if "exchange_enabled" in request.config:
+        value = request.config["exchange_enabled"]
+        known = set(state["config"]["exchange_enabled"])
+        if not isinstance(value, dict) or set(value) - known or any(not isinstance(v, bool) for v in value.values()):
+            raise HTTPException(status_code=422, detail="exchange_enabled must contain known exchange keys with boolean values.")
     if "strategy_enabled" in request.config:
         state["config"]["strategy_enabled"].update(request.config["strategy_enabled"])
         remaining = {k: v for k, v in request.config.items() if k != "strategy_enabled"}
@@ -171,6 +176,7 @@ def watchlist_add(request: WatchlistRequest, x_control_token: str | None = Heade
         if len(state["watchlist"]) >= int(state["config"]["max_watchlist_symbols"]):
             raise HTTPException(status_code=422, detail="Watchlist capacity limit reached.")
         state["watchlist"].append(symbol)
+        if runtime is not None: runtime.set_watchlist(state["watchlist"])
         _event("watchlist_added", {"symbol": symbol})
     return {"watchlist": state["watchlist"]}
 
@@ -180,5 +186,6 @@ def watchlist_remove(request: WatchlistRequest, x_control_token: str | None = He
     symbol = request.symbol.upper().strip()
     if symbol in state["watchlist"]:
         state["watchlist"].remove(symbol)
+        if runtime is not None: runtime.set_watchlist(state["watchlist"])
         _event("watchlist_removed", {"symbol": symbol})
     return {"watchlist": state["watchlist"]}
