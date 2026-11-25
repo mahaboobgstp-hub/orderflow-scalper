@@ -38,6 +38,56 @@ class PaperTradingEngine:
         realized=sum(t["net_pnl"] for t in self.closed_trades)
         equity=self.cash+locked+unrealized
         return {"mode":"PAPER_ONLY","real_orders":False,"initial_equity":self.initial_equity,"cash_balance":round(self.cash,8),"locked_margin":round(locked,8),"unrealized_pnl":round(unrealized,8),"realized_pnl":round(realized,8),"equity":round(equity,8),"open_position_count":len(self.positions),"positions":[self._position_view(p) for p in self.positions.values()]}
+    def persistence_snapshot(self):
+        """JSON-safe full simulator state for restart recovery."""
+        return {
+            "version": 1,
+            "mode": "PAPER_ONLY",
+            "initial_equity": self.initial_equity,
+            "cash": self.cash,
+            "fee_rate": self.fee_rate,
+            "positions": {k: dict(v) for k, v in self.positions.items()},
+            "orders": list(self.orders[-500:]),
+            "closed_trades": list(self.closed_trades[-500:]),
+            "mark_prices": dict(self.mark_prices),
+            "session_started_ms": self.session_started_ms,
+        }
+
+    def restore_persistence_snapshot(self, snapshot):
+        """Restore only validated PAPER_ONLY snapshots; refuse live-mode payloads."""
+        if not isinstance(snapshot, dict) or snapshot.get("mode") != "PAPER_ONLY" or snapshot.get("version") != 1:
+            return False
+        initial = self._finite(snapshot.get("initial_equity"))
+        cash = self._finite(snapshot.get("cash"))
+        fee = self._finite(snapshot.get("fee_rate"))
+        positions = snapshot.get("positions")
+        marks = snapshot.get("mark_prices", {})
+        orders = snapshot.get("orders", [])
+        trades = snapshot.get("closed_trades", [])
+        if initial is None or initial <= 0 or cash is None or cash < 0 or fee is None or fee < 0:
+            return False
+        if not isinstance(positions, dict) or not isinstance(marks, dict) or not isinstance(orders, list) or not isinstance(trades, list):
+            return False
+        # Validate every open position before mutating engine state.
+        for symbol, position in positions.items():
+            if not isinstance(position, dict) or position.get("symbol") != symbol:
+                return False
+            if position.get("side") not in ("long", "short"):
+                return False
+            for field in ("quantity", "entry_price", "margin"):
+                value = self._finite(position.get(field))
+                if value is None or value <= 0:
+                    return False
+        self.initial_equity = initial
+        self.cash = cash
+        self.fee_rate = fee
+        self.positions = {str(k): dict(v) for k, v in positions.items()}
+        self.mark_prices = {str(k): float(v) for k, v in marks.items() if self._finite(v) and float(v) > 0}
+        self.orders = orders[-500:]
+        self.closed_trades = trades[-500:]
+        self.session_started_ms = int(snapshot.get("session_started_ms") or int(time.time()*1000))
+        return True
+
     def submit(self,req:dict[str,Any]):
         symbol=str(req.get("symbol","")).upper().strip(); side=str(req.get("side","")).lower(); qty=self._finite(req.get("quantity")); price=self._finite(req.get("price")); leverage=self._finite(req.get("leverage",1))
         if not symbol or len(symbol)>30: raise ValueError("Valid symbol required.")
