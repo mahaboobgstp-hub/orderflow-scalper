@@ -41,19 +41,26 @@ class AbsorptionLiquidityDetector:
         if not book.get("synchronized",False): raise ValueError("Order book is unsynchronized; absorption analysis refused.")
         if book.get("stale",True): raise ValueError("Order book is stale; analysis refused.")
         age=book.get("age_seconds")
-        if age is None or float(age)>self.max_book_age_seconds: raise ValueError("Order book exceeds maximum age.")
+        try: age_value=float(age)
+        except (TypeError,ValueError): raise ValueError("Order book age is invalid.")
+        if not math.isfinite(age_value) or age_value<0 or age_value>self.max_book_age_seconds:
+            raise ValueError("Order book exceeds maximum age or has invalid age.")
         if book.get("integrity_error"): raise ValueError(f"Book integrity error: {book['integrity_error']}")
         bids=self._valid_levels(book.get("bids")); asks=self._valid_levels(book.get("asks"))
         if not bids or not asks: raise ValueError("Both book sides must have valid levels.")
         best_bid=max(p for p,q in bids); best_ask=min(p for p,q in asks)
         if best_bid>=best_ask: raise ValueError("Crossed or locked book is invalid.")
         mid=(best_bid+best_ask)/2
-        now_ms=int(time.time()*1000); cutoff=now_ms-max(1.0,min(float(lookback_seconds),120.0))*1000
+        try: lookback=float(lookback_seconds)
+        except (TypeError,ValueError): raise ValueError("Lookback must be a finite number.")
+        if not math.isfinite(lookback): raise ValueError("Lookback must be a finite number.")
+        lookback=max(1.0,min(lookback,120.0))
+        now_ms=int(time.time()*1000); cutoff=now_ms-lookback*1000
         normalized=[]
         for t in trades or []:
             if not isinstance(t,dict): continue
             try: price=float(t.get("price",0)); qty=float(t.get("quantity",0)); ts=int(t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0)
-            except (TypeError,ValueError): continue
+            except (TypeError,ValueError,OverflowError): continue
             side=str(t.get("side","")).lower()
             if side not in ("buy","sell") or price<=0 or qty<=0 or not math.isfinite(price) or not math.isfinite(qty): continue
             if ts>=cutoff and ts<=now_ms+5000: normalized.append({"price":price,"quantity":qty,"side":side,"ts":ts})
@@ -105,7 +112,7 @@ class AbsorptionLiquidityDetector:
             recent_vol=sum(t["quantity"] for t in recent); earlier_vol=sum(t["quantity"] for t in earlier)
             exhaustion="FLOW_WEAKENING" if earlier and recent_vol<earlier_vol else "FLOW_STABLE_OR_INCREASING"
         return {"detector":"phase6_absorption_liquidity_behavior","exchange":exchange,"symbol":symbol,
-            "analysis_timestamp_ms":now_ms,"lookback_seconds":lookback_seconds,"trade_count":len(normalized),
+            "analysis_timestamp_ms":now_ms,"lookback_seconds":lookback,"trade_count":len(normalized),
             "classification":label,"metrics":{"aggressive_buy_quantity":round(buy_qty,8),"aggressive_sell_quantity":round(sell_qty,8),
             "buy_trade_count":buy_count,"sell_trade_count":sell_count,"net_aggressive_delta":round(delta,8),
             "aggressive_delta_ratio":round(delta/total_qty,6) if total_qty else 0.0,"absolute_flow_imbalance":round(flow_ratio,6),
