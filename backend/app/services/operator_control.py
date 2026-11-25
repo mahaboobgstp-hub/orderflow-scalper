@@ -63,20 +63,10 @@ def control_events(limit: int = 100):
 def engine_command(request: EngineCommandRequest, x_control_token: str | None = Header(default=None)):
     _auth(x_control_token)
     command = request.command.upper().strip()
-    if command == "START" and not state["autonomous_engine_integrated"]:
-        raise HTTPException(status_code=409, detail="Autonomous strategy/execution loop is not integrated. Engine start is intentionally blocked.")
     if command not in {"START", "PAUSE", "RESUME", "STOP", "EMERGENCY_HALT"}:
         raise HTTPException(status_code=400, detail="Unsupported engine command.")
-    if command in {"PAUSE", "RESUME"} and state["engine_state"] == "STOPPED":
-        raise HTTPException(status_code=409, detail="Engine is stopped.")
-    if command in {"STOP", "EMERGENCY_HALT"}:
-        state["engine_state"] = "STOPPED"
-    elif command == "PAUSE":
-        state["engine_state"] = "PAUSED"
-    elif command == "RESUME":
-        state["engine_state"] = "RUNNING"
-    _event("engine_command", {"command": command, "state": state["engine_state"]})
-    return {"accepted": True, "engine_state": state["engine_state"], "message": "Command recorded; autonomous engine integration status remains separately reported."}
+    _event("engine_command_blocked", {"command": command, "reason": "autonomous_engine_not_integrated"})
+    raise HTTPException(status_code=409, detail="No autonomous trading process is connected to these controls yet. The command was not applied.")
 @router.put("/config")
 def update_config(request: ConfigRequest, x_control_token: str | None = Header(default=None)):
     _auth(x_control_token)
