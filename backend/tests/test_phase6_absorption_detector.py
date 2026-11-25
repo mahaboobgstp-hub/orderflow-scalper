@@ -205,6 +205,18 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
         self.assertAlmostEqual(result["quality"]["depth_coverage_ratio"],0.00025,places=6)
         self.assertLess(result["quality"]["score"],1.0)
+    def test_flow_exhaustion_uses_timestamp_order_not_input_order(self):
+        detector=AbsorptionLiquidityDetector()
+        base_ts=1_000
+        quantities=[10.0,10.0,10.0,1.0,1.0,1.0]
+        tape=[{"side":"buy","quantity":q,"price":100.05,
+                "received_timestamp_ms":base_ts+i*1000} for i,q in enumerate(quantities)]
+        tape.reverse()  # newest-first input should not invert the flow trend
+        with patch("app.services.absorption_detector.time.time",return_value=10.0):
+            result=detector.analyze(book(),tape,lookback_seconds=15)
+        self.assertEqual(result["trade_count"],6)
+        self.assertEqual(result["flow_exhaustion"],"FLOW_WEAKENING")
+
 
 if __name__=="__main__":
     unittest.main()
