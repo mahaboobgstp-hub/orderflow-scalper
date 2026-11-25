@@ -10,6 +10,8 @@ Market data only:
 import asyncio
 import json
 import logging
+import math
+import time
 from collections import deque
 from typing import Any
 
@@ -28,7 +30,13 @@ class BinanceOrderBookStream:
         self,
         symbol: str = "BTCUSDT",
         snapshot_limit: int = 1000,
+        max_book_age_seconds: float = 3.0,
     ):
+        max_age = float(max_book_age_seconds)
+        if not math.isfinite(max_age):
+            raise ValueError("Maximum book age must be finite.")
+        self.max_book_age_seconds = max(0.1, max_age)
+        self._last_event_received_at: float | None = None
         self.symbol = symbol.upper()
         self.stream_symbol = symbol.lower()
         self.snapshot_limit = snapshot_limit
@@ -126,6 +134,7 @@ class BinanceOrderBookStream:
             self.connected = True
             self.synchronized = False
             self.last_error = None
+            self._last_event_received_at = None
 
             logger.info(
                 "Connected to Binance stream: %s",
@@ -144,6 +153,45 @@ class BinanceOrderBookStream:
                 collect_events()
             )
 
+            async def next_event():
+                # Drain buffered updates before interpreting a finished collector
+                # as a disconnect; otherwise a closed stream can strand sync.
+                if not event_queue.empty():
+                    return event_queue.get_nowait()
+                if collector_task.done():
+                    if collector_task.cancelled():
+                        raise ConnectionError("Binance depth stream collector was cancelled.")
+                    error = collector_task.exception()
+                    if error:
+                        raise error
+                    raise ConnectionError("Binance depth stream closed.")
+
+                event_task = asyncio.create_task(event_queue.get())
+                done, _ = await asyncio.wait(
+                    {event_task, collector_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if event_task in done:
+                    return event_task.result()
+                if not event_queue.empty():
+                    event_task.cancel()
+                    try:
+                        await event_task
+                    except asyncio.CancelledError:
+                        pass
+                    return event_queue.get_nowait()
+                event_task.cancel()
+                try:
+                    await event_task
+                except asyncio.CancelledError:
+                    pass
+                if collector_task.cancelled():
+                    raise ConnectionError("Binance depth stream collector was cancelled.")
+                error = collector_task.exception()
+                if error:
+                    raise error
+                raise ConnectionError("Binance depth stream closed.")
+
             try:
                 snapshot = await self._fetch_snapshot()
 
@@ -152,13 +200,19 @@ class BinanceOrderBookStream:
 
                 # Apply buffered events until the book is synchronized.
                 while not self.synchronized:
-                    event = await event_queue.get()
+                    event = await next_event()
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
-                            self._apply_event(event)
+                            applied = self._apply_event(
+                                event,
+                                initial_snapshot_bridge=True,
+                            )
 
-                        self.synchronized = True
+                        # Synchronization is valid only if the bridge event
+                        # was actually applied to the snapshot.
+                        if applied:
+                            self.synchronized = True
 
                 logger.info(
                     "Order book synchronized: %s update_id=%s",
@@ -168,12 +222,15 @@ class BinanceOrderBookStream:
 
                 # Process live updates.
                 while not self._stop_event.is_set():
-                    event = await event_queue.get()
+                    event = await next_event()
 
                     async with self._lock:
                         if not self._apply_event(event):
-                            # A sequence gap occurred.
-                            # Reconnect and obtain a fresh snapshot.
+                            # Invalidate immediately so read-only endpoints cannot
+                            # serve the last book while reconnecting.
+                            self.synchronized = False
+                            self.connected = False
+                            self.last_error = "Order-book sequence gap detected"
                             logger.warning(
                                 "Order-book sequence gap detected"
                             )
@@ -240,60 +297,78 @@ class BinanceOrderBookStream:
         event: dict[str, Any],
     ) -> bool:
         """
-        Binance depth events contain:
-        U = first update ID
-        u = final update ID
+        Validate Binance Futures snapshot-to-stream synchronization.
 
-        The first event after the snapshot must bridge
-        the snapshot update ID.
+        The first accepted event must cover snapshot lastUpdateId + 1:
+        U <= lastUpdateId + 1 <= u. Events fully covered by the snapshot
+        are ignored.
         """
-
         if self.last_update_id is None:
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
-
-        # Ignore events already covered by the snapshot.
-        if final_update_id < self.last_update_id:
+        try:
+            first_update_id = int(event["U"])
+            final_update_id = int(event["u"])
+        except (KeyError, TypeError, ValueError):
             return False
 
+        if first_update_id > final_update_id:
+            return False
+
+        bridge_update_id = self.last_update_id + 1
         return (
-            first_update_id
-            <= self.last_update_id
-            <= final_update_id
+            final_update_id >= bridge_update_id
+            and first_update_id <= bridge_update_id
         )
 
     def _apply_event(
         self,
         event: dict[str, Any],
+        initial_snapshot_bridge: bool = False,
     ) -> bool:
         """
         Apply a depth event.
 
-        Returns False when a sequence gap is detected.
+        The first snapshot-bridging event is validated using U/u only; its
+        pu value describes the WebSocket stream's prior event and must not
+        be compared to the REST snapshot ID. Subsequent events use pu
+        continuity (or U/u continuity when pu is absent).
+        Returns False when a sequence gap or malformed sequence is detected.
         """
-
         if self.last_update_id is None:
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
-
-        # Ignore old events.
-        if final_update_id <= self.last_update_id:
-            return True
-
-        # For subsequent events, pu should match the
-        # previous event's final update ID.
-        previous_final_id = event.get("pu")
-
-        if previous_final_id is not None:
-            if int(previous_final_id) != self.last_update_id:
-                return False
-
-        elif first_update_id > self.last_update_id + 1:
+        try:
+            first_update_id = int(event["U"])
+            final_update_id = int(event["u"])
+        except (KeyError, TypeError, ValueError):
             return False
+
+        if first_update_id > final_update_id:
+            return False
+
+        if initial_snapshot_bridge:
+            # A bridge event must cover the first update after the snapshot;
+            # even an event ending at the snapshot ID is not a bridge.
+            if not self._event_bridges_snapshot(event):
+                return False
+        else:
+            # Ignore old/duplicate events only after initial sync.
+            if final_update_id <= self.last_update_id:
+                return True
+
+            # For subsequent Futures depth events, pu must match the
+            # previous final update ID. If pu is absent, use the U/u gap
+            # rule as a defensive fallback.
+            previous_final_id = event.get("pu")
+            if previous_final_id is not None:
+                try:
+                    if int(previous_final_id) != self.last_update_id:
+                        return False
+                except (TypeError, ValueError):
+                    return False
+            elif first_update_id > self.last_update_id + 1:
+                return False
 
         self._update_levels(
             self.bids,
@@ -306,6 +381,9 @@ class BinanceOrderBookStream:
         )
 
         self.last_update_id = final_update_id
+        # Freshness tracks sequence progress, not merely event receipt. Ignored
+        # duplicates/old updates must not keep a stalled book marked fresh.
+        self._last_event_received_at = time.monotonic()
 
         return True
 
@@ -328,11 +406,25 @@ class BinanceOrderBookStream:
     # --------------------------------------------------
 
     async def get_status(self) -> dict[str, Any]:
+        age_seconds = (
+            time.monotonic() - self._last_event_received_at
+            if self._last_event_received_at is not None
+            else None
+        )
+        stale = (
+            not self.connected
+            or not self.synchronized
+            or age_seconds is None
+            or age_seconds > self.max_book_age_seconds
+        )
         return {
             "symbol": self.symbol,
             "connected": self.connected,
             "synchronized": self.synchronized,
             "last_update_id": self.last_update_id,
+            "last_event_age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+            "max_book_age_seconds": self.max_book_age_seconds,
+            "stale": stale,
             "last_error": self.last_error,
         }
 
@@ -342,9 +434,17 @@ class BinanceOrderBookStream:
     ) -> dict[str, Any] | None:
 
         async with self._lock:
+            age_seconds = (
+                time.monotonic() - self._last_event_received_at
+                if self._last_event_received_at is not None
+                else None
+            )
             if (
-                not self.synchronized
+                not self.connected
+                or not self.synchronized
                 or self.last_update_id is None
+                or age_seconds is None
+                or age_seconds > self.max_book_age_seconds
             ):
                 return None
 
@@ -361,6 +461,8 @@ class BinanceOrderBookStream:
 
             return {
                 "last_update_id": self.last_update_id,
+                "age_seconds": round(age_seconds, 3),
+                "stale": False,
                 "bids": [
                     [price, quantity]
                     for price, quantity in sorted_bids
