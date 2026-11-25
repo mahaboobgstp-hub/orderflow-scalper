@@ -29,6 +29,39 @@ class PaperPersistenceWorker:
             logger.error("Paper persistence queue full; event dropped (%s)", event.get("type"))
             return False
 
+    async def restore_state(self, engine):
+        """Restore the simulator from the last account snapshot, with DB open-position fallback."""
+        try:
+            saved = await self.repo.load_paper_state()
+            wrapped = saved.get("snapshot", {})
+            account = wrapped.get("paper_account", {}) if isinstance(wrapped, dict) else {}
+            restored = engine.restore_persistence_snapshot(account)
+            if not restored:
+                # Recovery fallback: position_data is the authoritative serialized
+                # position when the account snapshot is absent/invalid.
+                fallback = {}
+                mark_prices = {}
+                for row in saved.get("open_positions", []):
+                    data = row.get("position_data") or {}
+                    symbol = str(row.get("symbol", "")).upper()
+                    if symbol and isinstance(data, dict) and data.get("position_id"):
+                        fallback[symbol] = data
+                        price = row.get("mark_price") or data.get("entry_price")
+                        if price:
+                            mark_prices[symbol] = float(price)
+                if fallback:
+                    engine.positions = fallback
+                    engine.mark_prices = mark_prices
+                    restored = True
+            if restored:
+                logger.info("Paper trading state restored: %d open positions", len(engine.positions))
+            else:
+                logger.info("No valid persisted paper state found; starting fresh paper account")
+            return restored
+        except Exception:
+            logger.exception("Paper trading recovery failed; simulator remains fresh and empty")
+            return False
+
     async def start(self):
         if self.running:
             return
@@ -124,3 +157,9 @@ class PaperPersistenceWorker:
             logger.info("Persisted paper close for %s", symbol)
         else:
             logger.warning("Unknown paper persistence event type: %s", kind)
+        if kind in {"order_open", "position_mark", "management_update", "position_close"}:
+            snapshot = e.get("account_snapshot")
+            if isinstance(snapshot, dict):
+                ok = await self.repo.save_paper_state(snapshot)
+                if not ok:
+                    raise RuntimeError("Paper account snapshot save failed")
