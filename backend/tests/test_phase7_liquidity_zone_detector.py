@@ -158,3 +158,37 @@ def test_trade_input_order_does_not_change_zone_geometry_or_volume():
     b=d2.analyze(make_book(100.02),list(reversed(base)),30)["zones"]
     geometry=lambda zs: sorted((z["low"],z["high"],z["center"],z["trade_volume_in_cluster"]) for z in zs)
     assert geometry(a)==geometry(b)
+
+
+@pytest.mark.parametrize("timestamp", [float("inf"), float("-inf"), 10**10000])
+def test_overflowing_trade_timestamps_are_ignored(timestamp):
+    now=int(time.time()*1000)
+    detector=LiquidityZoneDetector()
+    result=detector.analyze(make_book(),[
+        {"price":100.0,"quantity":2,"received_timestamp_ms":now},
+        {"price":100.01,"quantity":2,"received_timestamp_ms":timestamp},
+    ],30)
+    assert result["zones"]
+
+
+def test_zone_state_is_cleared_when_zone_disappears():
+    detector=LiquidityZoneDetector()
+    t=trades([100.0,100.01,100.02])
+    detector.analyze(make_book(100.02),t,30)
+    assert detector._previous_state["bybit:ETHUSDT"]
+    detector.analyze(make_book(100.02),[],30)
+    assert detector._previous_state["bybit:ETHUSDT"] == {}
+
+
+def test_possible_rejection_does_not_mask_confirmed_mid_breakout_classification():
+    detector=LiquidityZoneDetector()
+    now=int(time.time()*1000)
+    tape=[
+        {"price":100.00,"quantity":2,"received_timestamp_ms":now-300},
+        {"price":100.01,"quantity":2,"received_timestamp_ms":now-200},
+        {"price":100.20,"quantity":2,"received_timestamp_ms":now-100},
+    ]
+    result=detector.analyze(make_book(100.20),tape,30)
+    assert result["zones"]
+    assert any(z["possible_rejection"] for z in result["zones"])
+    assert any(z["interaction_state"] == "BREAKOUT_UP" for z in result["zones"])
