@@ -1,0 +1,58 @@
+import unittest
+from app.services.absorption_detector import AbsorptionLiquidityDetector
+
+
+def book(**changes):
+    value={"exchange":"bybit","symbol":"BTCUSDT","bids":[[100.0,10.0],[99.9,8.0]],
+        "asks":[[100.1,10.0],[100.2,8.0]],"synchronized":True,"stale":False,"age_seconds":0.2,"integrity_error":None}
+    value.update(changes); return value
+
+
+def trades(side="buy",qty=1.0,count=8,price=100.05):
+    return [{"side":side,"quantity":qty,"price":price,"received_timestamp_ms":int(__import__("time").time()*1000)} for _ in range(count)]
+
+
+class Phase6DetectorTests(unittest.TestCase):
+    def test_high_aggressive_buy_with_limited_progress_is_absorption_candidate(self):
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy"),15)
+        self.assertEqual(result["classification"],"POSSIBLE_BUY_ABSORPTION")
+        self.assertTrue(result["metrics"]["buy_absorption_candidate"])
+        self.assertEqual(result["metrics"]["aggressive_buy_quantity"],8.0)
+
+    def test_sell_side_absorption_candidate(self):
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("sell"),15)
+        self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
+        self.assertTrue(result["metrics"]["sell_absorption_candidate"])
+
+    def test_no_clear_absorption_when_tape_below_minimum(self):
+        result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)
+        self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
+        self.assertEqual(result["trade_count"],2)
+
+    def test_refuses_unsynced_and_stale_book(self):
+        detector=AbsorptionLiquidityDetector()
+        with self.assertRaisesRegex(ValueError,"unsynchronized"):
+            detector.analyze(book(synchronized=False),trades())
+        with self.assertRaisesRegex(ValueError,"stale"):
+            detector.analyze(book(stale=True),trades())
+
+    def test_refuses_invalid_book(self):
+        with self.assertRaisesRegex(ValueError,"Crossed"):
+            AbsorptionLiquidityDetector().analyze(book(bids=[[100.2,2]],asks=[[100.1,3]]),trades())
+
+    def test_liquidity_changes_need_two_samples(self):
+        detector=AbsorptionLiquidityDetector()
+        first=detector.analyze(book(),trades())
+        self.assertIsNone(first["liquidity_observation"]["replenishment"])
+        second=detector.analyze(book(bids=[[100.0,14.0],[99.9,8.0]]),trades())
+        self.assertTrue(second["liquidity_observation"]["replenishment"]["bid_replenished"])
+
+    def test_trade_flow_summary_and_diagnostics(self):
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=7),15)
+        self.assertIn("flow_exhaustion",result)
+        self.assertIn("quality",result)
+        self.assertIn("not an entry",result["diagnostics"][2].lower())
+
+
+if __name__=="__main__":
+    unittest.main()
