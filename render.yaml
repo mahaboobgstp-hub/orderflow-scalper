@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: orderflow-scalper-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: BINANCE_PUBLIC_WS_ENABLED
+        value: "false"
+      - key: BYBIT_PUBLIC_WS_ENABLED
+        value: "false"
+      - key: DELTA_PUBLIC_WS_ENABLED
+        value: "false"
+      - key: DEMO_EXECUTION_ENABLED
+        value: "false"
