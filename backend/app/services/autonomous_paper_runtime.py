@@ -7,11 +7,11 @@ from typing import Any
 class AutonomousPaperRuntime:
     def __init__(self, scanner, paper_engine, config:dict[str,Any], watchlist:list[str],
                  market_data=None, imbalance=None, absorption=None, zones=None, trade_flow=None,
-                 risk_engine=None, decision_engine=None, repository=None, broader_symbol="BTCUSDT"):
+                 risk_engine=None, decision_engine=None, repository=None, validation_session=None, broader_symbol="BTCUSDT"):
         self.scanner=scanner; self.paper_engine=paper_engine
         self.market_data=market_data; self.imbalance=imbalance; self.absorption=absorption
         self.zones=zones; self.trade_flow=trade_flow; self.risk_engine=risk_engine
-        self.decision_engine=decision_engine; self.repository=repository
+        self.decision_engine=decision_engine; self.repository=repository; self.validation_session=validation_session
         self.config=dict(config); self.watchlist=list(watchlist); self.broader_symbol=broader_symbol
         self._task=None; self._running=False; self._paused=False
         self._last_scan=None; self._last_error=None; self._scan_count=0; self._started_at=None; self._last_scan_time=None
@@ -23,7 +23,7 @@ class AutonomousPaperRuntime:
             "last_scan_time":self._last_scan_time,"last_error":self._last_error,
             "last_scan_summary":self._last_scan,"watchlist_count":len(self.watchlist),
             "decision_engine":"nine_layer_decision_engine" if self.decision_engine else "NOT_CONFIGURED",
-            "decision_count":len(self._decisions),"recent_decisions":self._decisions[-10:],
+            "decision_count":len(self._decisions),"recent_decisions":self._decisions[-10:],"controlled_validation_session":self.validation_session.status() if self.validation_session else None,
             "guardrails":["No exchange orders","Paper simulator only","Critical unavailable layers block entry","Duplicate symbol entries refused"]}
 
     def apply_config(self,config):
@@ -109,7 +109,11 @@ class AutonomousPaperRuntime:
         result["exchange"]=exchange; result["price"]=market.get("last_price")
         # Convert decision into a guarded PAPER-only simulated order. No exchange
         # API or demo/live order endpoint is called from this runtime.
-        if result.get("entry_eligible") and not risk_blockers:
+        session_allowed=True; session_blockers=[]
+        if self.validation_session:
+            session_allowed,session_blockers=self.validation_session.entry_gate(result.get("side","NEUTRAL"),bool(book),equity)
+        result["controlled_session_gate"]={"allowed":session_allowed,"blockers":session_blockers,"session_state":self.validation_session.state if self.validation_session else "NOT_CONFIGURED"}
+        if result.get("entry_eligible") and not risk_blockers and session_allowed:
             side="long" if result.get("side")=="BUY" else "short"
             price=float(market.get("last_price") or 0)
             stop_pct=float(cfg.get("initial_stop_loss_pct",cfg.get("trailing_stop_pct",1.0)))
@@ -127,12 +131,13 @@ class AutonomousPaperRuntime:
                         "ttp_activation_pct":float(cfg.get("trailing_take_profit_activation_pct",1.0)),
                         "ttp_trail_pct":float(cfg.get("trailing_take_profit_pct",0.5))})
                     result["paper_execution"]={"status":"SIMULATED_OPEN","sizing":sizing}
+                    if self.validation_session: self.validation_session.record_entry(symbol,side,{"decision_score":result.get("score")})
                 except (ValueError,TypeError) as exc:
                     result["paper_execution"]={"status":"REJECTED","reason":str(exc)}
             else:
                 result["paper_execution"]={"status":"REJECTED","reason":"Risk sizing returned zero quantity","sizing":sizing}
         else:
-            result["paper_execution"]={"status":"NOT_EXECUTED","reason":"Decision or hard risk gate did not permit entry"}
+            result["paper_execution"]={"status":"NOT_EXECUTED","reason":"Decision, risk gate, or controlled-session gate did not permit entry","session_blockers":session_blockers}
         return result
 
     async def _persist_decision(self, result):
