@@ -60,7 +60,7 @@ export default function App() {
   async function refreshAll() {
     if (!base) { setConnected(false); return; }
     try {
-      const [h,d,x,p,c,e,s,ph] = await Promise.allSettled([
+      const [h,d,x,p,c,e,ph,me] = await Promise.allSettled([
         api("/health"), api("/api/monitoring/diagnostics"), api("/api/exchanges/status"),
         api("/api/paper/account"), api("/api/control/status"), api("/api/control/events"),
         api("/api/scanner/coins?limit=15&include_rejected=false"), api("/api/paper/history?limit=50")
@@ -86,7 +86,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [apiBase, token]);
 
-  async function command(cmd) {
+  async function refreshScanner() {\n    if (!base) return;\n    try { const result = await api("/api/scanner/coins?limit=15&include_rejected=false"); setScanner(result); } catch { setScanner(null); }\n  }\n\n  async function command(cmd) {
     setBusy(true); setNotice("");
     try {
       const result = await api("/api/control/engine", { method:"POST", body:JSON.stringify({command:cmd}) });
