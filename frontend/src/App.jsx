@@ -75,7 +75,7 @@ export default function App() {
     setPaper(p.status==="fulfilled" ? p.value : null);
     if (controlStatus.status==="fulfilled") { setControl(controlStatus.value); setConfigDraft(prev => Object.keys(prev).length ? prev : (controlStatus.value.config || {})); }
     const controlEvents=controlLog.status==="fulfilled" ? controlLog.value.events || [] : [];
-    const monitoringEvents=monitorLog.status==="fulfilled" ? monitorLog.value.events || [] : [];
+    const monitoringEvents=monitorLog.status==="fulfilled" ? (monitorLog.value.events || []).filter(evt=>evt.event!=="http_request") : [];
     setEvents([...controlEvents,...monitoringEvents].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).slice(0,100));
     setHistory(tradeHistory.status==="fulfilled" ? tradeHistory.value : null);
   }
