@@ -77,6 +77,21 @@ async def analyze_imbalance(exchange:str,symbol:str,levels:int=Query(default=10,
         return app.state.imbalance_detector.analyze(book,levels=levels)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc))
+@app.get("/api/absorption/status")
+async def absorption_status():
+    return app.state.absorption_detector.status()
+@app.get("/api/absorption/{exchange}/{symbol}")
+async def analyze_absorption(exchange:str,symbol:str,lookback_seconds:float=Query(default=15.0,ge=1.0,le=120.0),limit:int=Query(default=500,ge=1,le=500)):
+    if exchange.lower() not in {"binance","bybit","delta"}:
+        raise HTTPException(status_code=400,detail="Unsupported exchange.")
+    book=app.state.unified_market_data.get_book(exchange,symbol)
+    if book is None:
+        raise HTTPException(status_code=404,detail="No normalized order book available for this exchange/symbol.")
+    trades=app.state.unified_market_data.get_recent_trades(exchange,symbol,limit)
+    try:
+        return app.state.absorption_detector.analyze(book,trades,lookback_seconds=lookback_seconds)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc))
 @app.get("/api/scanner/coins")
 async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bool=False):
     """On-demand market scan. It calls public Binance USD-M endpoints."""
