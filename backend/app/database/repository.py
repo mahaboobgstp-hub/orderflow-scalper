@@ -6,6 +6,7 @@ public CRUD API and never accepts arbitrary table names from HTTP callers.
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime, timezone
 
 from app.database.supabase_client import database
 
