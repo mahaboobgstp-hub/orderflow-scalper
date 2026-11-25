@@ -153,10 +153,16 @@ class Phase6DetectorTests(unittest.TestCase):
         cases=[
             ("buy",0.040,0.600,True,"POSSIBLE_BUY_ABSORPTION"),
             ("buy",0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            # Small adverse moves remain low-displacement candidates; larger
+            # adverse moves are penalized at the same threshold as favorable moves.
+            ("buy",-0.040,0.600,True,"POSSIBLE_BUY_ABSORPTION"),
+            ("buy",-0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
             ("buy",-0.060,0.400,False,"NO_CLEAR_ABSORPTION"),
             ("buy",0.100,0.000,False,"NO_CLEAR_ABSORPTION"),
             ("sell",-0.040,0.600,True,"POSSIBLE_SELL_ABSORPTION"),
             ("sell",-0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",0.040,0.600,True,"POSSIBLE_SELL_ABSORPTION"),
+            ("sell",0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
             ("sell",0.060,0.400,False,"NO_CLEAR_ABSORPTION"),
             ("sell",-0.100,0.000,False,"NO_CLEAR_ABSORPTION"),
         ]
