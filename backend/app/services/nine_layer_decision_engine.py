@@ -61,7 +61,7 @@ class NineLayerDecisionEngine:
         # L2: aggressive volume that fails to progress may indicate absorption.
         ab=inputs.get("absorption"); am=(ab or {}).get("metrics",{}) if isinstance(ab,dict) else {}
         b=_finite(am.get("buy_absorption_score")); se=_finite(am.get("sell_absorption_score"))
-        a_score=((b or 0)-(se or 0))*100 if b is not None or se is not None else None
+        a_score=((se or 0)-(b or 0))*100 if b is not None or se is not None else None
         put("absorption",a_score,(ab or {}).get("quality",{}).get("score",0),
             ["Absorption hypothesis; interpreted as opposing-side caution"],am,available=a_score is not None)
         # L3: zone breakout/rejection classifications.
