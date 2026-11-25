@@ -99,13 +99,17 @@ class AbsorptionLiquidityDetector:
         # Temporal progress requires a recent prior midpoint sample.
         has_recent_baseline=prior is not None and 0 <= prior_sample_age_ms <= lookback*1000
         if has_recent_baseline and prior["mid"]>0:
-            buy_progress_pct=max(0.0,(mid-prior["mid"])/prior["mid"]*100)
-            sell_progress_pct=max(0.0,(prior["mid"]-mid)/prior["mid"]*100)
+            # Signed directional progress: positive is favorable to the
+            # aggressor side, negative is adverse movement.
+            buy_progress_pct=(mid-prior["mid"])/prior["mid"]*100
+            sell_progress_pct=(prior["mid"]-mid)/prior["mid"]*100
         # Without a temporal baseline, scores remain zero to avoid false absorption.
+        # Penalize midpoint movement in either direction: adverse movement is
+        # not "zero progress" and must not receive a maximum absorption score.
         if has_recent_baseline and len(normalized)>=self.min_trades and total_qty>0:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
-            buy_absorption_score=buy_share*max(0.0,1.0-min(buy_progress_pct/0.10,1.0))
-            sell_absorption_score=sell_share*max(0.0,1.0-min(sell_progress_pct/0.10,1.0))
+            buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
+            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
         sell_absorbed=sell_absorption_score>=self.absorption_threshold
         if buy_absorbed and sell_absorbed: label="MIXED_ABSORPTION"
@@ -132,7 +136,7 @@ class AbsorptionLiquidityDetector:
             "top5_bid_depth":round(bid_depth,8),"top5_ask_depth":round(ask_depth,8)},
             "liquidity_observation":{"previous_sample_available":prior is not None,"replenishment":replenishment,"depletion":depletion},
             "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"note":"Evidence-quality heuristic, not a prediction or win probability."},
-            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
+            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","Progress is signed by aggressor direction; scoring penalizes absolute midpoint movement in either direction.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
     def status(self):
         return {"phase":6,"engine":"absorption_liquidity_behavior_detector","tracked_symbols":len(self._history),
                 "min_trades":self.min_trades,"absorption_threshold":self.absorption_threshold,
