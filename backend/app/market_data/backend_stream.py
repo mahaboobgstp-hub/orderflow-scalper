@@ -296,14 +296,16 @@ class BinanceOrderBookStream:
         if first_update_id > final_update_id:
             return False
 
-        # Ignore old/duplicate events.
-        if final_update_id <= self.last_update_id:
-            return True
-
         if initial_snapshot_bridge:
+            # A bridge event must cover the first update after the snapshot;
+            # even an event ending at the snapshot ID is not a bridge.
             if not self._event_bridges_snapshot(event):
                 return False
         else:
+            # Ignore old/duplicate events only after initial sync.
+            if final_update_id <= self.last_update_id:
+                return True
+
             # For subsequent Futures depth events, pu must match the
             # previous final update ID. If pu is absent, use the U/u gap
             # rule as a defensive fallback.
