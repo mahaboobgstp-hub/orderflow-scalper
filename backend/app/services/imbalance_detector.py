@@ -103,6 +103,17 @@ class OrderBookImbalanceDetector:
         key = f"{exchange}:{symbol}"
         now = time.time()
         history = self._record(key, weighted_score, now)
+        pressure_change_per_second = None
+        pressure_acceleration_per_second2 = None
+        if len(history) > 1:
+            previous = history[-2]
+            dt = max(now - previous["timestamp"], 1e-6)
+            pressure_change_per_second = (weighted_score - previous["score"]) / dt
+            if len(history) > 2:
+                prior = history[-3]
+                prior_dt = max(previous["timestamp"] - prior["timestamp"], 1e-6)
+                prior_rate = (previous["score"] - prior["score"]) / prior_dt
+                pressure_acceleration_per_second2 = (pressure_change_per_second - prior_rate) / max((dt + prior_dt) / 2, 1e-6)
         positive = sum(1 for item in history if item["score"] >= self.pressure_threshold)
         negative = sum(1 for item in history if item["score"] <= -self.pressure_threshold)
         neutral = len(history) - positive - negative
@@ -154,6 +165,8 @@ class OrderBookImbalanceDetector:
                 "neutral_samples": neutral,
                 "current_pressure_persistence": round(persistence, 4),
                 "pressure_change_from_previous": round(weighted_score - history[-2]["score"], 6) if len(history) > 1 else None,
+                "pressure_change_per_second": round(pressure_change_per_second, 6) if pressure_change_per_second is not None else None,
+                "pressure_acceleration_per_second2": round(pressure_acceleration_per_second2, 6) if pressure_acceleration_per_second2 is not None else None,
             },
             "quality": {
                 "score": quality,
