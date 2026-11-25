@@ -172,4 +172,4 @@ class PaperTradingEngine:
     def reset(self,equity:float):
         v=self._finite(equity)
         if v is None or v<=0: raise ValueError("Reset equity must be positive finite number.")
-        self.__init__(v,self.fee_rate); return self.status()
+        self.__init__(v,self.fee_rate); self._emit_persistence({"type":"account_reset"}); return self.status()
