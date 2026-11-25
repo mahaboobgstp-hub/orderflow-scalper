@@ -1,6 +1,7 @@
 import time
 import pytest
 from app.services.liquidity_zone_detector import LiquidityZoneDetector
+from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 
 def make_book(mid=100.0):
     return {"exchange":"bybit","symbol":"ETHUSDT","bids":[[mid-0.01,10],[mid-0.02,8]],"asks":[[mid+0.01,11],[mid+0.02,7]],
@@ -192,3 +193,29 @@ def test_possible_rejection_does_not_mask_confirmed_mid_breakout_classification(
     assert result["zones"]
     assert any(z["possible_rejection"] for z in result["zones"])
     assert any(z["interaction_state"] == "BREAKOUT_UP" for z in result["zones"])
+
+
+def test_nine_layer_engine_consumes_layer3_breakout_as_directional_evidence():
+    engine=NineLayerDecisionEngine()
+    result=engine.evaluate("ETHUSDT",{"zones":{"zones":[{"interaction_state":"BREAKOUT_UP"}]}},risk={"allowed":True,"blockers":[]})
+    layer=result["layers"]["liquidity_breakout"]
+    assert layer["available"] is True
+    assert layer["direction"]=="BUY"
+    assert layer["score"]==70
+
+
+def test_nine_layer_engine_keeps_possible_rejection_non_directional():
+    engine=NineLayerDecisionEngine()
+    result=engine.evaluate("ETHUSDT",{"zones":{"zones":[{"interaction_state":"POSSIBLE_REJECTION"}]}},risk={"allowed":True,"blockers":[]})
+    layer=result["layers"]["liquidity_breakout"]
+    assert layer["available"] is True
+    assert layer["direction"]=="NEUTRAL"
+    assert layer["score"]==0
+
+
+def test_nine_layer_engine_marks_missing_layer3_zones_unavailable():
+    engine=NineLayerDecisionEngine()
+    result=engine.evaluate("ETHUSDT",{"zones":{"zones":[]}},risk={"allowed":True,"blockers":[]})
+    layer=result["layers"]["liquidity_breakout"]
+    assert layer["available"] is False
+    assert layer["score"] is None
