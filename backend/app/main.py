@@ -25,6 +25,7 @@ from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
 from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
 from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
+from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 import logging
 import os
 import time
@@ -55,7 +56,7 @@ async def lifespan(app: FastAPI):
     set_persistence_enqueue(persistence_worker.enqueue)
     await persistence_worker.start()
     app.state.backtesting_engine=BacktestEngine()
-    runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"])
+    runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"],market_data=app.state.unified_market_data,imbalance=app.state.imbalance_detector,absorption=app.state.absorption_detector,zones=app.state.liquidity_zone_detector,trade_flow=app.state.trade_flow_momentum_detector,risk_engine=app.state.risk_management_engine,decision_engine=NineLayerDecisionEngine(operator_control_state["config"]))
     set_runtime(runtime)
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
