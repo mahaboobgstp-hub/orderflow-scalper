@@ -14,12 +14,18 @@ class PaperPersistenceWorker:
         self.task: asyncio.Task | None = None
         self.running = False
         self.position_ids: dict[str, str] = {}
+        self.processed_count = 0
+        self.failed_count = 0
+        self.last_processed_event: str | None = None
+        self.last_error: str | None = None
 
     def enqueue(self, event: dict[str, Any]) -> bool:
         try:
             self.queue.put_nowait(event)
             return True
         except asyncio.QueueFull:
+            self.failed_count += 1
+            self.last_error = "queue_full"
             logger.error("Paper persistence queue full; event dropped (%s)", event.get("type"))
             return False
 
@@ -49,9 +55,27 @@ class PaperPersistenceWorker:
             try:
                 await self._persist(event)
             except Exception:
+                self.failed_count += 1
+                self.last_error = f"{event.get('type')}: persistence failure"
                 logger.exception("Paper lifecycle persistence event failed: %s", event.get("type"))
+            else:
+                self.processed_count += 1
+                self.last_processed_event = event.get("type")
+                self.last_error = None
             finally:
                 self.queue.task_done()
+
+    def status(self):
+        return {
+            "enabled": True,
+            "running": self.running,
+            "queue_depth": self.queue.qsize(),
+            "processed_events": self.processed_count,
+            "failed_events": self.failed_count,
+            "last_processed_event": self.last_processed_event,
+            "last_error": self.last_error,
+            "mode": "PAPER_ONLY",
+        }
 
     async def _persist(self, e: dict[str, Any]):
         kind = e.get("type")
