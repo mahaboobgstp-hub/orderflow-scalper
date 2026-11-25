@@ -25,7 +25,7 @@ class PaperTradingEngine:
         locked=sum(p["margin"] for p in self.positions.values())
         realized=sum(t["net_pnl"] for t in self.closed_trades)
         equity=self.cash+locked+unrealized
-        return {"mode":"PAPER_ONLY","real_orders":False,"initial_equity":self.initial_equity,"cash_balance":round(self.cash,8),"locked_margin":round(locked,8),"unrealized_pnl":round(unrealized,8),"realized_pnl":round(realized,8),"equity":round(equity,8),"open_position_count":len(self.positions),"positions":[self._position_view(p) for p in self.positions.values()]}
+        return {"mode":"PAPER_ONLY","real_orders":False,"initial_equity":self.initial_equity,"cash_balance":round(self.cash,8),"locked_margin":round(locked,8),"unrealized_pnl":round(unrealized,8),"realized_pnl":round(realized,8),"equity":round(equity,8),"open_position_count":len(self.positions),"positions":[self._position_view(p) for p in self.positions.values()] }
     def submit(self,req:dict[str,Any]):
         symbol=str(req.get("symbol","")).upper().strip(); side=str(req.get("side","")).lower(); qty=self._finite(req.get("quantity")); price=self._finite(req.get("price")); leverage=self._finite(req.get("leverage",1))
         if not symbol or len(symbol)>30: raise ValueError("Valid symbol required.")
