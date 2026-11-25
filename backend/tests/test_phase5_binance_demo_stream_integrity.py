@@ -1,0 +1,86 @@
+import time
+import unittest
+
+from app.market_data.backend_stream import BinanceOrderBookStream
+
+
+def valid_snapshot():
+    return {
+        "lastUpdateId": 100,
+        "bids": [["100.0", "2.0"], ["99.9", "1.0"]],
+        "asks": [["100.1", "2.0"], ["100.2", "1.0"]],
+    }
+
+
+def depth_event(U, u, pu, bids=None, asks=None):
+    return {"U": U, "u": u, "pu": pu, "b": bids or [], "a": asks or []}
+
+
+class BinanceDemoBookIntegrityTests(unittest.TestCase):
+    def ready_stream(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        stream._load_snapshot(valid_snapshot())
+        stream.connected = True
+        stream.synchronized = True
+        stream._last_event_received_at = time.monotonic()
+        return stream
+
+    def test_accessor_rejects_crossed_and_locked_books(self):
+        stream = self.ready_stream()
+        stream.bids = {100.2: 2.0}
+        stream.asks = {100.1: 1.0}
+        self.assertIsNone(__import__("asyncio").run(stream.get_order_book()))
+
+        stream.bids = {100.1: 2.0}
+        stream.asks = {100.1: 1.0}
+        self.assertIsNone(__import__("asyncio").run(stream.get_order_book()))
+
+    def test_accessor_rejects_nonfinite_and_nonpositive_levels(self):
+        for bids, asks in (
+            ({float("nan"): 1.0}, {101.0: 1.0}),
+            ({100.0: float("inf")}, {101.0: 1.0}),
+            ({100.0: -1.0}, {101.0: 1.0}),
+            ({100.0: 1.0}, {float("inf"): 1.0}),
+            ({100.0: 1.0}, {101.0: 0.0}),
+        ):
+            with self.subTest(bids=bids, asks=asks):
+                stream = self.ready_stream()
+                stream.bids, stream.asks = bids, asks
+                self.assertIsNone(__import__("asyncio").run(stream.get_order_book()))
+
+    def test_snapshot_rejects_nonfinite_levels_and_crossed_books(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        bad_snapshots = (
+            {**valid_snapshot(), "bids": [["nan", "2.0"]]},
+            {**valid_snapshot(), "asks": [["101.0", "inf"]]},
+            {**valid_snapshot(), "bids": [["101.0", "2.0"]]},
+        )
+        for snapshot in bad_snapshots:
+            with self.subTest(snapshot=snapshot):
+                with self.assertRaises(ValueError):
+                    stream._load_snapshot(snapshot)
+
+    def test_invalid_event_rejected_without_partial_mutation(self):
+        stream = self.ready_stream()
+        before_bids, before_asks, before_id = dict(stream.bids), dict(stream.asks), stream.last_update_id
+        event = depth_event(
+            101, 102, 100,
+            bids=[["100.0", "3.0"]],
+            asks=[["nan", "1.0"]],
+        )
+        self.assertFalse(stream._apply_event(event))
+        self.assertEqual(stream.bids, before_bids)
+        self.assertEqual(stream.asks, before_asks)
+        self.assertEqual(stream.last_update_id, before_id)
+
+    def test_valid_deletion_and_update_keep_book_valid(self):
+        stream = self.ready_stream()
+        event = depth_event(101, 102, 100, bids=[["99.9", "0"], ["100.0", "3.0"]])
+        self.assertTrue(stream._apply_event(event))
+        self.assertEqual(stream.bids[100.0], 3.0)
+        self.assertNotIn(99.9, stream.bids)
+        self.assertTrue(stream._book_integrity_valid(stream.bids, stream.asks))
+
+
+if __name__ == "__main__":
+    unittest.main()
