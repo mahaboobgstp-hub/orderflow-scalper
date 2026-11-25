@@ -113,5 +113,5 @@ class UnifiedMarketDataEngine:
         now=time.time()
         return {"phase":3,"engine":"unified_market_data","stale_after_seconds":self.stale_after_seconds,
           "exchanges":{x:{"messages_received":self.counts.get(x,0),"last_message_age_seconds":round(now-self.last_seen[x],3) if x in self.last_seen else None} for x in sorted(set(self.counts)|{b.exchange for b in self.books.values()})},
-          "books":{k:{"synchronized":b.synchronized,"stale":b.stale,"integrity_error":b.error} for k,b in self.books.items()},
+          "books":{k:{"synchronized":b.synchronized,"stale":(b.received_ts is None or now-b.received_ts/1000>self.stale_after_seconds),"integrity_error":b.error} for k,b in self.books.items()},
           "trade_streams":{k:len(v) for k,v in self.trades.items()},"errors":self.errors.copy()}
