@@ -4,13 +4,19 @@ Autonomous strategy execution is not integrated; engine commands are safely bloc
 from __future__ import annotations
 import os
 import time
+import asyncio
 from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/control", tags=["operator-control"])
+runtime = None
+
+def set_runtime(engine):
+    global runtime
+    runtime = engine
 state: dict[str, Any] = {
-    "engine_state": "NOT_INTEGRATED",
+    "engine_state": "STOPPED",
     "mode": "PAPER_ONLY",
     "config": {
         "risk_per_trade_pct": 0.5,
@@ -48,7 +54,7 @@ state: dict[str, Any] = {
     "watchlist": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
     "events": [],
     "updated_at": time.time(),
-    "autonomous_engine_integrated": False,
+    "autonomous_engine_integrated": True,
 }
 
 class ConfigRequest(BaseModel):
@@ -74,7 +80,7 @@ def _event(event: str, details: dict[str, Any] | None = None):
 
 @router.get("/status")
 def control_status():
-    return {k: state[k] for k in ("engine_state", "mode", "config", "watchlist", "updated_at", "autonomous_engine_integrated")}
+    return {k: state[k] for k in ("engine_state", "mode", "config", "watchlist", "updated_at", "autonomous_engine_integrated")} | {"runtime": runtime.status() if runtime else {"connected": False}}
 
 @router.get("/events")
 def control_events(limit: int = 100):
@@ -82,13 +88,30 @@ def control_events(limit: int = 100):
     return {"events": state["events"][-limit:]}
 
 @router.post("/engine")
-def engine_command(request: EngineCommandRequest, x_control_token: str | None = Header(default=None)):
+async def engine_command(request: EngineCommandRequest, x_control_token: str | None = Header(default=None)):
     _auth(x_control_token)
     command = request.command.upper().strip()
     if command not in {"START", "PAUSE", "RESUME", "STOP", "EMERGENCY_HALT"}:
         raise HTTPException(status_code=400, detail="Unsupported engine command.")
-    _event("engine_command_blocked", {"command": command, "reason": "autonomous_engine_not_integrated"})
-    raise HTTPException(status_code=409, detail="No autonomous trading process is connected to these controls yet. The command was not applied.")
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="Runtime service is not connected.")
+    try:
+        if command == "START":
+            await runtime.start()
+            state["engine_state"] = "RUNNING"
+        elif command == "PAUSE":
+            runtime.pause()
+            state["engine_state"] = "PAUSED"
+        elif command == "RESUME":
+            runtime.resume()
+            state["engine_state"] = "RUNNING"
+        else:
+            await runtime.stop()
+            state["engine_state"] = "STOPPED"
+        _event("engine_command_applied", {"command": command})
+        return {"applied": True, "command": command, "engine_state": state["engine_state"], "runtime": runtime.status()}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 @router.put("/config")
 def update_config(request: ConfigRequest, x_control_token: str | None = Header(default=None)):
@@ -133,8 +156,10 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
         state["config"].update(remaining)
     else:
         state["config"].update(request.config)
+    if runtime is not None:
+        runtime.apply_config(state["config"])
     _event("configuration_updated", request.config)
-    return {"accepted": True, "config": state["config"], "persisted": False, "message": "Saved to API process memory only; autonomous strategy engine and durable storage are not yet connected."}
+    return {"accepted": True, "config": state["config"], "persisted": False, "message": "Configuration applied to runtime process memory; no automatic trade execution is enabled."}
 
 @router.post("/watchlist/add")
 def watchlist_add(request: WatchlistRequest, x_control_token: str | None = Header(default=None)):
