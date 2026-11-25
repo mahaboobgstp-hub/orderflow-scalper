@@ -43,7 +43,7 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
         self.assertEqual(down["metrics"]["buy_price_progress_pct"],0.0)
 
-    def test_no_clear_absorption_when_tape_below_minimum(self)
+    def test_no_clear_absorption_when_tape_below_minimum(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["trade_count"],2)
@@ -92,7 +92,7 @@ class Phase6DetectorTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,"finite"):
                     AbsorptionLiquidityDetector(max_book_age_seconds=value)
 
-    def test_rejects_nonfinite_lookback(self)
+    def test_rejects_nonfinite_lookback(self):
         detector=AbsorptionLiquidityDetector()
         for lookback in (float("nan"), float("inf"), float("-inf")):
             with self.subTest(lookback=lookback):
