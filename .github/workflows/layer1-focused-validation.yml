@@ -1,0 +1,38 @@
+name: Layer 1 Focused Synchronization Validation
+
+on:
+  push:
+    branches: [fix/layer1-binance-snapshot-bridge]
+    paths:
+      - "backend/app/market_data/backend_stream.py"
+      - "backend/tests/test_phase5_imbalance_detector.py"
+      - "backend/tests/test_phase5_binance_demo_stream_sync.py"
+      - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
+      - ".github/workflows/layer1-focused-validation.yml"
+  pull_request:
+    paths:
+      - "backend/app/market_data/backend_stream.py"
+      - "backend/tests/test_phase5_imbalance_detector.py"
+      - "backend/tests/test_phase5_binance_demo_stream_sync.py"
+      - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
+      - ".github/workflows/layer1-focused-validation.yml"
+
+jobs:
+  layer1-synchronization:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile stream and regression tests
+        run: python -m compileall -q backend/app/market_data/backend_stream.py backend/tests/test_phase5_imbalance_detector.py backend/tests/test_phase5_binance_demo_stream_sync.py backend/tests/test_phase5_binance_demo_stream_reconnect.py
+      - name: Run focused Layer 1 tests
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -vv tests/test_phase5_imbalance_detector.py tests/test_phase5_binance_demo_stream_sync.py tests/test_phase5_binance_demo_stream_reconnect.py
