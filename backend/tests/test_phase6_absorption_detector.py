@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 
 
@@ -124,6 +125,86 @@ class Phase6DetectorTests(unittest.TestCase):
         result=detector.analyze(book(),trades("buy"),lookback_seconds=1)
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
+
+
+    @staticmethod
+    def _fixed_tape(side, price, timestamp_ms, count=8, quantity=1.0):
+        return [{"side":side,"price":price,"quantity":quantity,"received_timestamp_ms":timestamp_ms} for _ in range(count)]
+
+    @staticmethod
+    def _book_at_mid(mid):
+        return book(bids=[[mid-0.05,10.0],[mid-0.15,8.0]],
+                   asks=[[mid+0.05,10.0],[mid+0.15,8.0]])
+
+    def _analyze_at(self, detector, test_book, tape, timestamp_ms):
+        with patch("app.services.absorption_detector.time.time",return_value=timestamp_ms/1000.0):
+            return detector.analyze(test_book,tape,lookback_seconds=15)
+
+    def _progress_case(self, side, movement_pct):
+        detector=AbsorptionLiquidityDetector()
+        base_mid=100.05
+        first_ts=1_000_000
+        first_tape=self._fixed_tape(side,base_mid,first_ts)
+        self._analyze_at(detector,self._book_at_mid(base_mid),first_tape,first_ts)
+        second_ts=1_001_000
+        target_mid=base_mid*(1.0+movement_pct/100.0)
+        second_tape=self._fixed_tape(side,target_mid,second_ts)
+        return self._analyze_at(detector,self._book_at_mid(target_mid),second_tape,second_ts)
+
+    def test_signed_progress_and_abs_movement_score_thresholds_both_sides(self):
+        cases=[
+            ("buy",0.040,0.600,True,"POSSIBLE_BUY_ABSORPTION"),
+            ("buy",0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            ("buy",-0.060,0.400,False,"NO_CLEAR_ABSORPTION"),
+            ("buy",0.100,0.000,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",-0.040,0.600,True,"POSSIBLE_SELL_ABSORPTION"),
+            ("sell",-0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",0.060,0.400,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",-0.100,0.000,False,"NO_CLEAR_ABSORPTION"),
+        ]
+        for side,movement,expected_score,expected_candidate,expected_class in cases:
+            with self.subTest(side=side,movement_pct=movement):
+                result=self._progress_case(side,movement)
+                metrics=result["metrics"]
+                signed_progress=movement if side=="buy" else -movement
+                score_key=f"{side}_absorption_score"
+                candidate_key=f"{side}_absorption_candidate"
+                progress_key=f"{side}_price_progress_pct"
+                self.assertAlmostEqual(metrics[progress_key],signed_progress,places=5)
+                self.assertAlmostEqual(metrics[score_key],expected_score,places=5)
+                self.assertEqual(metrics[candidate_key],expected_candidate)
+                self.assertEqual(result["classification"],expected_class)
+
+    def test_vwap_vs_mid_sign_is_spatial_and_separate_from_temporal_progress(self):
+        detector=AbsorptionLiquidityDetector()
+        mid=100.05
+        t0=1_000_000
+        positive_tape=self._fixed_tape("buy",mid+0.02,t0,count=5)+self._fixed_tape("sell",mid-0.02,t0,count=5)
+        first=self._analyze_at(detector,self._book_at_mid(mid),positive_tape,t0)
+        t1=1_001_000
+        negative_tape=self._fixed_tape("buy",mid-0.02,t1,count=5)+self._fixed_tape("sell",mid+0.02,t1,count=5)
+        second=self._analyze_at(detector,self._book_at_mid(mid),negative_tape,t1)
+        self.assertGreater(first["metrics"]["buy_vwap_vs_mid_pct"],0)
+        self.assertGreater(first["metrics"]["sell_vwap_vs_mid_pct"],0)
+        self.assertLess(second["metrics"]["buy_vwap_vs_mid_pct"],0)
+        self.assertLess(second["metrics"]["sell_vwap_vs_mid_pct"],0)
+        self.assertEqual(second["metrics"]["buy_price_progress_pct"],0.0)
+        self.assertEqual(second["metrics"]["sell_price_progress_pct"],0.0)
+
+    def test_thin_book_is_exposed_as_low_depth_not_silently_rejected(self):
+        detector=AbsorptionLiquidityDetector()
+        mid=100.05
+        thin=self._book_at_mid(mid)
+        thin["bids"]=[[100.0,0.001]]
+        thin["asks"]=[[100.1,0.001]]
+        t0=1_000_000
+        first=self._fixed_tape("buy",mid,t0)
+        self._analyze_at(detector,thin,first,t0)
+        t1=1_001_000
+        result=self._analyze_at(detector,thin,self._fixed_tape("buy",mid,t1),t1)
+        self.assertEqual(result["metrics"]["top5_bid_depth"],0.001)
+        self.assertEqual(result["metrics"]["top5_ask_depth"],0.001)
+        self.assertTrue(result["metrics"]["buy_absorption_candidate"])
 
 if __name__=="__main__":
     unittest.main()
