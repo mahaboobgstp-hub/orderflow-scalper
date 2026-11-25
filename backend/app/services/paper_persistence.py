@@ -18,6 +18,10 @@ class PaperPersistenceWorker:
         self.failed_count = 0
         self.last_processed_event: str | None = None
         self.last_error: str | None = None
+        self.recovery_report: dict[str, Any] = {
+            "attempted": False, "restored": False, "source": "none",
+            "open_position_count": 0, "snapshot_valid": False, "warnings": [],
+        }
 
     def enqueue(self, event: dict[str, Any]) -> bool:
         try:
@@ -32,10 +36,14 @@ class PaperPersistenceWorker:
     async def restore_state(self, engine):
         """Restore the simulator from the last account snapshot, with DB open-position fallback."""
         try:
+            self.recovery_report["attempted"] = True
             saved = await self.repo.load_paper_state()
             wrapped = saved.get("snapshot", {})
             account = wrapped.get("paper_account", {}) if isinstance(wrapped, dict) else {}
-            restored = engine.restore_persistence_snapshot(account)
+            snapshot_valid = engine.restore_persistence_snapshot(account)
+            restored = snapshot_valid
+            self.recovery_report["snapshot_valid"] = bool(snapshot_valid)
+            self.recovery_report["source"] = "account_snapshot" if snapshot_valid else "open_position_fallback"
             if not restored:
                 # Recovery fallback: position_data is the authoritative serialized
                 # position when the account snapshot is absent/invalid.
@@ -53,15 +61,27 @@ class PaperPersistenceWorker:
                     engine.positions = fallback
                     engine.mark_prices = mark_prices
                     restored = True
+                    self.recovery_report["warnings"].append("Account snapshot unavailable; recovered open positions only. Cash, closed-trade history, and session metrics may be incomplete.")
             if restored:
+                self.recovery_report["restored"] = True
+                self.recovery_report["open_position_count"] = len(engine.positions)
+                if snapshot_valid:
+                    db_symbols = {str(row.get("symbol", "")).upper() for row in saved.get("open_positions", []) if row.get("symbol")}
+                    snapshot_symbols = set(engine.positions)
+                    if db_symbols != snapshot_symbols:
+                        self.recovery_report["warnings"].append("Snapshot and OPEN position rows disagree; snapshot used as account authority.")
                 for row in saved.get("open_positions", []):
                     if row.get("symbol") and row.get("id"):
                         self.position_ids[str(row["symbol"]).upper()] = str(row["id"])
                 logger.info("Paper trading state restored: %d open positions", len(engine.positions))
             else:
+                self.recovery_report["source"] = "fresh_account"
+                self.recovery_report["warnings"].append("No usable saved state found. Recovery did not restore an account.")
                 logger.info("No valid persisted paper state found; starting fresh paper account")
             return restored
-        except Exception:
+        except Exception as exc:
+            self.recovery_report["warnings"].append(f"Recovery error: {type(exc).__name__}")
+            self.recovery_report["source"] = "recovery_error"
             logger.exception("Paper trading recovery failed; simulator remains fresh and empty")
             return False
 
@@ -110,6 +130,7 @@ class PaperPersistenceWorker:
             "failed_events": self.failed_count,
             "last_processed_event": self.last_processed_event,
             "last_error": self.last_error,
+            "recovery": self.recovery_report,
             "mode": "PAPER_ONLY",
         }
 
