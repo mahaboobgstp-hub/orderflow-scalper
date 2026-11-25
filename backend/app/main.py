@@ -20,7 +20,8 @@ from app.services.risk_management import RiskManagementEngine
 from app.services.paper_trading import PaperTradingEngine
 from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
-from app.services.operator_control import router as operator_control_router
+from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
+from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
 import logging
 import os
 import time
@@ -43,6 +44,8 @@ async def lifespan(app: FastAPI):
     app.state.risk_management_engine=RiskManagementEngine()
     app.state.paper_trading_engine=PaperTradingEngine()
     app.state.backtesting_engine=BacktestEngine()
+    runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"])
+    set_runtime(runtime)
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
