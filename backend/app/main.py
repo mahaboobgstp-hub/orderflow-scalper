@@ -19,7 +19,8 @@ from app.services.trade_flow_momentum import TradeFlowMomentumDetector
 from app.services.market_context_dummy_api import DummyMarketContextAPI
 from app.services.market_regime_context import MarketRegimeContextEngine
 from app.services.risk_management import RiskManagementEngine
-from app.services.paper_trading import PaperTradingEngine
+from app.services.paper_trading import PaperTradingEngine, set_persistence_enqueue
+from app.services.paper_persistence import PaperPersistenceWorker
 from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
 from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
@@ -47,6 +48,10 @@ async def lifespan(app: FastAPI):
     app.state.market_regime_context_engine=MarketRegimeContextEngine()
     app.state.risk_management_engine=RiskManagementEngine()
     app.state.paper_trading_engine=PaperTradingEngine()
+    persistence_worker=PaperPersistenceWorker(repository)
+    app.state.paper_persistence_worker=persistence_worker
+    set_persistence_enqueue(persistence_worker.enqueue)
+    await persistence_worker.start()
     app.state.backtesting_engine=BacktestEngine()
     runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"])
     set_runtime(runtime)
@@ -68,6 +73,8 @@ async def lifespan(app: FastAPI):
         logger.exception('Application lifecycle error')
         raise
     finally:
+        try: await persistence_worker.stop()
+        except Exception: logger.exception('Paper persistence worker shutdown error')
         try: await repository.engine_state(mode='DEMO_PAPER_ONLY',status='stopped',execution_enabled=False,state={'autonomous_entry_enabled':False,'paper_only':True})
         except Exception: logger.exception('Supabase engine-state shutdown update error')
         try: await repository.system_log('INFO','Backend shutdown initiated','lifecycle',{'mode':'PAPER_ONLY'})
