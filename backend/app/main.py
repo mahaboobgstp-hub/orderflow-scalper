@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any
 from app.config import settings
@@ -64,6 +65,8 @@ async def lifespan(app: FastAPI):
         except Exception: logger.exception('Market stream shutdown error')
 
 app=FastAPI(title="OrderFlow Scalper API",description="Multi-exchange public market-data and Binance demo execution backend",version="0.5.0")
+allowed_origins=[origin.strip() for origin in os.getenv("FRONTEND_ORIGINS","https://orderflow-scalper-ivory.vercel.app").split(",") if origin.strip()]
+app.add_middleware(CORSMiddleware,allow_origins=allowed_origins,allow_methods=["GET","POST","PUT","OPTIONS"],allow_headers=["Content-Type","X-Control-Token"])
 @app.middleware("http")
 async def request_monitoring(request, call_next):
     started=time.perf_counter()
