@@ -19,6 +19,7 @@ from app.services.risk_management import RiskManagementEngine
 from app.services.paper_trading import PaperTradingEngine
 from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
+from app.services.operator_control import router as operator_control_router
 import logging
 import os
 import time
@@ -317,3 +318,6 @@ async def paper_history(limit:int=Query(default=100,ge=1,le=500)):
 @app.post("/api/paper/reset")
 async def paper_reset(request:PaperResetRequest):
     return app.state.paper_trading_engine.reset(request.initial_equity)
+
+# Operator controls (API-only state; autonomous engine integration is not yet enabled)
+app.include_router(operator_control_router)
