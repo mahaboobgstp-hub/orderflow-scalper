@@ -54,6 +54,9 @@ class PaperPersistenceWorker:
                     engine.mark_prices = mark_prices
                     restored = True
             if restored:
+                for row in saved.get("open_positions", []):
+                    if row.get("symbol") and row.get("id"):
+                        self.position_ids[str(row["symbol"]).upper()] = str(row["id"])
                 logger.info("Paper trading state restored: %d open positions", len(engine.positions))
             else:
                 logger.info("No valid persisted paper state found; starting fresh paper account")
@@ -112,7 +115,9 @@ class PaperPersistenceWorker:
 
     async def _persist(self, e: dict[str, Any]):
         kind = e.get("type")
-        if kind == "order_open":
+        if kind == "account_reset":
+            await self.repo.db.update("positions", {"status":"RESET","closed_at":e.get("closed_at")}, filters={"status":"eq.OPEN"})
+        elif kind == "order_open":
             order = e["order"]; pos = e["position"]
             await self.repo.order(order["symbol"], order["side"], order["quantity"],
                 order["status"], order_type="paper_simulated", price=order["entry_price"],
