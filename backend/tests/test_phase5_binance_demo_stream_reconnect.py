@@ -1,6 +1,7 @@
 import asyncio
 import json
 import unittest
+import time
 from unittest.mock import AsyncMock, patch
 
 from app.market_data.backend_stream import BinanceOrderBookStream
@@ -121,6 +122,38 @@ class BinanceStreamReconnectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream.bids[100.0], 4.0)
         self.assertIsNone(stream.last_error)
         self.assertIsNone(await stream.get_order_book())
+
+
+    async def test_fresh_book_is_returned_with_age_metadata(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        stream.connected = True
+        stream.synchronized = True
+        stream.last_update_id = 100
+        stream.bids = {100.0: 2.0}
+        stream.asks = {101.0: 2.0}
+        stream._last_event_received_at = time.monotonic() - 0.25
+
+        result = await stream.get_order_book()
+        status = await stream.get_status()
+        self.assertIsNotNone(result)
+        self.assertLessEqual(result["age_seconds"], 3.0)
+        self.assertFalse(result["stale"])
+        self.assertFalse(status["stale"])
+
+    async def test_stale_synchronized_book_is_rejected(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        stream.connected = True
+        stream.synchronized = True
+        stream.last_update_id = 100
+        stream.bids = {100.0: 2.0}
+        stream.asks = {101.0: 2.0}
+        stream._last_event_received_at = time.monotonic() - 4.0
+
+        result = await stream.get_order_book()
+        status = await stream.get_status()
+        self.assertIsNone(result)
+        self.assertTrue(status["stale"])
+        self.assertGreater(status["last_event_age_seconds"], 3.0)
 
 if __name__ == "__main__":
     unittest.main()
