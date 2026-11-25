@@ -39,7 +39,7 @@ def _binance_error(response: httpx.Response):
             }
         return {"http_status": response.status_code, "message": str(body)[:200]}
     except Exception:
-        return {"http_status": response.status_code, "message": response.text[:200]
+        return {"http_status": response.status_code, "message": response.text[:200]}
 
 
 def _sign_payload(payload: str, auth_type: str, secret: str = "", private_key_pem: str = ""):
