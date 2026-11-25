@@ -18,9 +18,16 @@ from app.services.market_regime_context import MarketRegimeContextEngine
 from app.services.risk_management import RiskManagementEngine
 from app.services.paper_trading import PaperTradingEngine
 from app.services.backtesting import BacktestEngine
+from app.services.monitoring import MonitoringService
+import logging
+import os
+
+logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO').upper(),format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logger=logging.getLogger('orderflow-scalper')
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.monitoring_service=MonitoringService()
     stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
     app.state.coin_scanner=CoinMarketScanner()
@@ -40,10 +47,19 @@ async def lifespan(app: FastAPI):
         DeltaPublicAdapter(enabled=settings.delta_public_enabled,symbol=settings.delta_public_symbol,on_message=callback),
     ])
     app.state.exchange_manager=manager
-    await stream.start(); await manager.start()
-    try: yield
+    try:
+        await stream.start(); await manager.start()
+        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3})
+        yield
+    except Exception as exc:
+        app.state.monitoring_service.record('ERROR','startup_or_runtime_error',{'error_type':type(exc).__name__})
+        logger.exception('Application lifecycle error')
+        raise
     finally:
-        await manager.stop(); await stream.stop()
+        try: await manager.stop()
+        except Exception: logger.exception('Exchange manager shutdown error')
+        try: await stream.stop()
+        except Exception: logger.exception('Market stream shutdown error')
 
 app=FastAPI(title="OrderFlow Scalper API",description="Multi-exchange public market-data and Binance demo execution backend",version="0.5.0")
 
