@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 from app.config import settings
 from app.execution.binance_demo_client import BinanceDemoClient, BinanceDemoError
@@ -7,11 +7,13 @@ from app.execution.order_service import DemoOrderService, OrderRejected
 from app.market_data.backend_stream import BinanceOrderBookStream
 from app.market_data.unified_engine import UnifiedMarketDataEngine
 from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BybitPublicAdapter, DeltaPublicAdapter
+from app.services.coin_scanner import CoinMarketScanner
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
+    app.state.coin_scanner=CoinMarketScanner()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
@@ -57,6 +59,13 @@ async def unified_book(exchange:str,symbol:str):
 async def unified_trades(exchange:str,symbol:str,limit:int=100):
     if exchange.lower() not in {"binance","bybit","delta"}: raise HTTPException(status_code=400,detail="Unsupported exchange.")
     return {"exchange":exchange.lower(),"symbol":symbol.upper(),"trades":app.state.unified_market_data.get_recent_trades(exchange,symbol,limit)}
+@app.get("/api/scanner/coins")
+async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bool=False):
+    """On-demand market scan. It calls public Binance USD-M endpoints."""
+    try:
+        return await app.state.coin_scanner.scan(limit=limit,include_rejected=include_rejected)
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail=f"Coin scan failed: {exc}")
 @app.get("/api/demo/account")
 async def demo_account():
     try: return await BinanceDemoClient().get_account()
