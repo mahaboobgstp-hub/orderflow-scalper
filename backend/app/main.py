@@ -338,6 +338,9 @@ async def run_backtest(request:BacktestRunRequest):
 @app.get("/api/paper/status")
 async def paper_status():
     return app.state.paper_trading_engine.status()
+@app.get("/api/paper/persistence/status")
+async def paper_persistence_status():
+    return app.state.paper_persistence_worker.status()
 @app.get("/api/paper/account")
 async def paper_account():
     return app.state.paper_trading_engine.account()
