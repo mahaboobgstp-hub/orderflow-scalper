@@ -8,12 +8,14 @@ from app.market_data.backend_stream import BinanceOrderBookStream
 from app.market_data.unified_engine import UnifiedMarketDataEngine
 from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BybitPublicAdapter, DeltaPublicAdapter
 from app.services.coin_scanner import CoinMarketScanner
+from app.services.imbalance_detector import OrderBookImbalanceDetector
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
     app.state.coin_scanner=CoinMarketScanner()
+    app.state.imbalance_detector=OrderBookImbalanceDetector()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
@@ -26,7 +28,7 @@ async def lifespan(app: FastAPI):
     finally:
         await manager.stop(); await stream.stop()
 
-app=FastAPI(title="OrderFlow Scalper API",description="Multi-exchange public market-data and Binance demo execution backend",version="0.4.0")
+app=FastAPI(title="OrderFlow Scalper API",description="Multi-exchange public market-data and Binance demo execution backend",version="0.5.0")
 
 class DemoOrderRequest(BaseModel):
     symbol:str=Field(default="BTCUSDT",min_length=3,max_length=20)
@@ -59,6 +61,20 @@ async def unified_book(exchange:str,symbol:str):
 async def unified_trades(exchange:str,symbol:str,limit:int=100):
     if exchange.lower() not in {"binance","bybit","delta"}: raise HTTPException(status_code=400,detail="Unsupported exchange.")
     return {"exchange":exchange.lower(),"symbol":symbol.upper(),"trades":app.state.unified_market_data.get_recent_trades(exchange,symbol,limit)}
+@app.get("/api/imbalance/status")
+async def imbalance_status():
+    return app.state.imbalance_detector.status()
+@app.get("/api/imbalance/{exchange}/{symbol}")
+async def analyze_imbalance(exchange:str,symbol:str,levels:int=Query(default=10,ge=1,le=20)):
+    if exchange.lower() not in {"binance","bybit","delta"}:
+        raise HTTPException(status_code=400,detail="Unsupported exchange.")
+    book=app.state.unified_market_data.get_book(exchange,symbol)
+    if book is None:
+        raise HTTPException(status_code=404,detail="No normalized book data available for this exchange/symbol.")
+    try:
+        return app.state.imbalance_detector.analyze(book,levels=levels)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc))
 @app.get("/api/scanner/coins")
 async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bool=False):
     """On-demand market scan. It calls public Binance USD-M endpoints."""
