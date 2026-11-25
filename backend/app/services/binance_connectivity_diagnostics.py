@@ -6,6 +6,8 @@ import time
 from urllib.parse import urlencode
 
 import httpx
+import websockets
+import asyncio
 
 from app.config import settings
 
@@ -15,6 +17,15 @@ async def _public_probe(base: str, path: str, params=None):
         response = await client.get(base + path, params=params or {})
         response.raise_for_status()
         return response.json()
+
+
+async def _websocket_probe(url: str):
+    try:
+        async with websockets.connect(url, open_timeout=6, close_timeout=3, ping_interval=20, ping_timeout=20) as ws:
+            message = await asyncio.wait_for(ws.recv(), timeout=6)
+            return {"status": "connected", "first_message_received": bool(message)}
+    except Exception as exc:
+        return {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
 async def _signed_account_probe(base: str, key: str, secret: str):
@@ -62,6 +73,8 @@ async def run_binance_diagnostics():
     except Exception as exc:
         result["demo"]["public_rest"] = {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
 
+    result["demo"]["market_data_websocket"] = await _websocket_probe("wss://demo-fstream.binance.com/ws/btcusdt@depth@100ms")
+
     # Demo authenticated account read.
     if settings.binance_api_key and settings.binance_api_secret:
         try:
@@ -83,6 +96,8 @@ async def run_binance_diagnostics():
         }
     except Exception as exc:
         result["live_public"] = {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
+
+    result["live_public"]["market_data_websocket"] = await _websocket_probe("wss://fstream.binance.com/ws/btcusdt@depth@100ms")
 
     # Live authenticated read-only account endpoint; does not place trades.
     live_key = os.getenv("BINANCE_LIVE_API_KEY", "")
