@@ -46,6 +46,7 @@ class Phase6ApiTests(unittest.TestCase):
         self.assertIn("classification",result)
         self.assertIn("liquidity_observation",result)
         self.assertIn("quality",result)
+        self.assertIn("depth_coverage_ratio",result["quality"])
         self.assertIn("diagnostics",result)
 
     def test_absorption_route_rejects_unknown_exchange_and_missing_book(self):
