@@ -11,7 +11,7 @@ def stream_with_snapshot(update_id=100):
         {
             "lastUpdateId": update_id,
             "bids": [["100.0", "1.0"]],
-            "asks": [["101.0", "1.0"]],
+            "asks": [["101.0", "1.0"], ["101.1", "1.0"]],
         }
     )
     return stream
