@@ -14,9 +14,13 @@ class AbsorptionLiquidityDetector:
     def __init__(self, history_size: int = 30, max_book_age_seconds: float = 3.0,
                  min_trades: int = 5, absorption_threshold: float = 0.60):
         self.history_size=max(3,min(int(history_size),200))
-        self.max_book_age_seconds=max(0.1,float(max_book_age_seconds))
+        max_age=float(max_book_age_seconds)
+        threshold=float(absorption_threshold)
+        if not math.isfinite(max_age) or not math.isfinite(threshold):
+            raise ValueError("Detector configuration must be finite.")
+        self.max_book_age_seconds=max(0.1,max_age)
         self.min_trades=max(3,min(int(min_trades),500))
-        self.absorption_threshold=max(0.1,min(float(absorption_threshold),0.95))
+        self.absorption_threshold=max(0.1,min(threshold,0.95))
         self._history: dict[str,deque[dict[str,Any]]]={}
 
     @staticmethod
@@ -72,11 +76,9 @@ class AbsorptionLiquidityDetector:
         flow_ratio=self._safe_ratio(abs(delta),total_qty)
         buy_avg=self._safe_ratio(sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="buy"),buy_qty)
         sell_avg=self._safe_ratio(sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="sell"),sell_qty)
-        buy_vwap_progress=(mid-buy_avg)/buy_avg*100 if buy_avg else 0.0
-        sell_vwap_progress=(sell_avg-mid)/sell_avg*100 if sell_avg else 0.0
-        # Aggressor-direction price progress measured against the opposite side of the touch.
-        buy_progress_pct=max(0.0,(mid-buy_avg)/buy_avg*100) if buy_avg else 0.0
-        sell_progress_pct=max(0.0,(sell_avg-mid)/sell_avg*100) if sell_avg else 0.0
+        # VWAP-versus-mid is a spatial comparison, not temporal price progress.
+        buy_vwap_vs_mid_pct=(buy_avg-mid)/mid*100 if buy_avg and mid else 0.0
+        sell_vwap_vs_mid_pct=(mid-sell_avg)/mid*100 if sell_avg and mid else 0.0
         # Current displayed liquidity at the touch, and concentration in first 5 levels.
         bid5=sorted(bids,key=lambda x:x[0],reverse=True)[:5]; ask5=sorted(asks,key=lambda x:x[0])[:5]
         bid_depth=sum(q for p,q in bid5); ask_depth=sum(q for p,q in ask5)
@@ -92,10 +94,16 @@ class AbsorptionLiquidityDetector:
                       "ask_depth_change_pct":round((ask_depth-prior["ask5"])/prior["ask5"]*100,4) if prior["ask5"] else None,
                       "bid_depleted":bid_depth<prior["bid5"],"ask_depleted":ask_depth<prior["ask5"]}
         buy_absorption_score=0.0; sell_absorption_score=0.0
-        # Candidate absorption requires minimum tape count and directional dominance.
-        if len(normalized)>=self.min_trades and total_qty>0:
+        buy_progress_pct=0.0; sell_progress_pct=0.0
+        prior_sample_age_ms=(now_ms-prior["timestamp"]) if prior else None
+        # Temporal progress requires a recent prior midpoint sample.
+        has_recent_baseline=prior is not None and 0 < prior_sample_age_ms <= lookback*1000
+        if has_recent_baseline and prior["mid"]>0:
+            buy_progress_pct=max(0.0,(mid-prior["mid"])/prior["mid"]*100)
+            sell_progress_pct=max(0.0,(prior["mid"]-mid)/prior["mid"]*100)
+        # Without a temporal baseline, scores remain zero to avoid false absorption.
+        if has_recent_baseline and len(normalized)>=self.min_trades and total_qty>0:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
-            # High aggressive volume with limited price progress is a hypothesis.
             buy_absorption_score=buy_share*max(0.0,1.0-min(buy_progress_pct/0.10,1.0))
             sell_absorption_score=sell_share*max(0.0,1.0-min(sell_progress_pct/0.10,1.0))
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
@@ -118,12 +126,13 @@ class AbsorptionLiquidityDetector:
             "aggressive_delta_ratio":round(delta/total_qty,6) if total_qty else 0.0,"absolute_flow_imbalance":round(flow_ratio,6),
             "buy_vwap":round(buy_avg,8) if buy_qty else None,"sell_vwap":round(sell_avg,8) if sell_qty else None,
             "mid_price":round(mid,8),"buy_price_progress_pct":round(buy_progress_pct,6),"sell_price_progress_pct":round(sell_progress_pct,6),
+            "buy_vwap_vs_mid_pct":round(buy_vwap_vs_mid_pct,6),"sell_vwap_vs_mid_pct":round(sell_vwap_vs_mid_pct,6),
             "buy_absorption_score":round(buy_absorption_score,6),"sell_absorption_score":round(sell_absorption_score,6),
             "buy_absorption_candidate":buy_absorbed,"sell_absorption_candidate":sell_absorbed,
             "top5_bid_depth":round(bid_depth,8),"top5_ask_depth":round(ask_depth,8)},
             "liquidity_observation":{"previous_sample_available":prior is not None,"replenishment":replenishment,"depletion":depletion},
             "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"note":"Evidence-quality heuristic, not a prediction or win probability."},
-            "diagnostics":["Absorption is a hypothesis based on aggressive flow and limited price progress.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
+            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
     def status(self):
         return {"phase":6,"engine":"absorption_liquidity_behavior_detector","tracked_symbols":len(self._history),
                 "min_trades":self.min_trades,"absorption_threshold":self.absorption_threshold,
