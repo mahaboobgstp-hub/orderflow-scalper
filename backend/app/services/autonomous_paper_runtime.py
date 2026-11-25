@@ -82,7 +82,33 @@ class AutonomousPaperRuntime:
         if not book: risk_blockers.append("SYNCHRONIZED_BOOK_UNAVAILABLE")
         risk={"allowed":not risk_blockers,"blockers":risk_blockers,"equity":equity,"open_positions":positions,"exchange":exchange}
         result=self.decision_engine.evaluate(symbol,inputs,risk)
-        result["exchange"]=exchange; result["price"]=market.get("last_price")
+        result["exchange"]=exchange; result["price"]=market.get("last_price)
+        # Convert decision into a guarded PAPER-only simulated order. No exchange
+        # API or demo/live order endpoint is called from this runtime.
+        if result.get("entry_eligible") and not risk_blockers:
+            side="long" if result.get("side")=="BUY" else "short"
+            price=float(market.get("last_price") or 0)
+            stop_pct=float(cfg.get("initial_stop_loss_pct",cfg.get("trailing_stop_pct",1.0)))
+            stop_price=price*(1-stop_pct/100) if side=="long" else price*(1+stop_pct/100)
+            sizing=self.risk_engine.calculate({"symbol":symbol,"account_equity":equity,"entry_price":price,
+                "stop_loss_price":stop_price,"side":side,"risk_per_trade_pct":cfg.get("risk_per_trade_pct",0.5),
+                "leverage":min(float(cfg.get("max_leverage",1)),5),"max_position_notional_pct":cfg.get("max_total_exposure_pct",25)})
+            if sizing.get("position_quantity",0)>0:
+                try:
+                    self.paper_engine.submit({"symbol":symbol,"side":side,"quantity":sizing["position_quantity"],"price":price,
+                        "leverage":sizing["leverage"],"stop_loss_price":stop_price,
+                        "tsl_enabled":bool(cfg.get("trailing_stop_enabled",True)),
+                        "tsl_distance_pct":float(cfg.get("trailing_stop_pct",1.0)),
+                        "ttp_enabled":bool(cfg.get("trailing_take_profit_enabled",True)),
+                        "ttp_activation_pct":float(cfg.get("trailing_take_profit_activation_pct",1.0)),
+                        "ttp_trail_pct":float(cfg.get("trailing_take_profit_pct",0.5))})
+                    result["paper_execution"]={"status":"SIMULATED_OPEN","sizing":sizing}
+                except (ValueError,TypeError) as exc:
+                    result["paper_execution"]={"status":"REJECTED","reason":str(exc)}
+            else:
+                result["paper_execution"]={"status":"REJECTED","reason":"Risk sizing returned zero quantity","sizing":sizing}
+        else:
+            result["paper_execution"]={"status":"NOT_EXECUTED","reason":"Decision or hard risk gate did not permit entry"}
         return result
 
     async def _loop(self):
