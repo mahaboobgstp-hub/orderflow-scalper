@@ -69,7 +69,7 @@ export default function App() {
       setDiagnostics(d.status==="fulfilled" ? d.value : null);
       setExchanges(x.status==="fulfilled" ? x.value : null);
       setPaper(p.status==="fulfilled" ? p.value : null);
-      if (c.status==="fulfilled") { setControl(c.value); setConfigDraft(c.value.config || {}); }
+      if (c.status==="fulfilled") { setControl(c.value); setConfigDraft(prev => Object.keys(prev).length ? prev : (c.value.config || {})); }
       const controlEvents=e.status==="fulfilled" ? e.value.events || [] : [];
       const monitorEvents=d.status==="fulfilled" ? [] : [];
       setEvents([...controlEvents,...monitorEvents].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).slice(0,100));
