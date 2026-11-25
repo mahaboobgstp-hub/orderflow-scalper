@@ -99,5 +99,31 @@ class Phase6DetectorTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Lookback"):
                     detector.analyze(book(),trades(),lookback_seconds=lookback)
 
+    def test_filters_invalid_trade_fields_and_out_of_window_timestamps(self):
+        detector=AbsorptionLiquidityDetector()
+        now_ms=int(__import__("time").time()*1000)
+        valid=trades("buy",count=2)
+        invalid=[
+            {"side":"buy","quantity":1,"price":0,"received_timestamp_ms":now_ms},
+            {"side":"buy","quantity":-1,"price":100,"received_timestamp_ms":now_ms},
+            {"side":"buy","quantity":float("nan"),"price":100,"received_timestamp_ms":now_ms},
+            {"side":"unknown","quantity":1,"price":100,"received_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100,"received_timestamp_ms":now_ms-60000},
+            {"side":"sell","quantity":1,"price":100,"received_timestamp_ms":now_ms+10000},
+            {"side":"buy","quantity":1,"price":100,"received_timestamp_ms":"bad"},
+        ]
+        result=detector.analyze(book(),valid+invalid,15)
+        self.assertEqual(result["trade_count"],2)
+        self.assertEqual(result["metrics"]["aggressive_buy_quantity"],2.0)
+
+    def test_absorption_requires_baseline_within_lookback(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("buy"),lookback_seconds=1)
+        # Simulate a previous observation older than the requested lookback.
+        detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=2000
+        result=detector.analyze(book(),trades("buy"),lookback_seconds=1)
+        self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
+        self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
+
 if __name__=="__main__":
     unittest.main()
