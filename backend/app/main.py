@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any
 from app.config import settings
+from app.database.supabase_client import database
 from app.execution.binance_demo_client import BinanceDemoClient, BinanceDemoError
 from app.execution.order_service import DemoOrderService, OrderRejected
 from app.market_data.backend_stream import BinanceOrderBookStream
@@ -32,6 +33,8 @@ logger=logging.getLogger('orderflow-scalper')
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.monitoring_service=MonitoringService()
+    app.state.database=database
+    await database.start()
     stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
     app.state.coin_scanner=CoinMarketScanner()
@@ -55,13 +58,17 @@ async def lifespan(app: FastAPI):
     app.state.exchange_manager=manager
     try:
         await stream.start(); await manager.start()
-        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3})
+        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3,'supabase_connected':database.connected})
         yield
     except Exception as exc:
         app.state.monitoring_service.record('ERROR','startup_or_runtime_error',{'error_type':type(exc).__name__})
         logger.exception('Application lifecycle error')
         raise
     finally:
+        try: await database.write_heartbeat('offline', {'shutdown': True})
+        except Exception: logger.exception('Supabase shutdown heartbeat error')
+        try: await database.close()
+        except Exception: logger.exception('Supabase client shutdown error')
         try: await runtime.stop()
         except Exception: logger.exception("Autonomous runtime shutdown error")
         try: await manager.stop()
@@ -153,6 +160,10 @@ async def root():
 @app.get("/health")
 async def health():
     return app.state.monitoring_service.health()
+
+@app.get("/api/database/status")
+async def database_status():
+    return await database.status(refresh=True)
 @app.get("/api/monitoring/diagnostics")
 async def monitoring_diagnostics():
     return app.state.monitoring_service.diagnostics(app)
