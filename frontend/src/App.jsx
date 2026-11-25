@@ -59,34 +59,39 @@ export default function App() {
 
   async function refreshAll() {
     if (!base) { setConnected(false); return; }
-    try {
-      const [h,d,x,p,c,e,ph,me] = await Promise.allSettled([
-        api("/health"), api("/api/monitoring/diagnostics"), api("/api/exchanges/status"),
-        api("/api/paper/account"), api("/api/control/status"), api("/api/control/events"),
-        api("/api/scanner/coins?limit=15&include_rejected=false"), api("/api/paper/history?limit=50")
-      ]);
-      if (h.status === "fulfilled") { setHealth(h.value); setConnected(true); } else { setHealth(null); setConnected(false); }
-      setDiagnostics(d.status==="fulfilled" ? d.value : null);
-      setExchanges(x.status==="fulfilled" ? x.value : null);
-      setPaper(p.status==="fulfilled" ? p.value : null);
-      if (c.status==="fulfilled") { setControl(c.value); setConfigDraft(prev => Object.keys(prev).length ? prev : (c.value.config || {})); }
-      const controlEvents=e.status==="fulfilled" ? e.value.events || [] : [];
-      const monitorEvents=d.status==="fulfilled" ? [] : [];
-      setEvents([...controlEvents,...monitorEvents].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).slice(0,100));
-      setScanner(s.status==="fulfilled" ? s.value : null);
-      setHistory(ph.status==="fulfilled" ? ph.value : null);
-    } catch { setConnected(false); }
+    const [h,d,x,p,controlStatus,controlLog,tradeHistory,monitorLog] = await Promise.allSettled([
+      api("/health"), api("/api/monitoring/diagnostics"), api("/api/exchanges/status"),
+      api("/api/paper/account"), api("/api/control/status"), api("/api/control/events"),
+      api("/api/paper/history?limit=50"), api("/api/monitoring/events?limit=100")
+    ]);
+    if (h.status === "fulfilled") { setHealth(h.value); setConnected(true); } else { setHealth(null); setConnected(false); }
+    setDiagnostics(d.status==="fulfilled" ? d.value : null);
+    setExchanges(x.status==="fulfilled" ? x.value : null);
+    setPaper(p.status==="fulfilled" ? p.value : null);
+    if (controlStatus.status==="fulfilled") { setControl(controlStatus.value); setConfigDraft(prev => Object.keys(prev).length ? prev : (controlStatus.value.config || {})); }
+    const controlEvents=controlLog.status==="fulfilled" ? controlLog.value.events || [] : [];
+    const monitoringEvents=monitorLog.status==="fulfilled" ? monitorLog.value.events || [] : [];
+    setEvents([...controlEvents,...monitoringEvents].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).slice(0,100));
+    setHistory(tradeHistory.status==="fulfilled" ? tradeHistory.value : null);
+  }
+
+  async function refreshScanner() {
+    if (!base) return;
+    try { const result = await api("/api/scanner/coins?limit=15&include_rejected=false"); setScanner(result); }
+    catch { setScanner(null); }
   }
 
   useEffect(() => {
     localStorage.setItem("ofs_api", apiBase);
     localStorage.setItem("ofs_token", token);
     refreshAll();
-    const timer = setInterval(refreshAll, 8000);
-    return () => clearInterval(timer);
+    refreshScanner();
+    const timer = setInterval(refreshAll, 10000);
+    const scanTimer = setInterval(refreshScanner, 45000);
+    return () => { clearInterval(timer); clearInterval(scanTimer); };
   }, [apiBase, token]);
 
-  async function refreshScanner() {\n    if (!base) return;\n    try { const result = await api("/api/scanner/coins?limit=15&include_rejected=false"); setScanner(result); } catch { setScanner(null); }\n  }\n\n  async function command(cmd) {
+  async function command(cmd) {
     setBusy(true); setNotice("");
     try {
       const result = await api("/api/control/engine", { method:"POST", body:JSON.stringify({command:cmd}) });
