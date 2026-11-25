@@ -67,6 +67,14 @@ class LiquidityZoneDetector:
         if bid>=ask: raise ValueError("Crossed or locked book is invalid.")
         mid=(bid+ask)/2
         clusters=self._cluster_trades(trades,mid,lookback_seconds)
+        now_ms=int(time.time()*1000); cutoff=now_ms-max(1,min(float(lookback_seconds),3600))*1000
+        tape=[]
+        for t in trades or []:
+            if not isinstance(t,dict): continue
+            try: p=float(t.get("price",0)); ts=int(t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0)
+            except (ValueError,TypeError): continue
+            if p>0 and math.isfinite(p) and cutoff<=ts<=now_ms+5000: tape.append((ts,p))
+        tape.sort()
         key=f"{exchange}:{symbol}"; prior=self._previous_state.get(key,{})
         zones=[]
         for c in clusters:
@@ -95,7 +103,7 @@ class LiquidityZoneDetector:
             zones.append({"zone_id":zone_id,"type":zone_type,"low":round(low,8),"high":round(high,8),
                 "center":round(center,8),"trade_volume_in_cluster":round(c["volume"],8),"touch_count":c["touches"],
                 "last_interaction_timestamp_ms":c["last_ts"],"price_position":position,"distance_to_zone_pct":round(proximity_pct,5),
-                "approaching":approaching,"interaction_state":state,
+                "approaching":approaching,"possible_rejection":possible_rejection,"interaction_state":state,
                 "breakout_buffer_low":round(lower_break,8),"breakout_buffer_high":round(upper_break,8)})
             prior[zone_id]=state
         self._previous_state[key]=prior
@@ -112,12 +120,11 @@ class LiquidityZoneDetector:
             "interaction_legend":{"APPROACHING":"Price is near the zone, but not inside it.","IN_ZONE":"Price is trading within the inferred zone.",
             "BREAKOUT_UP":"Mid price is above the zone plus breakout buffer.","BREAKOUT_DOWN":"Mid price is below the zone minus breakout buffer.",
             "ZONE_RETEST_OR_REENTRY":"Price returned inside after a previously observed break/rejection state.",
-            "REJECTION_UP":"Not automatically assigned; requires confirmed away-from-zone price movement and later rejection evidence.",
-            "REJECTION_DOWN":"Not automatically assigned; requires confirmed away-from-zone price movement and later rejection evidence."},
+            "POSSIBLE_REJECTION":"Captured tape touched the cluster then moved away; a heuristic, not confirmation."},
             "diagnostics":["Zones are price clusters inferred from captured trades, not exchange-provided liquidity heatmaps.",
             "Touch count is trade observations in a cluster, not verified independent tests.",
             "Breakout labels are based on current mid price relative to a configurable buffer; candle-close confirmation is not available in this engine.",
-            "A rejection is not asserted without suitable timestamped price-path/candle evidence.",
+            "Possible rejection uses captured trade sequence and is heuristic; no candle-close confirmation is available.",
             "Displayed depth references are current top-level book quantities and can cancel or move.",
             "No entry, exit, reversal, or profitability signal is generated."]}
     def status(self):
