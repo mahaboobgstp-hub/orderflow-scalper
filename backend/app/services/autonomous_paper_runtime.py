@@ -82,7 +82,7 @@ class AutonomousPaperRuntime:
         if not book: risk_blockers.append("SYNCHRONIZED_BOOK_UNAVAILABLE")
         risk={"allowed":not risk_blockers,"blockers":risk_blockers,"equity":equity,"open_positions":positions,"exchange":exchange}
         result=self.decision_engine.evaluate(symbol,inputs,risk)
-        result["exchange"]=exchange; result["price"]=market.get("last_price)
+        result["exchange"]=exchange; result["price"]=market.get("last_price")
         # Convert decision into a guarded PAPER-only simulated order. No exchange
         # API or demo/live order endpoint is called from this runtime.
         if result.get("entry_eligible") and not risk_blockers:
