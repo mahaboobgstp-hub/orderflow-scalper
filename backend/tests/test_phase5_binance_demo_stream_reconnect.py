@@ -94,5 +94,33 @@ class BinanceStreamReconnectTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(stream.last_error)
 
 
+
+    async def test_closed_websocket_reconnects_after_synchronization(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        original_sleep = asyncio.sleep
+
+        async def fast_sleep(_seconds):
+            await original_sleep(0)
+
+        first = FakeWebsocket([
+            depth_event(100, 101, pu=98, bids=[["100.0", "2.0"]]),
+            depth_event(102, 103, pu=101, bids=[["100.0", "3.0"]]),
+        ])
+        second = FakeWebsocket(
+            [depth_event(200, 201, pu=199, bids=[["100.0", "4.0"]])],
+            stop_event=stream._stop_event,
+        )
+        connections = [FakeConnection(first), FakeConnection(second)]
+        with patch("app.market_data.backend_stream.websockets.connect", side_effect=connections) as mock_connect, \
+             patch.object(stream, "_fetch_snapshot", new=AsyncMock(side_effect=[snapshot(100), snapshot(200)])), \
+             patch("app.market_data.backend_stream.asyncio.sleep", new=fast_sleep):
+            await stream._run_forever()
+
+        self.assertEqual(mock_connect.call_count, 2)
+        self.assertEqual(stream.last_update_id, 201)
+        self.assertEqual(stream.bids[100.0], 4.0)
+        self.assertIsNone(stream.last_error)
+        self.assertIsNone(await stream.get_order_book())
+
 if __name__ == "__main__":
     unittest.main()
