@@ -85,7 +85,7 @@ class PaperTradingEngine:
     def _close_position(self,symbol,price,reason):
         pos=self.positions[symbol]; gross=self._pnl(pos,price); exit_fee=pos["quantity"]*price*self.fee_rate; net=gross-pos["entry_fee"]-exit_fee
         self.cash+=pos["margin"]+gross-exit_fee
-        record={"trade_id":str(uuid.uuid4()),"symbol":symbol,"side":pos["side"],"quantity":pos["quantity"],"entry_price":pos["entry_price"],"exit_price":price,"leverage":pos["leverage"],"gross_pnl":round(gross,8),"entry_fee":round(pos["entry_fee"],8),"exit_fee":round(exit_fee,8),"net_pnl":round(net,8),"opened_at_ms":pos["opened_at_ms"],"closed_at_ms":int(time.time()*1000),"close_reason":reason,"mode":"PAPER_ONLY"}}
+        record={"trade_id":str(uuid.uuid4()),"symbol":symbol,"side":pos["side"],"quantity":pos["quantity"],"entry_price":pos["entry_price"],"exit_price":price,"leverage":pos["leverage"],"gross_pnl":round(gross,8),"entry_fee":round(pos["entry_fee"],8),"exit_fee":round(exit_fee,8),"net_pnl":round(net,8),"opened_at_ms":pos["opened_at_ms"],"closed_at_ms":int(time.time()*1000),"close_reason":reason,"mode":"PAPER_ONLY"}
         self.closed_trades.append(record); del self.positions[symbol]; self.mark_prices[symbol]=price; return record
     def update_management(self,symbol,settings):
         symbol=symbol.upper(); pos=self.positions.get(symbol)
