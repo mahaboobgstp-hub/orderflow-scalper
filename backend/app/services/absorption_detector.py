@@ -68,6 +68,7 @@ class AbsorptionLiquidityDetector:
             side=str(t.get("side","")).lower()
             if side not in ("buy","sell") or price<=0 or qty<=0 or not math.isfinite(price) or not math.isfinite(qty): continue
             if ts>=cutoff and ts<=now_ms+5000: normalized.append({"price":price,"quantity":qty,"side":side,"ts":ts})
+        normalized.sort(key=lambda t:t["ts"])
         buy_qty=sum(t["quantity"] for t in normalized if t["side"]=="buy")
         sell_qty=sum(t["quantity"] for t in normalized if t["side"]=="sell")
         buy_count=sum(1 for t in normalized if t["side"]=="buy"); sell_count=len(normalized)-buy_count
