@@ -130,13 +130,13 @@ The baseline is now documented. Phase 2 is **Multi-Exchange Connectivity Infrast
 - [ ] Phase 2 — Multi-Exchange Connectivity Infrastructure
 - [ ] Phase 3 — Unified Market Data Engine
 - [ ] Phase 4 — Coin Scanner & Market Selection Engine
-- [ ] [ ] Phase 5 — Order Book Imbalance Detector
-- [ ] [ ] Phase 6 — Absorption & Liquidity Behavior Engine
-- [ ] [ ] Phase 7 — Liquidity Zone & Breakout Detector
-- [ ] [ ] Phase 8 — Aggressive Trade Flow & Momentum Engine
-- [ ] [ ] Phase 9 — Volatility, Market Regime & Broader Context Engine
-- [ ] [ ] Phase 10 — Risk Management & Position Sizing Engine
-- [ ] [ ] Phase 11 — Order Execution & Paper Trading Engine
-- [ ] [ ] Phase 12 — Advanced Position Management & Trailing Profit System
-- [ ] [ ] Phase 13 — Backtesting, Performance Analytics & Strategy Validation
-- [ ] [ ] Phase 14 — Production Deployment, Monitoring & Recovery
+- [ ] Phase 5 — Order Book Imbalance Detector
+- [ ] Phase 6 — Absorption & Liquidity Behavior Engine
+- [ ] Phase 7 — Liquidity Zone & Breakout Detector
+- [ ] Phase 8 — Aggressive Trade Flow & Momentum Engine
+- [ ] Phase 9 — Volatility, Market Regime & Broader Context Engine
+- [ ] Phase 10 — Risk Management & Position Sizing Engine
+- [ ] Phase 11 — Order Execution & Paper Trading Engine
+- [ ] Phase 12 — Advanced Position Management & Trailing Profit System
+- [ ] Phase 13 — Backtesting, Performance Analytics & Strategy Validation
+- [ ] Phase 14 — Production Deployment, Monitoring & Recovery
