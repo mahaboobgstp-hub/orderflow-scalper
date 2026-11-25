@@ -57,3 +57,12 @@ def test_liquidity_zone_api_maps_invalid_book_to_422():
     with pytest.raises(HTTPException) as exc:
         asyncio.run(main.analyze_liquidity_zones("bybit","ETHUSDT",30,500))
     assert exc.value.status_code==422
+
+
+def test_paper_runtime_safely_handles_detector_overflow():
+    from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
+    runtime=object.__new__(AutonomousPaperRuntime)
+    class OverflowingDetector:
+        def analyze(self, *args, **kwargs):
+            raise OverflowError("test overflow")
+    assert runtime._detect(OverflowingDetector(), make_book(), make_trades(), 300) is None
