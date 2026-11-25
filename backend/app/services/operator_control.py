@@ -36,7 +36,7 @@ state: dict[str, Any] = {
         "scanner_interval_seconds": 60,
         "max_watchlist_symbols": 100,
         "market_regime_filter_enabled": True,
-        "strategy_enabled": {
+        "exchange_enabled": {"binance": False, "bybit": False, "delta": False},\n        "strategy_enabled": {
             "order_book_imbalance": True,
             "absorption": True,
             "liquidity_zones": True,
