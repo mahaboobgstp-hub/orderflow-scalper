@@ -332,6 +332,23 @@ class BinanceOrderBookStream:
         self.last_update_id = update_id
         self.synchronized = False
 
+    @staticmethod
+    def _parse_update_id(value: Any) -> int | None:
+        """Accept only nonnegative integer sequence IDs, never truncating floats."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            value = value.strip()
+            if not value or not value.isascii() or not value.isdigit():
+                return None
+            try:
+                return int(value)
+            except (ValueError, OverflowError):
+                return None
+        return None
+
     def _event_bridges_snapshot(
         self,
         event: dict[str, Any],
@@ -346,10 +363,11 @@ class BinanceOrderBookStream:
         if self.last_update_id is None:
             return False
 
-        try:
-            first_update_id = int(event["U"])
-            final_update_id = int(event["u"])
-        except (KeyError, TypeError, ValueError):
+        if not isinstance(event, dict):
+            return False
+        first_update_id = self._parse_update_id(event.get("U"))
+        final_update_id = self._parse_update_id(event.get("u"))
+        if first_update_id is None or final_update_id is None:
             return False
 
         if first_update_id > final_update_id:
@@ -402,10 +420,8 @@ class BinanceOrderBookStream:
             # rule as a defensive fallback.
             previous_final_id = event.get("pu")
             if previous_final_id is not None:
-                try:
-                    if int(previous_final_id) != self.last_update_id:
-                        return False
-                except (TypeError, ValueError):
+                parsed_previous_final_id = self._parse_update_id(previous_final_id)
+                if parsed_previous_final_id is None or parsed_previous_final_id != self.last_update_id:
                     return False
             elif first_update_id > self.last_update_id + 1:
                 return False
