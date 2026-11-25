@@ -50,6 +50,8 @@ async def lifespan(app: FastAPI):
     app.state.paper_trading_engine=PaperTradingEngine()
     persistence_worker=PaperPersistenceWorker(repository)
     app.state.paper_persistence_worker=persistence_worker
+    recovered=await persistence_worker.restore_state(app.state.paper_trading_engine)
+    app.state.paper_state_recovered=recovered
     set_persistence_enqueue(persistence_worker.enqueue)
     await persistence_worker.start()
     app.state.backtesting_engine=BacktestEngine()
