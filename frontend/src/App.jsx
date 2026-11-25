@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
+  { key: "testcenter", label: "Test Center", icon: "▣" },
   { key: "activity", label: "Live Activity", icon: "◷" },
   { key: "positions", label: "Positions & Trades", icon: "▤" },
   { key: "watchlist", label: "Watchlist", icon: "☆" },
@@ -42,6 +43,11 @@ export default function App() {
   const [exchanges, setExchanges] = useState(null);
   const [paper, setPaper] = useState(null);
   const [history, setHistory] = useState(null);
+  const [testSession, setTestSession] = useState(null);
+  const [testOrders, setTestOrders] = useState(null);
+  const [decisionStatus, setDecisionStatus] = useState(null);
+  const [persistenceStatus, setPersistenceStatus] = useState(null);
+  const [riskStatus, setRiskStatus] = useState(null);
   const [control, setControl] = useState(null);
   const [events, setEvents] = useState([]);
   const [scanner, setScanner] = useState(null);
@@ -64,10 +70,11 @@ export default function App() {
 
   async function refreshAll() {
     if (!base) { setConnected(false); return; }
-    const [h,d,x,p,controlStatus,controlLog,tradeHistory,monitorLog] = await Promise.allSettled([
+    const [h,d,x,p,controlStatus,controlLog,tradeHistory,monitorLog,validation,orders,decision,persist,risk] = await Promise.allSettled([
       api("/health"), api("/api/monitoring/diagnostics"), api("/api/exchanges/status"),
       api("/api/paper/account"), api("/api/control/status"), api("/api/control/events"),
-      api("/api/paper/history?limit=50"), api("/api/monitoring/events?limit=100")
+      api("/api/paper/history?limit=50"), api("/api/monitoring/events?limit=100"),
+      api("/api/paper/validation/status"), api("/api/paper/orders"), api("/api/decision-engine/status"), api("/api/paper/persistence/status"), api("/api/risk/status")
     ]);
     if (h.status === "fulfilled") { setHealth(h.value); setConnected(true); } else { setHealth(null); setConnected(false); }
     setDiagnostics(d.status==="fulfilled" ? d.value : null);
@@ -78,6 +85,11 @@ export default function App() {
     const monitoringEvents=monitorLog.status==="fulfilled" ? (monitorLog.value.events || []).filter(evt=>evt.event!=="http_request") : [];
     setEvents([...controlEvents,...monitoringEvents].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0)).slice(0,100));
     setHistory(tradeHistory.status==="fulfilled" ? tradeHistory.value : null);
+    setTestSession(validation.status==="fulfilled" ? validation.value : null);
+    setTestOrders(orders.status==="fulfilled" ? orders.value : null);
+    setDecisionStatus(decision.status==="fulfilled" ? decision.value : null);
+    setPersistenceStatus(persist.status==="fulfilled" ? persist.value : null);
+    setRiskStatus(risk.status==="fulfilled" ? risk.value : null);
   }
 
   async function refreshScanner() {
@@ -141,6 +153,55 @@ export default function App() {
   function stat(label, val, foot, tone="") {
     return <div className="stat-card"><span className="stat-label">{label}</span><strong className={tone}>{value(val)}</strong><small>{foot || ""}</small></div>;
   }
+  async function validationCommand(action) {
+    setBusy(true); setNotice("");
+    const endpoint={START:"/api/paper/validation/start",PAUSE:"/api/paper/validation/pause",RESUME:"/api/paper/validation/resume",STOP:"/api/paper/validation/stop"}[action];
+    try { const result=await api(endpoint,{method:"POST"}); setTestSession(result); setNotice("Paper validation session: "+(result.state||action)); await refreshAll(); }
+    catch(e){setNotice(e.message)} finally {setBusy(false)}
+  }
+  function renderTestCenter() {
+    const decisions=decisionStatus?.runtime?.recent_decisions || [];
+    const last=decisions.length ? decisions[decisions.length-1] : null;
+    const orderList=testOrders?.orders || testOrders?.data?.orders || [];
+    const sessionEvents=testSession?.events || [];
+    const layerEntries=last?.layers ? Object.entries(last.layers) : [];
+    const fmtDate=(v)=>v ? new Date(v).toLocaleString() : "--";
+    return <>
+      {header("Test Center","Observe actual paper-session events, orders, decisions, risk and recovery data")}
+      <div className="status-strip"><span className="status-chip paper">PAPER ONLY</span><span className="status-chip">{testSession?.state || "SESSION STATUS UNAVAILABLE"}</span><span className="subtle">No live exchange orders are possible from this console.</div>
+      <div className="stats-grid">
+        {stat("Validation Session",testSession?.state || "Unavailable","Controller status")}
+        {stat("Trades Started",testSession?.trades_started ?? "--","Session entry count")}
+        {stat("Closed Session Trades",testSession?.closed_trades ?? "--","Session tracked exits")}
+        {stat("Session Realized P&L",money(testSession?.realized_pnl),"Controller-reported value")}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Controlled Paper Session</h2><span className="subtle">Session controls only</span></div>
+        <div className="control-buttons">
+          <button className="btn primary" onClick={()=>validationCommand("START")} disabled={busy||!connected||testSession?.state==="ACTIVE"}>Start Session</button>
+          <button className="btn warn" onClick={()=>validationCommand("PAUSE")} disabled={busy||testSession?.state!=="ACTIVE"}>Pause</button>
+          <button className="btn secondary" onClick={()=>validationCommand("RESUME")} disabled={busy||testSession?.state!=="PAUSED"}>Resume</button>
+          <button className="btn danger" onClick={()=>validationCommand("STOP")} disabled={busy||!["ACTIVE","PAUSED"].includes(testSession?.state)}>Stop Session</button>
+          <button className="btn secondary" onClick={refreshAll} disabled={busy}>Refresh Evidence</button>
+        </div>
+        <div className="notice warning">Starting a session enables the controlled paper-validation runtime. This is not live trading. Do not start until we explicitly begin the test phase.</div>
+        <div className="diagnostic">{JSON.stringify(testSession?.config || {},null,2)}</div>
+      </div>
+      <div className="split-grid">
+        <div className="panel"><h2>Actual Simulated Orders</h2><p className="subtle">Read-only records returned by the paper simulator</p>
+          {!testOrders ? <div className="empty-state">Order records unavailable or API not connected.</div> : orderList.length===0 ? <div className="empty-state">No simulator orders recorded.</div> : orderList.slice().reverse().map((o,i)=><div className="list-row" key={o.order_id||i}><div><b>{o.symbol} · {String(o.side||"").toUpperCase()}</b><small>{o.status} · {fmtDate(o.created_at_ms)}</small></div><div className="align-right"><b>{value(o.quantity)}</b><small>Entry {value(o.entry_price)} · {o.leverage}x</small></div></div>)}
+        </div>
+        <div className="panel"><h2>Paper Account Snapshot</h2>{paper ? <pre className="diagnostic">{JSON.stringify({cash_balance:paper.cash_balance,equity:paper.equity,realized_pnl:paper.realized_pnl,unrealized_pnl:paper.unrealized_pnl,open_position_count:paper.open_position_count},null,2)}</pre> : <div className="empty-state">Account snapshot unavailable.</div>}</div>
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Nine-Layer Decision Trace</h2><span className="subtle">Latest runtime decision, if available</span></div>
+        {!last ? <div className="empty-state">No recent decision trace returned by runtime yet.</div> : <><div className="list-row"><b>{last.symbol} · {last.decision}</b><span className="status-chip">{last.score ?? "--"} score</span></div><div className="layer-grid">{layerEntries.map(([key,l])=><div className="layer-card" key={key}><b>{key.replaceAll("_"," ")}</b><span className="status-chip">{l.direction||"N/A"}</span><small>Score: {l.score??"--"} · Confidence: {l.confidence??"--"}</small><p>{(l.reasons||[]).join(" | ")||"No reason detail"}</p></div>)}</div><pre className="diagnostic">{JSON.stringify(last,null,2)}</pre></>}
+      </div>
+      <div className="split-grid">
+        <div className="panel"><h2>Risk Monitor</h2>{riskStatus?<pre className="diagnostic">{JSON.stringify(riskStatus,null,2)}</pre>:<div className="empty-state">Risk status unavailable.</div>}</div>
+        <div className="panel"><h2>Persistence & Recovery</h2>{persistenceStatus?<pre className="diagnostic">{JSON.stringify(persistenceStatus,null,2)}</pre>:<div className="empty-state">Persistence diagnostics unavailable.</div>}</div>
+      </div>
+      <div className="panel"><h2>Session Event Timeline</h2>{sessionEvents.length===0?<div className="empty-state">No controlled-session events reported yet.</div>:sessionEvents.slice().reverse().map((e,i)=><div className="event-row full" key={i}><span className="event-time">{e.at?fmtDate(e.at):"--"}</span><b>{e.event||"Session event"}</b><small>{JSON.stringify(e.data||{})}</small></div>)}</div>
+    </>;
+  }
   function renderDashboard() {
     return <>
       {header("Dashboard","A concise live view of the trading system")}
@@ -203,6 +264,6 @@ export default function App() {
     </>;
   }
 
-  const pages={dashboard:renderDashboard,activity:renderActivity,positions:renderPositions,watchlist:renderWatchlist,controls:renderControls};
+  const pages={dashboard:renderDashboard,testcenter:renderTestCenter,activity:renderActivity,positions:renderPositions,watchlist:renderWatchlist,controls:renderControls};
   return <div className="app-root"><aside className="desktop-nav"><div className="brand-mark">OF</div><div className="brand-text">ORDERFLOW<span>SCALPER</span></div><nav>{NAV.map(n=><button key={n.key} className={page===n.key?"selected":""} onClick={()=>setPage(n.key)}><span className="nav-symbol">{n.icon}</span>{n.label}</button>)}</nav><div className="nav-foot"><span className={connected?"dot green":"dot red"}/>{connected?"API reachable":"API offline"}<small>Remote operator console</small></div></aside><main className="main"><div className="mobile-top"><div className="brand-mark small-mark">OF</div><div className="brand-text">ORDERFLOW<span>SCALPER</span></div><button className="refresh" onClick={refreshAll}>↻</button></div><div className="page-content">{pages[page]()}</div><footer className="footnote">OrderFlow Scalper · Remote Operator Console · Paper trading only</footer></main><nav className="mobile-nav">{NAV.map(n=><button key={n.key} className={page===n.key?"selected":""} onClick={()=>setPage(n.key)}><span>{n.icon}</span><small>{n.label.split(" ")[0]}</small></button>)}</nav>{notice&&<div className="toast" onClick={()=>setNotice("")}>{notice}<span>×</span></div>}</div>;
 }
