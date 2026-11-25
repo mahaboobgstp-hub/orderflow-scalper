@@ -7,6 +7,7 @@ from app.config import settings
 from app.database.supabase_client import database
 from app.database.repository import repository
 from app.execution.binance_demo_client import BinanceDemoClient, BinanceDemoError
+from app.services.binance_connectivity_diagnostics import run_binance_diagnostics
 from app.execution.order_service import DemoOrderService, OrderRejected
 from app.market_data.backend_stream import BinanceOrderBookStream
 from app.market_data.unified_engine import UnifiedMarketDataEngine
@@ -446,3 +447,9 @@ async def readiness():
     if diagnostics["status"] != "ok":
         raise HTTPException(status_code=503, detail={"status": "not_ready", "components": diagnostics["initialized_components"]})
     return {"status": "ready", "mode": "PAPER_ONLY", "live_execution_enabled": False}
+
+
+@app.get("/api/connectivity/binance/diagnostics")
+async def binance_connectivity_diagnostics():
+    """Backend-origin Binance connectivity checks; read-only, never places orders."""
+    return await run_binance_diagnostics()
