@@ -56,3 +56,24 @@ class PaperPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+class PaperStateRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_restore_valid_paper_snapshot(self):
+        from app.services.paper_trading import PaperTradingEngine
+        engine=PaperTradingEngine(initial_equity=2500)
+        engine.cash=2100.0
+        engine.positions={"BTCUSDT":{"position_id":"p-1","symbol":"BTCUSDT","side":"long","quantity":0.01,"entry_price":100,"margin":100,"leverage":1}}
+        engine.mark_prices={"BTCUSDT":105}
+        snapshot=engine.persistence_snapshot()
+        fresh=PaperTradingEngine(initial_equity=10000)
+        self.assertTrue(fresh.restore_persistence_snapshot(snapshot))
+        self.assertEqual(fresh.cash,2100.0)
+        self.assertEqual(fresh.positions["BTCUSDT"]["position_id"],"p-1")
+        self.assertEqual(fresh.mark_prices["BTCUSDT"],105)
+
+    async def test_reject_snapshot_with_wrong_mode_or_invalid_position(self):
+        from app.services.paper_trading import PaperTradingEngine
+        fresh=PaperTradingEngine()
+        self.assertFalse(fresh.restore_persistence_snapshot({"version":1,"mode":"LIVE"}))
+        invalid={"version":1,"mode":"PAPER_ONLY","initial_equity":1000,"cash":900,"fee_rate":0.0004,"positions":{"BAD":{"symbol":"BAD","side":"long","quantity":1,"entry_price":10}}}
+        self.assertFalse(fresh.restore_persistence_snapshot(invalid))
