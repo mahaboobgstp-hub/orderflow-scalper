@@ -84,8 +84,10 @@ class BinanceStreamReconnectTests(unittest.IsolatedAsyncioTestCase):
              patch.object(stream, "_fetch_snapshot", new=AsyncMock(side_effect=[snapshot(100), snapshot(200)])):
             await stream._run_forever()
 
-        self.assertTrue(stream.connected)
-        self.assertTrue(stream.synchronized)
+        # _run_forever clears connection/sync flags after its stop event,
+        # but the recovered snapshot must have been applied before shutdown.
+        self.assertFalse(stream.connected)
+        self.assertFalse(stream.synchronized)
         self.assertEqual(stream.last_update_id, 201)
         self.assertEqual(stream.bids[100.0], 4.0)
         self.assertIsNone(stream.last_error)
