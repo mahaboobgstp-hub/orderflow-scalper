@@ -396,10 +396,11 @@ class BinanceOrderBookStream:
         if self.last_update_id is None:
             return False
 
-        try:
-            first_update_id = int(event["U"])
-            final_update_id = int(event["u"])
-        except (KeyError, TypeError, ValueError):
+        if not isinstance(event, dict):
+            return False
+        first_update_id = self._parse_update_id(event.get("U"))
+        final_update_id = self._parse_update_id(event.get("u"))
+        if first_update_id is None or final_update_id is None:
             return False
 
         if first_update_id > final_update_id:
