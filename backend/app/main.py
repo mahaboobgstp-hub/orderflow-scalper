@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
     set_persistence_enqueue(persistence_worker.enqueue)
     await persistence_worker.start()
     app.state.backtesting_engine=BacktestEngine()
-    runtime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"],market_data=app.state.unified_market_data,imbalance=app.state.imbalance_detector,absorption=app.state.absorption_detector,zones=app.state.liquidity_zone_detector,trade_flow=app.state.trade_flow_momentum_detector,risk_engine=app.state.risk_management_engine,decision_engine=NineLayerDecisionEngine(operator_control_state["config"]),repository=repository)
+    decision_engine=NineLayerDecisionEngine(operator_control_state["config"]); app.state.nine_layer_decision_engine=decision_engine\nruntime=AutonomousPaperRuntime(app.state.coin_scanner,app.state.paper_trading_engine,operator_control_state["config"],operator_control_state["watchlist"],market_data=app.state.unified_market_data,imbalance=app.state.imbalance_detector,absorption=app.state.absorption_detector,zones=app.state.liquidity_zone_detector,trade_flow=app.state.trade_flow_momentum_detector,risk_engine=app.state.risk_management_engine,decision_engine=decision_engine,repository=repository); app.state.autonomous_paper_runtime=runtime
     set_runtime(runtime)
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
@@ -278,7 +278,7 @@ async def analyze_trade_flow(exchange:str,symbol:str,lookback_seconds:float=Quer
         return app.state.trade_flow_momentum_detector.analyze(book,trades,lookback_seconds=lookback_seconds)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc))
-@app.get("/api/scanner/coins")
+@app.get("/api/decision-engine/status")\nasync def decision_engine_status():\n    return {"engine":"nine_layer_decision_engine","mode":"PAPER_ONLY","live_exchange_execution":False,"decision_engine_config":app.state.nine_layer_decision_engine.config,"runtime":app.state.autonomous_paper_runtime.status()}\n\n@app.get("/api/scanner/coins")
 async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bool=False):
     """On-demand market scan. It calls public Binance USD-M endpoints."""
     try:
