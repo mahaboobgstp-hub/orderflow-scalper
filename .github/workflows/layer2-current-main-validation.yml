@@ -1,0 +1,36 @@
+name: Layer 2 Phase 6 Current Main Validation
+
+on:
+  push:
+    branches: [validation/layer2-phase6-mainline]
+    paths:
+      - "backend/app/services/absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_api.py"
+      - ".github/workflows/layer2-current-main-validation.yml"
+  pull_request:
+    paths:
+      - "backend/app/services/absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_api.py"
+      - ".github/workflows/layer2-current-main-validation.yml"
+
+jobs:
+  layer2-phase6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile detector and API tests
+        run: python -m compileall -q backend/app/services/absorption_detector.py backend/tests/test_phase6_absorption_detector.py backend/tests/test_phase6_absorption_api.py
+      - name: Run focused Phase 6 tests
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -vv tests/test_phase6_absorption_detector.py tests/test_phase6_absorption_api.py
