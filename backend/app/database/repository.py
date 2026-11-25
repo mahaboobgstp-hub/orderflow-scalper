@@ -35,7 +35,7 @@ class OrderFlowRepository:
             "status": status,
             "execution_enabled": bool(execution_enabled),
             "active_config_version": config_version,
-            "last_heartbeat_at": None,
+            "last_heartbeat_at": datetime.now(timezone.utc).isoformat(),
             "state_json": state or {},
         }
         try:
