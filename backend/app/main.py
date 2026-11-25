@@ -66,6 +66,21 @@ class PaperOrderRequest(BaseModel):
     quantity:float=Field(gt=0)
     price:float=Field(gt=0)
     leverage:float=Field(default=1.0,ge=1,le=5)
+    stop_loss_price:float|None=Field(default=None,gt=0)
+    take_profit_price:float|None=Field(default=None,gt=0)
+    tsl_enabled:bool=False
+    tsl_distance_pct:float|None=Field(default=None,gt=0,lt=100)
+    ttp_enabled:bool=False
+    ttp_activation_pct:float|None=Field(default=None,gt=0,lt=100)
+    ttp_trail_pct:float|None=Field(default=None,gt=0,lt=100)
+class PaperManagementRequest(BaseModel):
+    stop_loss_price:float|None=None
+    take_profit_price:float|None=None
+    tsl_enabled:bool|None=None
+    tsl_distance_pct:float|None=None
+    ttp_enabled:bool|None=None
+    ttp_activation_pct:float|None=None
+    ttp_trail_pct:float|None=None
 class PaperMarkPriceRequest(BaseModel):
     symbol:str=Field(min_length=1,max_length=30)
     price:float=Field(gt=0)
@@ -223,6 +238,10 @@ async def paper_account():
 @app.post("/api/paper/orders")
 async def paper_submit_order(request:PaperOrderRequest):
     try: return app.state.paper_trading_engine.submit(request.model_dump())
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+@app.post("/api/paper/manage/{symbol}")
+async def paper_manage_position(symbol:str,request:PaperManagementRequest):
+    try: return app.state.paper_trading_engine.update_management(symbol,request.model_dump(exclude_unset=True))
     except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
 @app.post("/api/paper/mark-price")
 async def paper_mark_price(request:PaperMarkPriceRequest):
