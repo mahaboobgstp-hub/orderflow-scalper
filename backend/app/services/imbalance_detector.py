@@ -6,6 +6,7 @@ fresh normalized books and reports diagnostics alongside pressure metrics.
 from __future__ import annotations
 
 import time
+import math
 from collections import deque
 from typing import Any
 
@@ -37,7 +38,7 @@ class OrderBookImbalanceDetector:
                 price, quantity = float(row[0]), float(row[1])
             except (ValueError, TypeError):
                 continue
-            if price <= 0 or quantity <= 0:
+            if not math.isfinite(price) or not math.isfinite(quantity) or price <= 0 or quantity <= 0:
                 continue
             parsed.append((price, quantity))
         parsed.sort(key=lambda x: x[0], reverse=(side == "bids"))
@@ -127,8 +128,9 @@ class OrderBookImbalanceDetector:
             classification = "NEUTRAL"
         # Confidence-quality is not predictive confidence. It grades data depth,
         # persistence, and agreement among raw/top/weighted measures.
-        depth_quality = min(len(bids), requested_levels) / requested_levels
-        agreement = 1.0 if (raw_score == 0 or weighted_score == 0 or raw_score * weighted_score > 0) else 0.0
+        depth_quality = min(len(bids), len(asks), requested_levels) / requested_levels
+        directions = [score for score in (raw_score, top_score, weighted_score) if abs(score) > 1e-9]
+        agreement = 1.0 if not directions or all(score * weighted_score > 0 for score in directions) else 0.0
         quality = round(100 * (0.5 * depth_quality + 0.3 * persistence + 0.2 * agreement), 2)
         return {
             "detector": "phase5_order_book_imbalance",
