@@ -230,3 +230,10 @@ def test_reentry_state_survives_small_zone_center_drift():
     result=detector.analyze(make_book(100.015),shifted,30)
     assert result["zones"]
     assert any(z["interaction_state"]=="ZONE_RETEST_OR_REENTRY" for z in result["zones"])
+
+
+@pytest.mark.parametrize("argument", ["max_book_age_seconds", "zone_band_pct", "breakout_buffer_pct"])
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_constructor_configuration_is_rejected(argument, invalid):
+    with pytest.raises(ValueError):
+        LiquidityZoneDetector(**{argument: invalid})
