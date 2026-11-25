@@ -219,3 +219,14 @@ def test_nine_layer_engine_marks_missing_layer3_zones_unavailable():
     layer=result["layers"]["liquidity_breakout"]
     assert layer["available"] is False
     assert layer["score"] is None
+
+
+def test_reentry_state_survives_small_zone_center_drift():
+    detector=LiquidityZoneDetector()
+    initial=trades([100.00,100.01,100.02])
+    detector.analyze(make_book(100.02),initial,30)
+    detector.analyze(make_book(100.20),initial,30)
+    shifted=trades([100.005,100.015,100.025])
+    result=detector.analyze(make_book(100.015),shifted,30)
+    assert result["zones"]
+    assert any(z["interaction_state"]=="ZONE_RETEST_OR_REENTRY" for z in result["zones"])
