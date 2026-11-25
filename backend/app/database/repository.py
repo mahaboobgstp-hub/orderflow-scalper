@@ -30,17 +30,20 @@ class OrderFlowRepository:
     async def engine_state(self, *, mode: str = "DEMO_PAPER_ONLY", status: str = "running",
                           execution_enabled: bool = False, config_version: int | None = None,
                           state: dict[str, Any] | None = None) -> bool:
-        # The schema currently permits multiple state rows; update is not attempted
-        # without a known row key. Heartbeats are the authoritative liveness record.
+        payload = {
+            "mode": mode,
+            "status": status,
+            "execution_enabled": bool(execution_enabled),
+            "active_config_version": config_version,
+            "last_heartbeat_at": None,
+            "state_json": state or {},
+        }
         try:
-            await self.db.insert("engine_state", {
-                "mode": mode,
-                "status": status,
-                "execution_enabled": bool(execution_enabled),
-                "active_config_version": config_version,
-                "last_heartbeat_at": None,
-                "state_json": state or {},
-            })
+            rows = await self.db.select("engine_state", columns="id", limit=1)
+            if rows:
+                await self.db.update("engine_state", payload, filters={"id": f"eq.{rows[0]['id"]})
+            else:
+                await self.db.insert("engine_state", payload)
             return True
         except Exception:
             return False
