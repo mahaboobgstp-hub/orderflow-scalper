@@ -6,11 +6,13 @@ on:
     paths:
       - "backend/app/services/absorption_detector.py"
       - "backend/tests/test_phase6_absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_api.py"
       - ".github/workflows/layer2-focused-validation.yml"
   pull_request:
     paths:
       - "backend/app/services/absorption_detector.py"
       - "backend/tests/test_phase6_absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_api.py"
       - ".github/workflows/layer2-focused-validation.yml"
 
 jobs:
@@ -26,9 +28,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt pytest
       - name: Compile detector and focused test
-        run: python -m compileall -q backend/app/services/absorption_detector.py backend/tests/test_phase6_absorption_detector.py
+        run: python -m compileall -q backend/app/services/absorption_detector.py backend/tests/test_phase6_absorption_detector.py backend/tests/test_phase6_absorption_api.py
       - name: Run Layer 2 absorption tests with verbose evidence
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -vv tests/test_phase6_absorption_detector.py
+        run: pytest -vv tests/test_phase6_absorption_detector.py tests/test_phase6_absorption_api.py
