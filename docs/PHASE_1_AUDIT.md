@@ -9,7 +9,7 @@
 - [x] Phase 5 — Order Book Imbalance Detector (implementation committed; runtime tests/API validation pending)
 - [x] Phase 6 — Absorption & Liquidity Behavior Engine (implementation committed; runtime tests/API validation pending)
 - [x] Phase 7 — Liquidity Zone & Breakout Detector (implementation committed; runtime API tests and live validation pending)
-- [ ] Phase 8 — Aggressive Trade Flow & Momentum Engine
+- [x] Phase 8 — Aggressive Trade Flow & Momentum Engine (implementation committed; runtime tests/live validation pending)
 - [ ] Phase 9 — Volatility, Market Regime & Broader Context Engine
 - [ ] Phase 10 — Risk Management & Position Sizing Engine
 - [ ] Phase 11 — Order Execution & Paper Trading Engine
