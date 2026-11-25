@@ -132,7 +132,7 @@ export default function App() {
   const totalPnl = Number(paper?.realized_pnl || 0) + Number(paper?.unrealized_pnl || 0);
   const engineLabel = control?.engine_state || "UNKNOWN";
   const isLiveFeed = Boolean(exchanges && Object.values(exchanges).some(x=>x?.connected || x?.status==="connected"));
-  const opportunities = scanner?.coins || scanner?.results || scanner?.data || [];
+  const opportunities = scanner?.markets || scanner?.coins || scanner?.results || scanner?.data || [];
   const displayEvents = useMemo(()=>events.slice(0,60),[events]);
 
   function header(title, subtitle) {
@@ -153,7 +153,7 @@ export default function App() {
       <div className="stats-grid">
         {stat("Total P&L", money(totalPnl), "Realized + unrealized from paper account", totalPnl>=0?"positive":"negative")}
         {stat("Open Positions", openPositions.length, "Paper positions")}
-        {stat("Qualified Scanner Results", opportunities.length, "Latest scanner response")}
+        {stat("Qualified Scanner Results", scanner?.candidate_count ?? opportunities.length, "Candidate coins returned")}
         {stat("Closed Trades", closed.length, "History returned by backend")}
       </div>
       <div className="panel">
@@ -177,6 +177,7 @@ export default function App() {
           <div className="list-row"><div><b>Diagnostics</b><small>Component initialization</small></div><span className="status-chip">{diagnostics?.status || "N/A"}</span></div>
         </div>
       </div>
+      <div className="panel"><div className="panel-title"><h2>Scanner Candidates</h2><button className="link-button" onClick={refreshScanner}>Refresh scanner</button></div><div className="subtle">Public Binance scanner · ranking only, not trading signals</div>{opportunities.length===0?<div className="empty-state">No candidates returned or scanner unavailable.</div>:opportunities.slice(0,8).map((coin,i)=><div className="list-row" key={coin.symbol||i}><div><b>{coin.symbol}</b><small>{coin.activity_acceleration_label||"Activity"} · {value(coin.price_change_24h_pct)}% 24h change</small></div><div className="align-right"><b>{value(coin.suitability_score)}</b><small>Suitability score</small></div></div>)}</div>
       <div className="panel"><div className="panel-title"><h2>Recent Engine Events</h2><button className="link-button" onClick={()=>setPage("activity")}>View activity</button></div>{displayEvents.length===0?<div className="empty-state">No operator events yet.</div>:displayEvents.slice(0,8).map((e,i)=><div className="event-row" key={i}><span className="event-time">{timeText(e.timestamp)}</span><b>{labelEvent(e)}</b><small>{JSON.stringify(e.details||{})}</small></div>)}</div>
     </>;
   }
