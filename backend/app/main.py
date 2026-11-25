@@ -16,6 +16,7 @@ from app.services.market_context_dummy_api import DummyMarketContextAPI
 from app.services.market_regime_context import MarketRegimeContextEngine
 from app.services.risk_management import RiskManagementEngine
 from app.services.paper_trading import PaperTradingEngine
+from app.services.backtesting import BacktestEngine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
     app.state.market_regime_context_engine=MarketRegimeContextEngine()
     app.state.risk_management_engine=RiskManagementEngine()
     app.state.paper_trading_engine=PaperTradingEngine()
+    app.state.backtesting_engine=BacktestEngine()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
@@ -88,6 +90,15 @@ class PaperCloseRequest(BaseModel):
     price:float=Field(gt=0)
 class PaperResetRequest(BaseModel):
     initial_equity:float=Field(gt=0)
+class BacktestCandle(BaseModel):
+    timestamp: str | int | float | None = None
+    open: float=Field(gt=0)
+    high: float=Field(gt=0)
+    low: float=Field(gt=0)
+    close: float=Field(gt=0)
+class BacktestRunRequest(BaseModel):
+    candles:list[BacktestCandle]
+    config:dict[str,Any]={}
 class DemoOrderRequest(BaseModel):
     symbol:str=Field(default="BTCUSDT",min_length=3,max_length=20)
     side:str
@@ -227,6 +238,15 @@ async def risk_position_size(request:RiskSizingRequest):
 async def risk_portfolio_check(request:PortfolioRiskRequest):
     try: return app.state.risk_management_engine.evaluate_portfolio(**request.model_dump())
     except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+
+# Phase 13 — Offline historical backtesting (never fetches market data)
+@app.get("/api/backtest/status")
+async def backtest_status():
+    return {"phase":13,"engine":"offline_backtesting","mode":"OFFLINE_HISTORICAL_CANDLES","data_is_live":False,"strategy":"EMA_CROSS baseline","exchange_api_calls":False,"metrics":["net_pnl","return_pct","win_rate","profit_factor","average_win","average_loss","max_drawdown","long_short_attribution"],"warning":"Candle-only baseline. Order-book strategy evaluation requires richer historical data and later integration."}
+@app.post("/api/backtest/run")
+async def run_backtest(request:BacktestRunRequest):
+    try: return app.state.backtesting_engine.run([c.model_dump() for c in request.candles],request.config)
+    except (ValueError,TypeError,KeyError) as exc: raise HTTPException(status_code=422,detail=str(exc))
 
 # Phase 11 — Paper-only simulator endpoints; never call exchange execution
 @app.get("/api/paper/status")
