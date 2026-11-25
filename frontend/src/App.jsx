@@ -19,7 +19,12 @@ const CONFIG_FIELDS = [
   ["cooldown_seconds", "Cooldown (seconds)", 0, 86400, 30],
   ["trailing_stop_pct", "Trailing stop distance (%)", 0.05, 50, 0.05],
   ["trailing_take_profit_activation_pct", "Trailing TP activation (%)", 0.05, 50, 0.05],
-  ["trailing_take_profit_pct", "Trailing TP distance (%)", 0.05, 50, 0.05],\n  ["min_opportunity_score", "Minimum opportunity score", 0, 100, 1],\n  ["min_liquidity_usd", "Minimum liquidity (USD)", 0, 10000000000, 1000],\n  ["min_24h_volume_usd", "Minimum 24h volume (USD)", 0, 10000000000, 10000],\n  ["scanner_interval_seconds", "Scanner interval (seconds)", 5, 600, 5],\n  ["max_watchlist_symbols", "Maximum watchlist symbols", 1, 200, 1],
+  ["trailing_take_profit_pct", "Trailing TP distance (%)", 0.05, 50, 0.05],
+  ["min_opportunity_score", "Minimum opportunity score", 0, 100, 1],
+  ["min_liquidity_usd", "Minimum liquidity (USD)", 0, 10000000000, 1000],
+  ["min_24h_volume_usd", "Minimum 24h volume (USD)", 0, 10000000000, 10000],
+  ["scanner_interval_seconds", "Scanner interval (seconds)", 5, 600, 5],
+  ["max_watchlist_symbols", "Maximum watchlist symbols", 1, 200, 1],
 ];
 const EMPTY = "--";
 const timeText = (v) => v ? new Date(typeof v === "number" && v < 1e12 ? v * 1000 : v).toLocaleTimeString() : "--";
