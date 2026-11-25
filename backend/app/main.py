@@ -279,7 +279,11 @@ async def analyze_trade_flow(exchange:str,symbol:str,lookback_seconds:float=Quer
         return app.state.trade_flow_momentum_detector.analyze(book,trades,lookback_seconds=lookback_seconds)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc))
-@app.get("/api/decision-engine/status")\nasync def decision_engine_status():\n    return {"engine":"nine_layer_decision_engine","mode":"PAPER_ONLY","live_exchange_execution":False,"decision_engine_config":app.state.nine_layer_decision_engine.config,"runtime":app.state.autonomous_paper_runtime.status()}\n\n@app.get("/api/scanner/coins")
+@app.get("/api/decision-engine/status")
+async def decision_engine_status():
+    return {"engine":"nine_layer_decision_engine","mode":"PAPER_ONLY","live_exchange_execution":False,"decision_engine_config":app.state.nine_layer_decision_engine.config,"runtime":app.state.autonomous_paper_runtime.status()}
+
+@app.get("/api/scanner/coins")
 async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bool=False):
     """On-demand market scan. It calls public Binance USD-M endpoints."""
     try:
