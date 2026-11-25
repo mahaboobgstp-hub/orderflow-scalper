@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
     try:
         await stream.start(); await manager.start()
         app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3,'supabase_connected':database.connected})
+        await repository.engine_state(mode='DEMO_PAPER_ONLY',status='running',execution_enabled=False,state={'autonomous_entry_enabled':False,'paper_only':True})
         await repository.system_log('INFO','Backend startup completed','lifecycle',{'database_connected':database.connected,'mode':'PAPER_ONLY'})
         yield
     except Exception as exc:
@@ -67,6 +68,8 @@ async def lifespan(app: FastAPI):
         logger.exception('Application lifecycle error')
         raise
     finally:
+        try: await repository.engine_state(mode='DEMO_PAPER_ONLY',status='stopped',execution_enabled=False,state={'autonomous_entry_enabled':False,'paper_only':True})
+        except Exception: logger.exception('Supabase engine-state shutdown update error')
         try: await repository.system_log('INFO','Backend shutdown initiated','lifecycle',{'mode':'PAPER_ONLY'})
         except Exception: logger.exception('Supabase shutdown log error')
         try: await database.write_heartbeat('offline', {'shutdown': True})
