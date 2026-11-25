@@ -62,7 +62,6 @@ class BacktestEngine:
                     entry_fill=price*(1+slip if signal=="long" else 1-slip)
                     notional=entry_fill*qty; entry_fee=notional*fee
                     if qty>0 and entry_fee<equity:
-                        equity-=entry_fee
                         position={"side":signal,"entry_time":timestamp,"entry_price":price,"entry_fill":entry_fill,"qty":qty,"entry_fee":entry_fee,"best_price":float(c["high"]) if signal=="long" else float(c["low"]),"stop_price":price*(1-stop_pct if signal=="long" else 1+stop_pct),"take_price":price*(1+tp_pct if signal=="long" else 1-tp_pct)}
             peak=max(peak,equity); max_dd=max(max_dd,(peak-equity)/peak if peak else 0)
             equity_curve.append({"timestamp":timestamp,"equity":round(equity,8)})
