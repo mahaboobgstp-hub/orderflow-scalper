@@ -344,3 +344,26 @@ async def paper_reset(request:PaperResetRequest):
 
 # Operator controls (API-only state; autonomous engine integration is not yet enabled)
 app.include_router(operator_control_router)
+
+# Infrastructure readiness summary. This endpoint is diagnostic and never enables execution.
+@app.get("/api/infrastructure/status")
+async def infrastructure_status():
+    database_status = await database.status(refresh=True)
+    diagnostics = app.state.monitoring_service.diagnostics(app)
+    return {
+        "service": "orderflow-scalper-api",
+        "status": "ready" if diagnostics["status"] == "ok" else "degraded",
+        "mode": "PAPER_ONLY",
+        "live_execution_enabled": False,
+        "deployment": {
+            "platform": os.getenv("RENDER", "unknown"),
+            "instance_id": os.getenv("RENDER_INSTANCE_ID", "unknown"),
+        },
+        "components": diagnostics,
+        "database": database_status,
+        "market_data": {
+            "primary_stream": await app.state.market_stream.get_status(),
+            "unified_data": app.state.unified_market_data.get_status(),
+            "exchange_connections": await app.state.exchange_manager.status(),
+        },
+    }
