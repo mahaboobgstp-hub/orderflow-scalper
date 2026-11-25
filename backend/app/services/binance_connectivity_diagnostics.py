@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import os
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import httpx
 import websockets
@@ -82,7 +82,7 @@ async def _signed_account_probe(base: str, key: str, auth_type: str, secret: str
         query = urlencode(payload)
         signature = _sign_payload(query, auth_type, secret, private_key_pem)
         response = await client.get(
-            f"{base}/fapi/v2/account?{query}&signature={urlencode({'signature': signature})[10:]}",
+            f"{base}/fapi/v2/account?{query}&signature={quote(signature, safe='')}",
             headers={"X-MBX-APIKEY": key},
         )
         if response.is_error:
