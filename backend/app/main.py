@@ -373,3 +373,10 @@ async def infrastructure_status():
             "exchange_connections": await app.state.exchange_manager.status(),
         },
     }
+
+@app.get("/ready")
+async def readiness():
+    diagnostics = app.state.monitoring_service.diagnostics(app)
+    if diagnostics["status"] != "ok":
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "components": diagnostics["initialized_components"]})
+    return {"status": "ready", "mode": "PAPER_ONLY", "live_execution_enabled": False}
