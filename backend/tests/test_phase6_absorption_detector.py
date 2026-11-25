@@ -54,5 +54,23 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertIn("not an entry",result["diagnostics"][2].lower())
 
 
+    def test_rejects_negative_and_nonfinite_book_age(self):
+        detector=AbsorptionLiquidityDetector()
+        for age in (-0.01, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(age=age):
+                with self.assertRaisesRegex(ValueError, "age"):
+                    detector.analyze(book(age_seconds=age),trades())
+
+    def test_rejects_non_numeric_book_age(self):
+        with self.assertRaisesRegex(ValueError, "age"):
+            AbsorptionLiquidityDetector().analyze(book(age_seconds="not-a-number"),trades())
+
+    def test_rejects_nonfinite_lookback(self):
+        detector=AbsorptionLiquidityDetector()
+        for lookback in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(lookback=lookback):
+                with self.assertRaisesRegex(ValueError, "Lookback"):
+                    detector.analyze(book(),trades(),lookback_seconds=lookback)
+
 if __name__=="__main__":
     unittest.main()
