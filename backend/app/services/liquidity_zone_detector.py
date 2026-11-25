@@ -34,7 +34,7 @@ class LiquidityZoneDetector:
         for t in trades or []:
             if not isinstance(t,dict): continue
             try: p=float(t.get("price",0)); q=float(t.get("quantity",0)); ts=int(t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0)
-            except (ValueError,TypeError): continue
+            except (ValueError,TypeError,OverflowError): continue
             if p>0 and q>0 and math.isfinite(p) and math.isfinite(q) and cutoff<=ts<=now+5000:
                 points.append((p,q,ts))
         points.sort(key=lambda x:x[0])
@@ -84,6 +84,7 @@ class LiquidityZoneDetector:
         tape.sort()
         key=f"{exchange}:{symbol}"; prior=self._previous_state.get(key,{})
         zones=[]
+        active_state={}
         for c in clusters:
             low,high=c["low"],c["high"]
             center=sum(c["prices"])/len(c["prices"])
@@ -110,7 +111,8 @@ class LiquidityZoneDetector:
             last_tape_price = tape[-1][1] if tape else None
             possible_rejection = bool(tape_touched and last_tape_price is not None and
                 (last_tape_price < lower_break or last_tape_price > upper_break))
-            if possible_rejection:
+            # Do not let the tape-only rejection heuristic mask a mid-price breakout.
+            if possible_rejection and state not in ("BREAKOUT_UP", "BREAKOUT_DOWN"):
                 state="POSSIBLE_REJECTION"
             elif approaching: state="APPROACHING"
             zone_type="SUPPORT" if center<mid else "RESISTANCE"
@@ -119,8 +121,10 @@ class LiquidityZoneDetector:
                 "last_interaction_timestamp_ms":c["last_ts"],"price_position":position,"distance_to_zone_pct":round(proximity_pct,5),
                 "approaching":approaching,"possible_rejection":possible_rejection,"interaction_state":state,
                 "breakout_buffer_low":round(lower_break,8),"breakout_buffer_high":round(upper_break,8)})
-            prior[zone_id]=state
-        self._previous_state[key]=prior
+            active_state[zone_id]=state
+        # Keep only zones present in this observation to avoid stale-state growth
+        # and false re-entry when old zones disappear and later reappear.
+        self._previous_state[key]=active_state
         # Displayed depth clusters: top 5 levels as separate reference zones, not historical liquidity.
         bidwalls=sorted(bids,key=lambda x:x[1],reverse=True)[:5]
         askwalls=sorted(asks,key=lambda x:x[1],reverse=True)[:5]
