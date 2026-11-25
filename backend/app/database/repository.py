@@ -50,6 +50,15 @@ class OrderFlowRepository:
         except Exception:
             return False
 
+    async def load_paper_state(self) -> dict[str, Any]:
+        """Load latest persisted paper account snapshot and open position rows."""
+        state_rows = await self.db.select("engine_state", columns="state_json,updated_at", limit=1, order="updated_at.desc")
+        open_positions = await self.db.select("positions", columns="id,symbol,side,quantity,entry_price,mark_price,stop_loss,take_profit,trailing_stop_price,trailing_take_profit_price,position_data,opened_at", filters={"status":"eq.OPEN"}, limit=500)
+        return {"snapshot": (state_rows[0].get("state_json") if state_rows else {}) or {}, "open_positions": open_positions or []}
+
+    async def save_paper_state(self, snapshot: dict[str, Any]) -> bool:
+        return await self.engine_state(mode="DEMO_PAPER_ONLY", status="running", execution_enabled=False, state={"paper_account":snapshot})
+
     async def decision(self, symbol: str, decision: str, *, score: float | None = None,
                       layers: dict[str, Any] | list[Any] | None = None,
                       rationale: dict[str, Any] | list[Any] | None = None,
