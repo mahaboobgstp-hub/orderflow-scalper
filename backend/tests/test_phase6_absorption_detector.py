@@ -39,7 +39,7 @@ class Phase6DetectorTests(unittest.TestCase):
         detector.analyze(book(),trades("buy"),15)
         up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),trades("buy"),15)
         self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
-        self.assertEqual(up["metrics"]["sell_price_progress_pct"],0.0)
+        self.assertLess(up["metrics"]["sell_price_progress_pct"],0)
         down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),trades("sell"),15)
         self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
         self.assertLess(down["metrics"]["buy_price_progress_pct"],0)
