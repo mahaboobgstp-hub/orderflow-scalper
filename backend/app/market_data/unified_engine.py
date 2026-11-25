@@ -45,6 +45,11 @@ class UnifiedMarketDataEngine:
         ex=exchange.lower()
         if not isinstance(raw,dict): return None
         topic=raw.get("topic",""); data=raw.get("data",raw)
+        if isinstance(data,list) and topic.startswith("publicTrade"):
+            result=None
+            for item in data:
+                if isinstance(item,dict): result=self.process(ex,{"topic":topic,"data":item},default_symbol) or result
+            return result
         if not isinstance(data,dict): return None
         symbol=str(data.get("s") or data.get("symbol") or default_symbol).upper()
         ts=self.as_int(raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts"))
@@ -74,7 +79,7 @@ class UnifiedMarketDataEngine:
                 if snap: b.synchronized=bool(b.bids and b.asks); b.error=None if b.synchronized else "Empty snapshot"
                 self.touch(ex,b,ts); return {"type":"book_snapshot" if snap else "book_delta","synchronized":b.synchronized}
             tape=[]
-            if ex=="binance" and raw.get("e")=="aggTrade": tape=[raw]
+            if ex=="binance" and data.get("e")=="aggTrade": tape=[data]
             elif topic.startswith("publicTrade"): tape=data if isinstance(data,list) else [data]
             elif ex=="delta" and "price" in data and ("size" in data or "quantity" in data): tape=[data]
             for t in tape:
