@@ -11,7 +11,7 @@
 | 7 | Liquidity zone & breakout detector | Implemented; tests/runtime pending |
 | 8 | Aggressive trade flow & momentum detector | Implemented; isolated reconstruction tests passed; full repo runtime pending |
 | 9 | Volatility, market regime & broader context | Implemented with dummy OHLCV provider; tests/runtime pending |
-| 10 | Risk management & position sizing | Not started |
+| 10 | Risk management & position sizing | Implemented calculation/advisory guard; tests/runtime pending |
 | 11 | Paper execution engine | Not started |
 | 12 | Advanced position management (TSL/TTP) | Not started |
 | 13 | Backtesting & performance analytics | Not started |
