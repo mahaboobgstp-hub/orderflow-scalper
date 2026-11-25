@@ -1,7 +1,13 @@
-
 {
-  "appId": "com.orderflowscalper.app",
+  "appId": "com.orderflowscalper.remote",
   "appName": "OrderFlow Scalper",
   "webDir": "dist",
-  "bundledWebRuntime": false
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://orderflow-scalper-jmgxaolqc-mahaboobs-projects-c4dc881b.vercel.app",
+    "cleartext": false,
+    "allowNavigation": [
+      "orderflow-scalper-jmgxaolqc-mahaboobs-projects-c4dc881b.vercel.app"
+    ]
+  }
 }
