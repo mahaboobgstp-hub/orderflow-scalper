@@ -41,7 +41,7 @@ class OrderFlowRepository:
         try:
             rows = await self.db.select("engine_state", columns="id", limit=1)
             if rows:
-                await self.db.update("engine_state", payload, filters={"id": f"eq.{rows[0]['id"]})
+                await self.db.update("engine_state", payload, filters={"id": f"eq.{rows[0]['id']}"})
             else:
                 await self.db.insert("engine_state", payload)
             return True
