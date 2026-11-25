@@ -116,6 +116,15 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["trade_count"],2)
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],2.0)
 
+    def test_flow_exhaustion_uses_timestamp_order_not_input_order(self):
+        detector=AbsorptionLiquidityDetector()
+        now_ms=int(__import__("time").time()*1000)
+        late=[{"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms-100+i} for i in range(3)]
+        early=[{"side":"buy","quantity":10,"price":100.05,"received_timestamp_ms":now_ms-200+i} for i in range(3)]
+        # Deliberately pass later trades before earlier ones.
+        result=detector.analyze(book(),late+early,15)
+        self.assertEqual(result["flow_exhaustion"],"FLOW_WEAKENING")
+
     def test_absorption_requires_baseline_within_lookback(self):
         detector=AbsorptionLiquidityDetector()
         detector.analyze(book(),trades("buy"),lookback_seconds=1)
