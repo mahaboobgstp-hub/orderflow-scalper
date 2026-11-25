@@ -15,7 +15,7 @@ class AutonomousPaperRuntime:
         self.config=dict(config); self.watchlist=list(watchlist); self.broader_symbol=broader_symbol
         self._task=None; self._running=False; self._paused=False
         self._last_scan=None; self._last_error=None; self._scan_count=0; self._started_at=None; self._last_scan_time=None
-        self._decisions=[]; self._last_decisions_by_symbol={}; self._logged_signatures={}
+        self._decisions=[]; self._last_decisions_by_symbol={}; self._logged_signatures={}; self._session_closed_trade_cursor=0
 
     def status(self):
         return {"connected":True,"state":"RUNNING" if self._running and not self._paused else "PAUSED" if self._running else "STOPPED",
@@ -119,8 +119,8 @@ class AutonomousPaperRuntime:
             stop_pct=float(cfg.get("initial_stop_loss_pct",cfg.get("trailing_stop_pct",1.0)))
             stop_price=price*(1-stop_pct/100) if side=="long" else price*(1+stop_pct/100)
             sizing=self.risk_engine.calculate({"symbol":symbol,"account_equity":equity,"entry_price":price,
-                "stop_loss_price":stop_price,"side":side,"risk_per_trade_pct":cfg.get("risk_per_trade_pct",0.5),
-                "leverage":min(float(cfg.get("max_leverage",1)),5),"max_position_notional_pct":cfg.get("max_total_exposure_pct",25)})
+                "stop_loss_price":stop_price,"side":side,"risk_per_trade_pct":min(float(cfg.get("risk_per_trade_pct",0.5)),float(self.validation_session.config_values.get("max_single_trade_risk_pct",0.5)) if self.validation_session else 0.5),
+                "leverage":min(float(cfg.get("max_leverage",1)),5,float(self.validation_session.config_values.get("max_leverage",5)) if self.validation_session else 5),"max_position_notional_pct":cfg.get("max_total_exposure_pct",25)})
             if sizing.get("position_quantity",0)>0:
                 try:
                     self.paper_engine.submit({"symbol":symbol,"side":side,"quantity":sizing["position_quantity"],"price":price,
@@ -172,6 +172,12 @@ class AutonomousPaperRuntime:
                         if symbol and price:
                             try: self.paper_engine.mark(symbol,float(price))
                             except (ValueError,TypeError): pass
+                    # Capture simulator exits into controlled-session metrics.
+                    if self.validation_session:
+                        closed=self.paper_engine.closed_trades
+                        new_closed=closed[self._session_closed_trade_cursor:]
+                        for trade in new_closed: self.validation_session.record_exit(trade)
+                        self._session_closed_trade_cursor=len(closed)
                     # Broader context is sourced from a live scanner BTC ticker when present.
                     btc=next((m for m in markets if m.get("symbol")=="BTCUSDT"),None)
                     broader={"score":max(-50,min(50,float(btc.get("price_change_24h_pct",0))*2)),
