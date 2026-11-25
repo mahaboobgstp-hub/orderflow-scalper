@@ -28,7 +28,22 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
         self.assertTrue(result["metrics"]["sell_absorption_candidate"])
 
-    def test_no_clear_absorption_when_tape_below_minimum(self):
+    def test_first_sample_does_not_infer_absorption_without_temporal_baseline(self):
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy"),15)
+        self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
+        self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
+
+    def test_buy_and_sell_progress_are_temporal_and_directional(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("buy"),15)
+        up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),trades("buy"),15)
+        self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
+        self.assertEqual(up["metrics"]["sell_price_progress_pct"],0.0)
+        down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),trades("sell"),15)
+        self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
+        self.assertEqual(down["metrics"]["buy_price_progress_pct"],0.0)
+
+    def test_no_clear_absorption_when_tape_below_minimum(self)
         result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["trade_count"],2)
@@ -69,7 +84,15 @@ class Phase6DetectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "age"):
             AbsorptionLiquidityDetector().analyze(book(age_seconds="not-a-number"),trades())
 
-    def test_rejects_nonfinite_lookback(self):
+    def test_rejects_nonfinite_detector_configuration(self):
+        for value in (float("nan"),float("inf"),float("-inf")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError,"finite"):
+                    AbsorptionLiquidityDetector(absorption_threshold=value)
+                with self.assertRaisesRegex(ValueError,"finite"):
+                    AbsorptionLiquidityDetector(max_book_age_seconds=value)
+
+    def test_rejects_nonfinite_lookback(self)
         detector=AbsorptionLiquidityDetector()
         for lookback in (float("nan"), float("inf"), float("-inf")):
             with self.subTest(lookback=lookback):
