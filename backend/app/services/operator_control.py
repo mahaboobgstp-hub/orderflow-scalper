@@ -1,5 +1,5 @@
 """Remote operator controls for OrderFlow Scalper. Config is in-memory only.
-Autonomous strategy execution is not integrated; engine commands are safely blocked.
+Runtime scanning is integrated; trade decision and automatic order execution remain disabled.
 """
 from __future__ import annotations
 import os
@@ -138,7 +138,7 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
         if key in enum_choices:
             if not isinstance(value, str) or value not in enum_choices[key]:
                 raise HTTPException(status_code=422, detail=f"Invalid value for {key}.")
-        elif key == "strategy_enabled":
+        elif key in {"strategy_enabled", "exchange_enabled"}:
             current_keys = set(state["config"]["strategy_enabled"])
             if not isinstance(value, dict) or set(value) - current_keys or any(not isinstance(v, bool) for v in value.values()):
                 raise HTTPException(status_code=422, detail="strategy_enabled must contain known strategy keys with boolean values.")
