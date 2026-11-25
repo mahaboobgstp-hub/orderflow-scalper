@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SupabaseDatabase:
@@ -41,12 +44,19 @@ class SupabaseDatabase:
         if not self.configured:
             self.connected = False
             self.last_error = "Supabase credentials are not configured."
+            logger.error("Supabase startup blocked: URL/key configuration missing")
             return False
         if self.client is None:
             self.client = self._new_client()
         if await self.check_connection():
-            await self.write_heartbeat("online", {"startup_check": True})
+            heartbeat_ok = await self.write_heartbeat("online", {"startup_check": True})
+            if heartbeat_ok:
+                logger.info("Supabase connection verified and startup heartbeat written")
+            else:
+                logger.error("Supabase connected but startup heartbeat write failed: %s", self.last_error)
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        else:
+            logger.error("Supabase startup connection check failed: %s", self.last_error)
         return self.connected
 
     async def _heartbeat_loop(self) -> None:
@@ -76,9 +86,11 @@ class SupabaseDatabase:
             response.raise_for_status()
             self.connected = True
             self.last_error = None
+            logger.info("Supabase REST connectivity check succeeded")
         except Exception as exc:
             self.connected = False
             self.last_error = f"{type(exc).__name__}: {str(exc)[:240]}"
+            logger.error("Supabase REST connectivity check failed: %s", self.last_error)
         return self.connected
 
     async def _request(self, method: str, table: str, *, params: dict[str, Any] | None = None,
@@ -144,10 +156,12 @@ class SupabaseDatabase:
             self.connected = True
             self.last_error = None
             self.last_heartbeat = datetime.now(timezone.utc).isoformat()
+            logger.info("Supabase heartbeat write succeeded (%s)", status)
             return True
         except Exception as exc:
             self.connected = False
             self.last_error = f"Heartbeat write failed: {type(exc).__name__}: {str(exc)[:240]}"
+            logger.error("Supabase heartbeat write failed: %s", self.last_error)
             return False
 
     async def status(self, refresh: bool = False) -> dict[str, Any]:
