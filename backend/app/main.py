@@ -385,6 +385,10 @@ async def paper_persistence_status():
 @app.get("/api/paper/account")
 async def paper_account():
     return app.state.paper_trading_engine.account()
+@app.get("/api/paper/orders")
+async def paper_orders():
+    engine=app.state.paper_trading_engine
+    return {"mode":"PAPER_ONLY","real_orders":False,"orders":list(engine.orders[-500:]),"count":len(engine.orders)}
 @app.post("/api/paper/orders")
 async def paper_submit_order(request:PaperOrderRequest):
     try: return app.state.paper_trading_engine.submit(request.model_dump())
