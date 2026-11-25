@@ -14,6 +14,7 @@ from app.services.liquidity_zone_detector import LiquidityZoneDetector
 from app.services.trade_flow_momentum import TradeFlowMomentumDetector
 from app.services.market_context_dummy_api import DummyMarketContextAPI
 from app.services.market_regime_context import MarketRegimeContextEngine
+from app.services.risk_management import RiskManagementEngine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
     app.state.trade_flow_momentum_detector=TradeFlowMomentumDetector()
     app.state.market_context_dummy_api=DummyMarketContextAPI()
     app.state.market_regime_context_engine=MarketRegimeContextEngine()
+    app.state.risk_management_engine=RiskManagementEngine()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
@@ -40,6 +42,22 @@ async def lifespan(app: FastAPI):
 
 app=FastAPI(title="OrderFlow Scalper API",description="Multi-exchange public market-data and Binance demo execution backend",version="0.5.0")
 
+class RiskSizingRequest(BaseModel):
+    symbol:str=Field(default="UNKNOWN",min_length=1,max_length=30)
+    account_equity:float=Field(gt=0)
+    entry_price:float=Field(gt=0)
+    stop_loss_price:float=Field(gt=0)
+    side:str
+    risk_per_trade_pct:float|None=Field(default=None,ge=0.01,le=5)
+    leverage:float=Field(default=1.0,ge=1,le=5)
+    max_position_notional_pct:float|None=Field(default=None,ge=1,le=100)
+class PortfolioRiskRequest(BaseModel):
+    account_equity:float=Field(gt=0)
+    daily_realized_loss:float=Field(default=0,ge=0)
+    open_risk:float=Field(default=0,ge=0)
+    open_positions:int=Field(default=0,ge=0)
+    consecutive_losses:int=Field(default=0,ge=0)
+    risk_per_trade_pct:float|None=Field(default=None,ge=0.01,le=5)
 class DemoOrderRequest(BaseModel):
     symbol:str=Field(default="BTCUSDT",min_length=3,max_length=20)
     side:str
@@ -165,4 +183,17 @@ async def market_context_regime(symbol:str,interval:str="1m",limit:int=Query(def
     if slow_period<=fast_period: raise HTTPException(status_code=400,detail="slow_period must be greater than fast_period")
     payload=app.state.market_context_dummy_api.get_candles(symbol,interval,limit)
     try: return app.state.market_regime_context_engine.analyze(payload,fast_period,slow_period)
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+
+# Phase 10 risk-management endpoints — advisory/calculation only
+@app.get("/api/risk/status")
+async def risk_engine_status():
+    return app.state.risk_management_engine.status()
+@app.post("/api/risk/position-size")
+async def risk_position_size(request:RiskSizingRequest):
+    try: return app.state.risk_management_engine.calculate(request.model_dump())
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
+@app.post("/api/risk/portfolio-check")
+async def risk_portfolio_check(request:PortfolioRiskRequest):
+    try: return app.state.risk_management_engine.evaluate_portfolio(**request.model_dump())
     except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
