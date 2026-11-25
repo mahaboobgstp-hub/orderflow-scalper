@@ -74,3 +74,48 @@ def test_malformed_trade_records_are_ignored():
         {"price":100,"quantity":"bad","received_timestamp_ms":int(time.time()*1000)}
     ],30)
     assert result["zones"]==[]
+
+def test_missing_book_side_and_crossed_book_rejected():
+    detector=LiquidityZoneDetector()
+    bad=make_book()
+    bad["asks"]=[]
+    with pytest.raises(ValueError):
+        detector.analyze(bad,[],30)
+    bad=make_book()
+    bad["bids"]=[[100.01,1]]
+    bad["asks"]=[[100.01,1]]
+    with pytest.raises(ValueError):
+        detector.analyze(bad,[],30)
+
+
+def test_symbol_state_isolation_for_breakout_and_reentry():
+    detector=LiquidityZoneDetector()
+    t=trades([100.00,100.01,100.02,100.03])
+    detector.analyze(make_book(100.02),t,30)
+    # ETH breakout is observed; BTC uses the same price cluster but must not
+    # inherit ETH's prior state because the detector key includes symbol.
+    eth=make_book(100.20)
+    eth["symbol"]="ETHUSDT"
+    detector.analyze(eth,t,30)
+    btc=make_book(100.02)
+    btc["symbol"]="BTCUSDT"
+    result=detector.analyze(btc,t,30)
+    assert any(z["interaction_state"]=="IN_ZONE" for z in result["zones"])
+
+
+def test_invalid_trade_timestamps_and_out_of_window_are_filtered():
+    now=int(time.time()*1000)
+    result=LiquidityZoneDetector().analyze(make_book(),[
+        {"price":100.0,"quantity":2,"received_timestamp_ms":"bad"},
+        {"price":100.01,"quantity":2,"received_timestamp_ms":now-100000},
+        {"price":float("nan"),"quantity":2,"received_timestamp_ms":now},
+        {"price":100.02,"quantity":2,"received_timestamp_ms":now+60000}
+    ],30)
+    assert result["zones"]==[]
+
+
+def test_zone_limit_is_respected():
+    d=LiquidityZoneDetector(max_zones=2,zone_band_pct=0.01)
+    prices=[99.80,99.90,100.00,100.10,100.20,100.30,100.40]
+    result=d.analyze(make_book(100.0),trades(prices),30)
+    assert result["zone_count"]<=2
