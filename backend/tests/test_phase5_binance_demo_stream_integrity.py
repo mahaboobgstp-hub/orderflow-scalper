@@ -73,6 +73,41 @@ class BinanceDemoBookIntegrityTests(unittest.TestCase):
         self.assertEqual(stream.asks, before_asks)
         self.assertEqual(stream.last_update_id, before_id)
 
+    def test_rejects_fractional_and_boolean_sequence_ids(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        stream._load_snapshot(valid_snapshot())
+        bad_initial_events = (
+            depth_event(100.5, 101.5, 100),
+            depth_event(True, 101, 100),
+            depth_event(100, True, 100),
+        )
+        for event in bad_initial_events:
+            with self.subTest(event=event):
+                self.assertFalse(stream._event_bridges_snapshot(event))
+
+        stream = self.ready_stream()
+        before_bids, before_asks, before_id = dict(stream.bids), dict(stream.asks), stream.last_update_id
+        bad_following_events = (
+            depth_event(101, 102, 100.5),
+            depth_event(101, 102, True),
+            depth_event(101.0, 102, 100),
+        )
+        for event in bad_following_events:
+            with self.subTest(event=event):
+                self.assertFalse(stream._apply_event(event))
+                self.assertEqual(stream.bids, before_bids)
+                self.assertEqual(stream.asks, before_asks)
+                self.assertEqual(stream.last_update_id, before_id)
+
+    def test_integer_string_sequence_ids_are_supported_without_truncation(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        stream._load_snapshot(valid_snapshot())
+        bridge = depth_event("101", "101", "999", bids=[["100.0", "3.0"]])
+        self.assertTrue(stream._event_bridges_snapshot(bridge))
+        self.assertTrue(stream._apply_event(bridge, initial_snapshot_bridge=True))
+        self.assertEqual(stream.last_update_id, 101)
+        self.assertEqual(stream.bids[100.0], 3.0)
+
     def test_valid_deletion_and_update_keep_book_valid(self):
         stream = self.ready_stream()
         event = depth_event(101, 102, 100, bids=[["99.9", "0"], ["100.0", "3.0"]])
