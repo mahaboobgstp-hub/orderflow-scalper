@@ -2,6 +2,7 @@
 Public REST only; no trading or private endpoints.
 """
 from __future__ import annotations
+import asyncio
 import time
 from typing import Any
 import httpx
@@ -80,7 +81,6 @@ class CoinMarketScanner:
                 except Exception:
                     return symbol,None
                 return symbol,None
-            import asyncio
             results=await asyncio.gather(*(kline(m["symbol"]) for m in shortlist))
             activity=dict(results)
             for m in markets:
