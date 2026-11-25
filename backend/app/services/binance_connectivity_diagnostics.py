@@ -104,7 +104,7 @@ async def run_binance_diagnostics():
         info = await _public_probe(live_base, "/fapi/v1/exchangeInfo")
         ticker = await _public_probe(live_base, "/fapi/v1/ticker/price", {"symbol": "BTCUSDT"})
         result["live_public"] = {
-            "status": "connected", "btc_price_received": bool(ticker.get("price"),
+            "status": "connected", "btc_price_received": bool(ticker.get("price")),
             "btc_price": ticker.get("price"), "exchange_symbols_count": len(info.get("symbols", [])),
         }
     except Exception as exc:
