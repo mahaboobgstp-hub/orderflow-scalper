@@ -17,3 +17,4 @@
 | 13 | Backtesting & performance analytics | Implemented; offline baseline; validation pending |
 | 14 | Deployment, monitoring & recovery | Implemented; deployment/runtime validation pending |
 | 15 | Nine-layer decision engine integration | Code integrated into autonomous paper runtime; testing deferred until full task set is complete |
+| 16 | Controlled paper validation framework | Session controller, limits, lifecycle API, entry gate, session metrics implemented; tests deferred |
