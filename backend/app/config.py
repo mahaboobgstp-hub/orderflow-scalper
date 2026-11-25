@@ -25,4 +25,11 @@ class Settings:
     )
 
 
+    binance_public_enabled: bool = _as_bool(os.getenv("BINANCE_PUBLIC_WS_ENABLED"), False)
+    bybit_public_enabled: bool = _as_bool(os.getenv("BYBIT_PUBLIC_WS_ENABLED"), False)
+    delta_public_enabled: bool = _as_bool(os.getenv("DELTA_PUBLIC_WS_ENABLED"), False)
+    bybit_public_symbol: str = os.getenv("BYBIT_PUBLIC_SYMBOL", "BTCUSDT")
+    delta_public_symbol: str = os.getenv("DELTA_PUBLIC_SYMBOL", "BTCUSD")
+
+
 settings = Settings()
