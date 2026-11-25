@@ -203,6 +203,8 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["top5_bid_depth"],0.001)
         self.assertEqual(result["metrics"]["top5_ask_depth"],0.001)
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
+        self.assertAlmostEqual(result["quality"]["depth_coverage_ratio"],0.00025,places=6)
+        self.assertLess(result["quality"]["score"],1.0)
 
 if __name__=="__main__":
     unittest.main()
