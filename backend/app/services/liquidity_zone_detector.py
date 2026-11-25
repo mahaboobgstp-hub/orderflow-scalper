@@ -79,7 +79,7 @@ class LiquidityZoneDetector:
         for t in trades or []:
             if not isinstance(t,dict): continue
             try: p=float(t.get("price",0)); ts=int(t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0)
-            except (ValueError,TypeError): continue
+            except (ValueError,TypeError,OverflowError): continue
             if p>0 and math.isfinite(p) and cutoff<=ts<=now_ms+5000: tape.append((ts,p))
         tape.sort()
         key=f"{exchange}:{symbol}"; prior=self._previous_state.get(key,{})
