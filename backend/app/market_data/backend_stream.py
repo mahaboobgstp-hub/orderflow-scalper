@@ -147,7 +147,6 @@ class BinanceOrderBookStream:
             async def collect_events():
                 async for message in websocket:
                     event = json.loads(message)
-                    self._last_event_received_at = time.monotonic()
                     await event_queue.put(event)
 
             collector_task = asyncio.create_task(
@@ -382,6 +381,9 @@ class BinanceOrderBookStream:
         )
 
         self.last_update_id = final_update_id
+        # Freshness tracks sequence progress, not merely event receipt. Ignored
+        # duplicates/old updates must not keep a stalled book marked fresh.
+        self._last_event_received_at = time.monotonic()
 
         return True
 
