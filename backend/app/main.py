@@ -12,6 +12,8 @@ from app.services.imbalance_detector import OrderBookImbalanceDetector
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 from app.services.liquidity_zone_detector import LiquidityZoneDetector
 from app.services.trade_flow_momentum import TradeFlowMomentumDetector
+from app.services.market_context_dummy_api import DummyMarketContextAPI
+from app.services.market_regime_context import MarketRegimeContextEngine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +24,8 @@ async def lifespan(app: FastAPI):
     app.state.absorption_detector=AbsorptionLiquidityDetector()
     app.state.liquidity_zone_detector=LiquidityZoneDetector()
     app.state.trade_flow_momentum_detector=TradeFlowMomentumDetector()
+    app.state.market_context_dummy_api=DummyMarketContextAPI()
+    app.state.market_regime_context_engine=MarketRegimeContextEngine()
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
@@ -144,3 +148,21 @@ async def place_demo_order(request:DemoOrderRequest):
         return {"mode":"BINANCE_FUTURES_DEMO","order":result}
     except OrderRejected as exc: raise HTTPException(status_code=400,detail=str(exc))
     except BinanceDemoError as exc: raise HTTPException(status_code=502,detail=str(exc))
+
+# Phase 9 — Dummy market context endpoints (explicitly non-live)
+@app.get("/api/market-context/status")
+async def market_context_status():
+    return {"phase":9,"provider":"dummy_ohlcv_api","data_mode":"DUMMY","is_live":False,"engine":"market_regime_context","message":"Dummy OHLCV API is enabled for integration testing. Replace provider with real exchange APIs later."}
+@app.get("/api/market-context/candles/{symbol}")
+async def market_context_candles(symbol:str,interval:str="1m",limit:int=Query(default=120,ge=40,le=500)):
+    allowed={"1m","3m","5m","15m","1h"}
+    if interval not in allowed: raise HTTPException(status_code=400,detail="Supported intervals: 1m, 3m, 5m, 15m, 1h")
+    return app.state.market_context_dummy_api.get_candles(symbol,interval,limit)
+@app.get("/api/market-context/regime/{symbol}")
+async def market_context_regime(symbol:str,interval:str="1m",limit:int=Query(default=120,ge=40,le=500),fast_period:int=Query(default=12,ge=3,le=50),slow_period:int=Query(default=36,ge=4,le=200)):
+    allowed={"1m","3m","5m","15m","1h"}
+    if interval not in allowed: raise HTTPException(status_code=400,detail="Supported intervals: 1m, 3m, 5m, 15m, 1h")
+    if slow_period<=fast_period: raise HTTPException(status_code=400,detail="slow_period must be greater than fast_period")
+    payload=app.state.market_context_dummy_api.get_candles(symbol,interval,limit)
+    try: return app.state.market_regime_context_engine.analyze(payload,fast_period,slow_period)
+    except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
