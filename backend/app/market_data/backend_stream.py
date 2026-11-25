@@ -10,6 +10,8 @@ Market data only:
 import asyncio
 import json
 import logging
+import math
+import time
 from collections import deque
 from typing import Any
 
@@ -28,7 +30,13 @@ class BinanceOrderBookStream:
         self,
         symbol: str = "BTCUSDT",
         snapshot_limit: int = 1000,
+        max_book_age_seconds: float = 3.0,
     ):
+        max_age = float(max_book_age_seconds)
+        if not math.isfinite(max_age):
+            raise ValueError("Maximum book age must be finite.")
+        self.max_book_age_seconds = max(0.1, max_age)
+        self._last_event_received_at: float | None = None
         self.symbol = symbol.upper()
         self.stream_symbol = symbol.lower()
         self.snapshot_limit = snapshot_limit
@@ -126,6 +134,7 @@ class BinanceOrderBookStream:
             self.connected = True
             self.synchronized = False
             self.last_error = None
+            self._last_event_received_at = None
 
             logger.info(
                 "Connected to Binance stream: %s",
@@ -138,6 +147,7 @@ class BinanceOrderBookStream:
             async def collect_events():
                 async for message in websocket:
                     event = json.loads(message)
+                    self._last_event_received_at = time.monotonic()
                     await event_queue.put(event)
 
             collector_task = asyncio.create_task(
@@ -394,11 +404,25 @@ class BinanceOrderBookStream:
     # --------------------------------------------------
 
     async def get_status(self) -> dict[str, Any]:
+        age_seconds = (
+            time.monotonic() - self._last_event_received_at
+            if self._last_event_received_at is not None
+            else None
+        )
+        stale = (
+            not self.connected
+            or not self.synchronized
+            or age_seconds is None
+            or age_seconds > self.max_book_age_seconds
+        )
         return {
             "symbol": self.symbol,
             "connected": self.connected,
             "synchronized": self.synchronized,
             "last_update_id": self.last_update_id,
+            "last_event_age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+            "max_book_age_seconds": self.max_book_age_seconds,
+            "stale": stale,
             "last_error": self.last_error,
         }
 
@@ -408,9 +432,17 @@ class BinanceOrderBookStream:
     ) -> dict[str, Any] | None:
 
         async with self._lock:
+            age_seconds = (
+                time.monotonic() - self._last_event_received_at
+                if self._last_event_received_at is not None
+                else None
+            )
             if (
-                not self.synchronized
+                not self.connected
+                or not self.synchronized
                 or self.last_update_id is None
+                or age_seconds is None
+                or age_seconds > self.max_book_age_seconds
             ):
                 return None
 
@@ -427,6 +459,8 @@ class BinanceOrderBookStream:
 
             return {
                 "last_update_id": self.last_update_id,
+                "age_seconds": round(age_seconds, 3),
+                "stale": False,
                 "bids": [
                     [price, quantity]
                     for price, quantity in sorted_bids
