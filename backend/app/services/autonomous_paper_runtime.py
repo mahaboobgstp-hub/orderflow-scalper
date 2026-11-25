@@ -53,7 +53,7 @@ class AutonomousPaperRuntime:
     def _detect(self, detector, book, trades, *args):
         if detector is None: return None
         try: return detector.analyze(book,trades,*args)
-        except (ValueError,TypeError,KeyError): return None
+        except (ValueError,TypeError,KeyError,OverflowError): return None
 
     def _evaluate_symbol(self, market, broader_context):
         symbol=str(market.get("symbol","")).upper()
