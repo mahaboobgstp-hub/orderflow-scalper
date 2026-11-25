@@ -1,6 +1,7 @@
 """Operator-controlled paper runtime with nine-layer evaluation; paper-only execution."""
 from __future__ import annotations
 import asyncio, time
+from datetime import datetime, timezone
 from typing import Any
 
 class AutonomousPaperRuntime:
@@ -10,7 +11,7 @@ class AutonomousPaperRuntime:
         self.scanner=scanner; self.paper_engine=paper_engine
         self.market_data=market_data; self.imbalance=imbalance; self.absorption=absorption
         self.zones=zones; self.trade_flow=trade_flow; self.risk_engine=risk_engine
-        self.decision_engine=decision_engine
+        self.decision_engine=decision_engine; self.repository=repository
         self.config=dict(config); self.watchlist=list(watchlist); self.broader_symbol=broader_symbol
         self._task=None; self._running=False; self._paused=False
         self._last_scan=None; self._last_error=None; self._scan_count=0; self._started_at=None; self._last_scan_time=None
@@ -134,6 +135,24 @@ class AutonomousPaperRuntime:
             result["paper_execution"]={"status":"NOT_EXECUTED","reason":"Decision or hard risk gate did not permit entry"}
         return result
 
+    async def _persist_decision(self, result):
+        if not self.repository: return
+        symbol=result.get("symbol","")
+        signature=(result.get("decision"),result.get("side"),result.get("paper_execution",{}).get("status"))
+        if self._logged_signatures.get(symbol)==signature: return
+        self._logged_signatures[symbol]=signature
+        try:
+            rows=await self.repository.decision(symbol,result.get("decision","HOLD"),score=result.get("score"),
+                layers=result.get("layers",{}),rationale={"reasons":result.get("reasons",[]),"paper_execution":result.get("paper_execution",{})},
+                market_context={"exchange":result.get("exchange"),"price":result.get("price"),"mode":"PAPER_ONLY"})
+            decision_id=rows[0].get("id") if isinstance(rows,list) and rows else None
+            if result.get("decision") in ("BUY","SELL"):
+                await self.repository.signal(symbol,result["side"],"NINE_LAYER_CONSENSUS",
+                    confidence=result.get("consensus_ratio"),status="paper_executed" if result.get("paper_execution",{}).get("status")=="SIMULATED_OPEN" else "candidate",
+                    data={"score":result.get("score"),"layer_results":result.get("layers"),"paper_only":True},decision_log_id=decision_id)
+        except Exception as exc:
+            self._last_error=f"Decision persistence: {type(exc).__name__}"
+
     async def _loop(self):
         while self._running:
             if not self._paused:
@@ -158,6 +177,8 @@ class AutonomousPaperRuntime:
                         if result:
                             decision_rows.append(result); self._last_decisions_by_symbol[result["symbol"]]=result
                     self._decisions=decision_rows[-100:]
+                    for decision in decision_rows:
+                        await self._persist_decision(decision)
                     self._last_scan={"scanned":scan.get("total_symbols_scanned",0),"candidate_count":scan.get("candidate_count",0),
                         "shortlist_count":len(filtered),"watchlist_candidates":[{"symbol":m.get("symbol"),"score":m.get("suitability_score"),"price":m.get("last_price")} for m in watched],
                         "top_candidates":[{"symbol":m.get("symbol"),"score":m.get("suitability_score"),"price":m.get("last_price")} for m in filtered[:10]],
