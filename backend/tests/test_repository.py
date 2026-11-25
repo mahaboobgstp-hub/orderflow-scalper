@@ -8,7 +8,7 @@ class FakeDB:
     def __init__(self):
         self.insert = AsyncMock(return_value=[{"id": "test-id"}])
         self.select = AsyncMock(return_value=[])
-        self.update = AsyncMock(return_value=None
+        self.update = AsyncMock(return_value=None)
 
 
 class RepositoryContractTests(unittest.IsolatedAsyncioTestCase):
