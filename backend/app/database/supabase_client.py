@@ -51,7 +51,7 @@ class SupabaseDatabase:
 
     async def _heartbeat_loop(self) -> None:
         while not self._closed:
-            await asyncio.sleep(max(20, int(os.getenv("SUPABASE_HEARTBEAT_INTERVAL_SECONDS", "60"))))
+            try:\n                interval = max(20, int(os.getenv("SUPABASE_HEARTBEAT_INTERVAL_SECONDS", "60")))\n            except ValueError:\n                interval = 60\n            await asyncio.sleep(interval)
             if self._closed:
                 return
             if not self.connected:
