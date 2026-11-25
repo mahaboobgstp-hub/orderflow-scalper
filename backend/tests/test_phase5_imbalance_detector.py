@@ -53,6 +53,13 @@ class ImbalanceDetectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "age"):
             OrderBookImbalanceDetector().analyze(sample_book(age_seconds=5.0))
 
+    def test_refuses_invalid_book_age_values(self):
+        detector = OrderBookImbalanceDetector()
+        for age in ("invalid", None, float("nan"), float("inf"), -0.1):
+            with self.subTest(age=age):
+                with self.assertRaisesRegex(ValueError, "age"):
+                    detector.analyze(sample_book(age_seconds=age))
+
     def test_refuses_crossed_book(self):
         book = sample_book(bids=[[100.2, 1]], asks=[[100.1, 1]])
         with self.assertRaisesRegex(ValueError, "Crossed"):
@@ -85,6 +92,16 @@ class ImbalanceDetectorTests(unittest.TestCase):
         # Rank-decayed quantities: 4 + 2/2 = 5 vs 2 + 2/2 = 3.
         self.assertAlmostEqual(metrics["weighted_imbalance"], 0.25, places=6)
         self.assertEqual(result["classification"], "BUY_PRESSURE")
+
+    def test_directional_quality_does_not_ignore_neutral_raw_imbalance(self):
+        book = sample_book(
+            bids=[[100, 10], [99.9, 1]],
+            asks=[[100.1, 1], [100.2, 10]],
+        )
+        result = OrderBookImbalanceDetector().analyze(book, 2)
+        self.assertGreater(result["metrics"]["weighted_imbalance"], 0)
+        self.assertAlmostEqual(result["metrics"]["raw_imbalance"], 0.0, places=6)
+        self.assertFalse(result["quality"]["raw_weighted_direction_agreement"])
 
     def test_invalid_levels_are_ignored_safely(self):
         detector = OrderBookImbalanceDetector()
