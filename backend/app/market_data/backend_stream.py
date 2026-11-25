@@ -144,6 +144,45 @@ class BinanceOrderBookStream:
                 collect_events()
             )
 
+            async def next_event():
+                # Drain buffered updates before interpreting a finished collector
+                # as a disconnect; otherwise a closed stream can strand sync.
+                if not event_queue.empty():
+                    return event_queue.get_nowait()
+                if collector_task.done():
+                    if collector_task.cancelled():
+                        raise ConnectionError("Binance depth stream collector was cancelled.")
+                    error = collector_task.exception()
+                    if error:
+                        raise error
+                    raise ConnectionError("Binance depth stream closed.")
+
+                event_task = asyncio.create_task(event_queue.get())
+                done, _ = await asyncio.wait(
+                    {event_task, collector_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if event_task in done:
+                    return event_task.result()
+                if not event_queue.empty():
+                    event_task.cancel()
+                    try:
+                        await event_task
+                    except asyncio.CancelledError:
+                        pass
+                    return event_queue.get_nowait()
+                event_task.cancel()
+                try:
+                    await event_task
+                except asyncio.CancelledError:
+                    pass
+                if collector_task.cancelled():
+                    raise ConnectionError("Binance depth stream collector was cancelled.")
+                error = collector_task.exception()
+                if error:
+                    raise error
+                raise ConnectionError("Binance depth stream closed.")
+
             try:
                 snapshot = await self._fetch_snapshot()
 
@@ -152,7 +191,7 @@ class BinanceOrderBookStream:
 
                 # Apply buffered events until the book is synchronized.
                 while not self.synchronized:
-                    event = await event_queue.get()
+                    event = await next_event()
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
@@ -174,12 +213,15 @@ class BinanceOrderBookStream:
 
                 # Process live updates.
                 while not self._stop_event.is_set():
-                    event = await event_queue.get()
+                    event = await next_event()
 
                     async with self._lock:
                         if not self._apply_event(event):
-                            # A sequence gap occurred.
-                            # Reconnect and obtain a fresh snapshot.
+                            # Invalidate immediately so read-only endpoints cannot
+                            # serve the last book while reconnecting.
+                            self.synchronized = False
+                            self.connected = False
+                            self.last_error = "Order-book sequence gap detected"
                             logger.warning(
                                 "Order-book sequence gap detected"
                             )
