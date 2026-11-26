@@ -1,0 +1,84 @@
+name: Layers 1 and 2 Current Main Validation
+
+on:
+  push:
+    branches: [validation/layers1-2-current-mainline]
+    paths:
+      - "backend/app/market_data/backend_stream.py"
+      - "backend/app/services/absorption_detector.py"
+      - "backend/tests/test_phase5_binance_demo_stream_sync.py"
+      - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
+      - "backend/tests/test_phase5_binance_demo_stream_integrity.py"
+      - "backend/tests/test_phase5_imbalance_detector.py"
+      - "backend/tests/test_phase6_absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_api.py"
+      - "backend/tests/test_paper_persistence.py"
+      - ".github/workflows/layers1-2-current-main-validation.yml"
+      - ".github/workflows/backend-infrastructure-checks.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/app/market_data/backend_stream.py"
+      - "backend/app/services/absorption_detector.py"
+      - "backend/tests/test_phase5_binance_demo_stream_sync.py"
+      - "backend/tests/test_phase5_binance_demo_stream_reconnect.py"
+      - "backend/tests/test_phase5_binance_demo_stream_integrity.py"
+      - "backend/tests/test_phase5_imbalance_detector.py"
+      - "backend/tests/test_phase6_absorption_detector.py"
+      - "backend/tests/test_phase6_absorption_api.py"
+      - "backend/tests/test_paper_persistence.py"
+      - ".github/workflows/layers1-2-current-main-validation.yml"
+      - ".github/workflows/backend-infrastructure-checks.yml"
+
+jobs:
+  focused-layers-1-2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile validation modules
+        run: python -m compileall -q backend/app/market_data/backend_stream.py backend/app/services/absorption_detector.py backend/tests
+      - name: Run focused Layer 1 and 2 tests
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -vv tests/test_phase5_binance_demo_stream_sync.py tests/test_phase5_binance_demo_stream_reconnect.py tests/test_phase5_binance_demo_stream_integrity.py tests/test_phase5_imbalance_detector.py tests/test_phase6_absorption_detector.py tests/test_phase6_absorption_api.py
+  full-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Run full backend test suite
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -q tests
+  infrastructure-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies and pytest
+        run: pip install -r backend/requirements.txt pytest
+      - name: Compile backend
+        run: python -m compileall -q backend/app backend/tests
+      - name: Run repository contract tests
+        env:
+          PYTHONPATH: backend
+        run: python -m unittest discover -s backend/tests -v
+      - name: Build Docker image
+        run: docker build -t orderflow-scalper-backend:ci .
