@@ -154,7 +154,8 @@ class NineLayerDecisionEngine:
         consensus=max(buy_weight,sell_weight)/total_weight if total_weight else 0
         threshold=float(self.config.get("decision_score_threshold",55))
         conflict_threshold=float(self.config.get("directional_conflict_ratio",0.65))
-        decision="REJECT" if not risk_pass or layers["spread_liquidity"]["direction"]=="BLOCK" else "HOLD"
+        critical_unavailable=[k for k in ("order_book_imbalance","aggressive_order_flow") if not layers[k]["available"]]
+        decision="REJECT" if not risk_pass or layers["spread_liquidity"]["direction"]=="BLOCK" or critical_unavailable else "HOLD"
         side="BUY" if buy_weight>sell_weight else "SELL" if sell_weight>buy_weight else "NEUTRAL"
         if decision!="REJECT" and active_count>=minimum_layers and consensus>=conflict_threshold and abs(score)>=threshold:
             decision=side
@@ -164,4 +165,5 @@ class NineLayerDecisionEngine:
             "minimum_layers_required":minimum_layers,"layers":layers,"weights":self.weights.copy(),
             "reasons":["Decision uses weighted layer consensus, not a raw score sum."],
             "missing_critical_layers":[k for k in ("order_book_imbalance","aggressive_order_flow","spread_liquidity","risk_execution") if not layers[k]["available"]],
+            "critical_unavailable_layers":critical_unavailable,
             "entry_eligible":decision in ("BUY","SELL"),"paper_only":True}
