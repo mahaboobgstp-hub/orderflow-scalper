@@ -379,6 +379,9 @@ class BinanceOrderBookStream:
         )
 
         self.last_update_id = final_update_id
+        # A progressing, accepted depth event—not mere message receipt—refreshes
+        # the book's usable-data freshness clock.
+        self.last_book_update_at = time.time()
 
         return True
 
