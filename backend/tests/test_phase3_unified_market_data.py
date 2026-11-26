@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from app.market_data.unified_engine import UnifiedMarketDataEngine
 class Tests(unittest.TestCase):
  def setUp(self): self.e=UnifiedMarketDataEngine()
@@ -36,4 +37,19 @@ class Tests(unittest.TestCase):
  def test_stale(self):
   self.e.process("bybit",{"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["10","1"]],"a":[["11","1"]]}})
   self.e.stale_after_seconds=0; self.assertTrue(self.e.get_book("bybit","BTCUSDT")["stale"])
+ def test_trade_messages_do_not_refresh_book_freshness(self):
+  snapshot={"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","2"]],"a":[["101","3"]],"u":7}}
+  with patch("app.market_data.unified_engine.time.time",return_value=100.0):
+   self.e.process("bybit",snapshot)
+  trade={"topic":"publicTrade.BTCUSDT","data":{"s":"BTCUSDT","p":"101","v":"2","S":"Buy"}}
+  with patch("app.market_data.unified_engine.time.time",return_value=200.0):
+   result=self.e.process("bybit",trade)
+  self.assertEqual(result["type"],"trade")
+  with patch("app.market_data.unified_engine.time.time",return_value=201.0):
+   book=self.e.get_book("bybit","BTCUSDT")
+   status=self.e.get_status()
+  self.assertTrue(book["stale"])
+  self.assertEqual(book["age_seconds"],101.0)
+  self.assertEqual(status["exchanges"]["bybit"]["messages_received"],2)
+  self.assertEqual(status["exchanges"]["bybit"]["last_message_age_seconds"],1.0)
 if __name__=="__main__":unittest.main()
