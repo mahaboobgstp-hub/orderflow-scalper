@@ -182,7 +182,7 @@ async def test_phase_e_state_recovery_failure_activates_fail_closed_halt():
     assert worker.risk_control_state["reason"]=="RISK_CONTROL_STATE_UNAVAILABLE"
 
 @pytest.mark.anyio
-async def test_phase_e_risk_status_reports_live_paper_metrics():
+async def test_phase_e_risk_status_reports_live_paper_metrics(monkeypatch):
     from app.services import operator_control
     old_risk=getattr(app.state,"risk_management_engine",None); old_paper=getattr(app.state,"paper_trading_engine",None)
     old_config=dict(operator_control.state["config"])
