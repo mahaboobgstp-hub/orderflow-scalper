@@ -55,6 +55,7 @@ export default function App() {
   const [symbolInput, setSymbolInput] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [activityFilter, setActivityFilter] = useState("ALL");
   const base = apiBase.trim().replace(/\/$/, "");
 
   async function api(path, options = {}) {
@@ -243,7 +244,36 @@ export default function App() {
     </>;
   }
   function renderActivity() {
-    return <>{header("Live Activity","Chronological backend/operator event feed")}<div className="panel"><div className="panel-title"><h2>Recent Events</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>{displayEvents.length===0?<div className="empty-state">No events received. Activity will appear when backend control actions generate events. This is not yet a full strategy decision log.</div>:displayEvents.map((e,i)=><div className="event-row full" key={i}><span className="event-time">{timeText(e.timestamp)}</span><b>{labelEvent(e)}</b><small>{JSON.stringify(e.details||{})}</small></div>)}</div><div className="notice">Important: this feed currently shows operator-control events. The autonomous decision engine is not integrated and therefore does not yet emit complete strategy decision traces.</div></>;
+    const runtime=decisionStatus?.runtime || {};
+    const decisions=[...(runtime.recent_decisions||[])].reverse();
+    const filtered=activityFilter==="ALL" ? decisions : decisions.filter(d=>String(d.decision||"").toUpperCase()===activityFilter);
+    const decisionLayers=(d)=>Object.entries(d.layers||{});
+    const decisionTime=runtime.last_scan_time ? timeText(runtime.last_scan_time) : "Last scan time unavailable";
+    return <>
+      {header("Live Activity","Live nine-layer decisions, paper execution outcomes and backend events")}
+      <div className="stats-grid">
+        {stat("Runtime State",runtime.state||"Unavailable","Autonomous paper runtime")}
+        {stat("Decision Count",runtime.decision_count??"--","Runtime decision records")}
+        {stat("Last Scan",decisionTime,"Latest scan timestamp")}
+        {stat("Mode",runtime.mode||"PAPER_ONLY","Exchange orders disabled")}
+      </div>
+      <div className="panel">
+        <div className="panel-title"><h2>Recent Nine-Layer Decisions</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
+        <div className="control-buttons">
+          <label>Filter decisions <select value={activityFilter} onChange={e=>setActivityFilter(e.target.value)}><option value="ALL">All</option><option value="BUY">BUY</option><option value="SELL">SELL</option><option value="HOLD">HOLD</option><option value="REJECT">REJECT</option></select></label>
+          <span className="subtle">Auto-refreshes with backend polling · displayed decisions are real backend responses, not sample data.</span>
+        </div>
+        {!connected ? <div className="empty-state">Connect to the backend to load decision traces.</div> : filtered.length===0 ? <div className="empty-state">No decisions for this filter yet. The engine may be stopped, scanning may be unavailable, or the current scan produced no records.</div> : filtered.map((d,i)=><div className="decision-card" key={d.symbol+"-"+i}>
+          <div className="decision-head"><div><b>{d.symbol||"Unknown symbol"}</b><small>{decisionTime} · Exchange {d.exchange||"--"} · Paper only</small></div><span className={"status-chip "+(["BUY","SELL"].includes(String(d.decision).toUpperCase())?"paper":"")}>{String(d.decision||"UNKNOWN").toUpperCase()}</span></div>
+          <div className="decision-metrics"><span>Score <b>{value(d.score)}</b></span><span>Consensus <b>{d.consensus_ratio==null?"--":(Number(d.consensus_ratio)*100).toFixed(1)+"%"}</b></span><span>Directional layers <b>{d.directional_layers_available??"--"}/{d.minimum_layers_required??"--"} min</b></span><span>Entry eligible <b>{d.entry_eligible?"YES":"NO"}</b></span></div>
+          <div className="layer-grid">{decisionLayers(d).map(([key,l])=><div className="layer-card" key={key}><b>{key.replaceAll("_"," ")}</b><span className="status-chip">{l.direction||"N/A"}</span><small>Score {l.score??"--"} · Confidence {l.confidence??"--"} · {l.available?"Available":"Unavailable"}</small><p>{(l.reasons||[]).join(" · ")||"No explanation supplied"}</p></div>)}</div>
+          <div className="decision-outcome"><b>Paper execution:</b> {d.paper_execution?.status||"Not reported"}{d.paper_execution?.reason? " — "+d.paper_execution.reason:""}{d.paper_execution?.session_blockers?.length? " · Blockers: "+d.paper_execution.session_blockers.join(", "):""}</div>
+          <details><summary>Full decision data</summary><pre className="diagnostic">{JSON.stringify(d,null,2)}</pre></details>
+        </div>)}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Backend / Operator Events</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>{displayEvents.length===0?<div className="empty-state">No events recorded.</div>:displayEvents.map((e,i)=><div className="event-row full" key={i}><span className="event-time">{timeText(e.timestamp)}</span><b>{labelEvent(e)}</b><small>{JSON.stringify(e.details||{})}</small></div>)}</div>
+      <div className="notice">Decision records are sourced from the runtime's recent in-memory decision list. They are not yet a durable, searchable decision-history archive; the timestamp shown is the latest scan timestamp shared by this batch.</div>
+    </>;
   }
   function renderPositions() {
     return <>{header("Positions & Trades","Simulated positions, management parameters and trade history")}<div className="panel"><div className="panel-title"><h2>Open Paper Positions</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>{openPositions.length===0?<div className="empty-state">No open paper positions.</div>:openPositions.map(p=><div className="position-card" key={p.position_id||p.symbol}><div className="position-head"><b>{p.symbol}</b><span className={"side-pill "+p.side}>{String(p.side).toUpperCase()}</span></div><div className="position-grid"><span>Entry<b>{value(p.entry_price)}</b></span><span>Mark<b>{value(p.mark_price)}</b></span><span>Quantity<b>{value(p.quantity)}</b></span><span>Leverage<b>{value(p.leverage)}x</b></span><span>SL<b>{value(p.stop_loss_price)}</b></span><span>TP<b>{value(p.take_profit_price)}</b></span><span>Trailing SL<b>{value(p.tsl_price)}</b></span><span>Trailing TP<b>{value(p.ttp_price)}</b></span></div><div className="list-row"><b>Unrealized P&L</b><b className={Number(p.unrealized_pnl)>=0?"positive":"negative"}>{money(p.unrealized_pnl)}</b></div></div>)}</div><div className="panel"><h2>Closed Trade History</h2>{closed.length===0?<div className="empty-state">No closed trades recorded.</div>:closed.slice().reverse().map((t,i)=><div className="list-row" key={t.trade_id||i}><div><b>{t.symbol} · {String(t.side).toUpperCase()}</b><small>{t.close_reason} · {timeText(t.closed_at_ms)}</small></div><div className="align-right"><b className={Number(t.net_pnl)>=0?"positive":"negative"}>{money(t.net_pnl)}</b><small>Exit {value(t.exit_price)}</small></div></div>)}</div></>;
