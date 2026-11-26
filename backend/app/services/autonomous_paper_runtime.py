@@ -24,7 +24,7 @@ class AutonomousPaperRuntime:
             "last_scan_summary":self._last_scan,"watchlist_count":len(self.watchlist),
             "decision_engine":"nine_layer_decision_engine" if self.decision_engine else "NOT_CONFIGURED",
             "decision_count":len(self._decisions),"recent_decisions":self._decisions[-10:],"controlled_validation_session":self.validation_session.status() if self.validation_session else None,
-            "guardrails":["No exchange orders","Paper simulator only","Critical unavailable layers block entry","Duplicate symbol entries refused"]}
+            "risk_kill_switch":self.risk_engine.kill_switch_status() if self.risk_engine else {"active":False,"reason":None},"guardrails":["No exchange orders","Paper simulator only","Critical unavailable layers block entry","Duplicate symbol entries refused","Centralized risk gate blocks unsafe entries"]}
 
     def apply_config(self,config):
         self.config=dict(config)
