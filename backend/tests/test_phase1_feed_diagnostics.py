@@ -302,6 +302,8 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             {"exchange": "nan", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": float("nan")},
             {"exchange": "infinite", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": float("inf")},
             {"exchange": "malformed", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": "not-a-number"},
+            {"exchange": "boolean_true", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": True},
+            {"exchange": "boolean_false", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": False},
             {"exchange": "valid", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2},
         ]
         result = main._feed_health_counts(
@@ -321,7 +323,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         books = {
             "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
         }
-        for threshold in (float("nan"), float("inf"), -1.0, "invalid"):
+        for threshold in (float("nan"), float("inf"), -1.0, "invalid", True, False):
             with self.subTest(threshold=threshold):
                 result = main._feed_health_counts(
                     {"exchanges": adapters},
