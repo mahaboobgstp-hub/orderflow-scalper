@@ -1,6 +1,7 @@
 import pytest
+import time
 from fastapi import HTTPException
-from app.main import app, paper_submit_order, PaperOrderRequest
+from app.main import app, paper_submit_order, PaperOrderRequest, risk_engine_status
 from app.services.risk_management import RiskManagementEngine
 from app.services.paper_trading import PaperTradingEngine
 
@@ -179,3 +180,26 @@ async def test_phase_e_state_recovery_failure_activates_fail_closed_halt():
     await worker.restore_state(engine)
     assert worker.risk_control_state["active"] is True
     assert worker.risk_control_state["reason"]=="RISK_CONTROL_STATE_UNAVAILABLE"
+
+@pytest.mark.anyio
+async def test_phase_e_risk_status_reports_live_paper_metrics():
+    from app.services import operator_control
+    old_risk=getattr(app.state,"risk_management_engine",None); old_paper=getattr(app.state,"paper_trading_engine",None)
+    old_config=dict(operator_control.state["config"])
+    risk=RiskManagementEngine(); risk.set_kill_switch(True,"telemetry test halt")
+    paper=PaperTradingEngine(10000)
+    paper.closed_trades.append({"net_pnl":-200,"closed_at_ms":int(time.time()*1000)})
+    app.state.risk_management_engine=risk; app.state.paper_trading_engine=paper
+    try:
+        result=await risk_engine_status()
+        gate=result["live_portfolio_gate"]
+        assert gate["daily_realized_loss"]>=200
+        assert "DAILY_LOSS_LIMIT_REACHED" in gate["blockers"]
+        assert gate["kill_switch"]["active"] is True
+        assert result["execution_enabled"] is False
+    finally:
+        if old_risk is None: delattr(app.state,"risk_management_engine")
+        else: app.state.risk_management_engine=old_risk
+        if old_paper is None: delattr(app.state,"paper_trading_engine")
+        else: app.state.paper_trading_engine=old_paper
+        operator_control.state["config"].clear(); operator_control.state["config"].update(old_config)
