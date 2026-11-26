@@ -51,7 +51,7 @@ def test_layer6_negative_or_nonfinite_market_values_block(spread,volume):
     assert r["decision"]=="REJECT"
 
 def test_layer6_exact_thresholds_are_accepted():
-    r=eval_market({"spread_pct":0.12,"quote_volume_24h":1_000_000})
+    r=eval_market({"spread_pct":0.12,"quote_volume_24h":5_000_000})
     assert l6(r)["direction"]=="NEUTRAL"
     assert l6(r)["score"]==60
 
