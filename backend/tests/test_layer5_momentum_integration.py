@@ -40,3 +40,17 @@ def test_layer5_scale_configuration():
     e=NineLayerDecisionEngine({"momentum_price_move_scale_pct":1.0})
     r=e.evaluate("BTCUSDT",{"trade_flow":{"trade_count":8,"metrics":{"price_move_pct":0.25}}},risk={"allowed":True,"blockers":[]})
     assert r["layers"]["momentum"]["score"]==25
+
+import pytest
+
+@pytest.mark.parametrize("bad",["invalid",None,float("nan"),float("inf"),float("-inf")])
+def test_layer5_invalid_min_trade_config_falls_back_safely(bad):
+    e=NineLayerDecisionEngine({"momentum_min_trades":bad})
+    r=e.evaluate("BTCUSDT",{"trade_flow":{"trade_count":8,"metrics":{"price_move_pct":0.5}}},risk={"allowed":True,"blockers":[]})
+    assert r["layers"]["momentum"]["available"] is True
+
+@pytest.mark.parametrize("bad",[0,-1,float("nan"),float("inf"),"bad",None])
+def test_layer5_invalid_scale_config_uses_default(bad):
+    e=NineLayerDecisionEngine({"momentum_price_move_scale_pct":bad})
+    r=e.evaluate("BTCUSDT",{"trade_flow":{"trade_count":8,"metrics":{"price_move_pct":0.5}}},risk={"allowed":True,"blockers":[]})
+    assert r["layers"]["momentum"]["score"]==100
