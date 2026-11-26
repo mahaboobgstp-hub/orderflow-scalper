@@ -108,16 +108,21 @@ async def engine_command(request: EngineCommandRequest, x_control_token: str | N
             runtime.resume()
             state["engine_state"] = "RUNNING"
         elif command == "EMERGENCY_HALT":
-            if getattr(runtime, "risk_engine", None): runtime.risk_engine.set_kill_switch(True, "OPERATOR_EMERGENCY_HALT")
+            risk_engine=getattr(runtime,"risk_engine",None)
+            result=risk_engine.set_kill_switch(True,"OPERATOR_EMERGENCY_HALT") if risk_engine else {"active":True,"reason":"OPERATOR_EMERGENCY_HALT"}
+            repository=getattr(runtime,"repository",None)
+            persisted=False
+            if repository and hasattr(repository,"engine_state"):
+                try: persisted=await repository.engine_state(status=str(runtime.status().get("state","STOPPED")).lower(),execution_enabled=False,state={"risk_kill_switch":result})
+                except Exception: persisted=False
             # Keep the scan/mark loop alive so existing paper positions continue
-            # to receive simulated price updates and exit management. The kill
-            # switch blocks every new entry; it is not a runtime shutdown.
+            # to receive simulated price updates and exit management. New entries are blocked.
             state["engine_state"] = runtime.status().get("state", "STOPPED")
         else:
             await runtime.stop()
             state["engine_state"] = "STOPPED"
         _event("engine_command_applied", {"command": command})
-        return {"applied": True, "command": command, "engine_state": state["engine_state"], "runtime": runtime.status()}
+        return {"applied": True, "command": command, "engine_state": state["engine_state"], "risk_kill_switch_persisted": persisted if command == "EMERGENCY_HALT" else None, "runtime": runtime.status()}
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
@@ -175,7 +180,7 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
     return {"accepted": True, "config": state["config"], "persisted": False, "message": "Configuration applied to runtime process memory; no automatic trade execution is enabled."}
 
 @router.post("/risk/kill-switch/reset")
-def reset_risk_kill_switch(x_control_token: str | None = Header(default=None)):
+async def reset_risk_kill_switch(x_control_token: str | None = Header(default=None)):
     _auth(x_control_token)
     if runtime is None:
         raise HTTPException(status_code=503, detail="Runtime service is not connected.")
@@ -184,9 +189,18 @@ def reset_risk_kill_switch(x_control_token: str | None = Header(default=None)):
     engine=getattr(runtime,"risk_engine",None)
     if engine is None:
         raise HTTPException(status_code=503, detail="Risk engine is not connected.")
+    repository=getattr(runtime,"repository",None)
+    if not repository or not hasattr(repository,"engine_state"):
+        raise HTTPException(status_code=503, detail="Persistent risk-control storage is unavailable; kill switch remains active.")
+    try:
+        persisted=await repository.engine_state(status="stopped",execution_enabled=False,state={"risk_kill_switch":{"active":False,"reason":None}})
+    except Exception:
+        persisted=False
+    if not persisted:
+        raise HTTPException(status_code=503,detail="Could not persist risk halt reset; kill switch remains active.")
     result=engine.set_kill_switch(False)
     _event("risk_kill_switch_reset", result)
-    return {"reset":True,"kill_switch":result,"engine_state":state["engine_state"]}
+    return {"reset":True,"persisted":True,"kill_switch":result,"engine_state":state["engine_state"]}
 
 @router.post("/watchlist/add")
 def watchlist_add(request: WatchlistRequest, x_control_token: str | None = Header(default=None)):
