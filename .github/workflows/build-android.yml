@@ -1,4 +1,3 @@
-
 name: Build OrderFlow Scalper Android APK
 
 on:
@@ -40,6 +39,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install
+
+      - name: Validate Android build prerequisites
+        working-directory: frontend
+        run: npm run android:validate
 
       - name: Build React frontend
         working-directory: frontend
