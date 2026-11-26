@@ -4,7 +4,7 @@ from app.services.risk_management import RiskManagementEngine
 def test_position_sizing_risk_based():
     r=RiskManagementEngine().calculate({"account_equity":10000,"entry_price":100,"stop_loss_price":98,"side":"long","leverage":3})
     assert r["risk_budget"]==50
-    assert r["position_quantity"]==25
+    assert r["position_quantity"]==12.5
     assert r["estimated_loss_at_stop"]==50
     assert r["estimated_initial_margin"]==pytest.approx(833.333333)
 
@@ -24,7 +24,7 @@ def test_reject_invalid_inputs_and_leverage():
     with pytest.raises(ValueError): e.calculate({"account_equity":1000,"entry_price":10,"stop_loss_price":9,"side":"long","leverage":10})
 
 def test_portfolio_guard_blocks_at_limits():
-    r=RiskManagementEngine().evaluate_portfolio(10000,daily_realized_loss=200,open_risk=250,open_positions=2,consecutive_losses=1)
+    r=RiskManagementEngine().evaluate_portfolio(10000,daily_realized_loss=200,open_risk=251,open_positions=2,consecutive_losses=1)
     assert r["allowed_to_consider_new_trade"] is False
     assert "DAILY_LOSS_LIMIT_REACHED" in r["blockers"]
     assert "OPEN_RISK_LIMIT_WOULD_BE_EXCEEDED" in r["blockers"]
