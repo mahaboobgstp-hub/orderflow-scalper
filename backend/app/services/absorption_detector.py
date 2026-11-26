@@ -101,13 +101,15 @@ class AbsorptionLiquidityDetector:
         # Temporal progress requires a recent prior midpoint sample.
         has_recent_baseline=prior is not None and 0 <= prior_sample_age_ms <= lookback*1000
         if has_recent_baseline and prior["mid"]>0:
-            buy_progress_pct=max(0.0,(mid-prior["mid"])/prior["mid"]*100)
-            sell_progress_pct=max(0.0,(prior["mid"]-mid)/prior["mid"]*100)
+            # Signed direction-aware temporal progress; both sides use the
+            # prior midpoint as the common baseline.
+            buy_progress_pct=(mid-prior["mid"])/prior["mid"]*100
+            sell_progress_pct=(prior["mid"]-mid)/prior["mid"]*100
         # Without a temporal baseline, scores remain zero to avoid false absorption.
         if has_recent_baseline and len(normalized)>=self.min_trades and total_qty>0:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
-            buy_absorption_score=buy_share*max(0.0,1.0-min(buy_progress_pct/0.10,1.0))
-            sell_absorption_score=sell_share*max(0.0,1.0-min(sell_progress_pct/0.10,1.0))
+            buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
+            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
         sell_absorbed=sell_absorption_score>=self.absorption_threshold
         if buy_absorbed and sell_absorbed: label="MIXED_ABSORPTION"

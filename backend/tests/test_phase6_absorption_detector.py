@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 
 
@@ -13,6 +14,47 @@ def trades(side="buy",qty=1.0,count=8,price=100.05):
 
 
 class Phase6DetectorTests(unittest.TestCase):
+    def _fixed_movement_result(self, side, movement_pct):
+        baseline_mid = 100.05
+        current_mid = baseline_mid * (1.0 + movement_pct / 100.0)
+        timestamp_ms = 1_000_000
+        detector = AbsorptionLiquidityDetector()
+        tape = [
+            {"side": side, "quantity": 1.0, "price": 100.05,
+             "received_timestamp_ms": timestamp_ms}
+            for _ in range(8)
+        ]
+
+        def book_at(mid):
+            return book(
+                bids=[[mid - 0.05, 10.0], [mid - 0.15, 8.0]],
+                asks=[[mid + 0.05, 10.0], [mid + 0.15, 8.0]],
+            )
+
+        with patch("app.services.absorption_detector.time.time", return_value=timestamp_ms / 1000.0):
+            detector.analyze(book_at(baseline_mid), tape, 15)
+            return detector.analyze(book_at(current_mid), tape, 15)
+
+    def test_adverse_midpoint_movement_reduces_both_absorption_scores(self):
+        buy = self._fixed_movement_result("buy", -0.05)
+        sell = self._fixed_movement_result("sell", 0.05)
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], -0.05, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], -0.05, places=6)
+        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 0.5, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 0.5, places=6)
+
+    def test_favorable_progress_boundary_zeroes_scores_for_both_sides(self):
+        buy = self._fixed_movement_result("buy", 0.10)
+        sell = self._fixed_movement_result("sell", -0.10)
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], 0.10, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], 0.10, places=6)
+        self.assertEqual(buy["metrics"]["buy_absorption_score"], 0.0)
+        self.assertEqual(sell["metrics"]["sell_absorption_score"], 0.0)
+
+    def test_sell_progress_uses_same_prior_mid_baseline_as_buy(self):
+        result = self._fixed_movement_result("sell", -0.05)
+        self.assertAlmostEqual(result["metrics"]["sell_price_progress_pct"], 0.05, places=6)
+
     def test_high_aggressive_buy_with_limited_progress_is_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
         detector.analyze(book(),trades("buy"),15)
@@ -38,10 +80,10 @@ class Phase6DetectorTests(unittest.TestCase):
         detector.analyze(book(),trades("buy"),15)
         up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),trades("buy"),15)
         self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
-        self.assertEqual(up["metrics"]["sell_price_progress_pct"],0.0)
+        self.assertLess(up["metrics"]["sell_price_progress_pct"],0.0)
         down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),trades("sell"),15)
         self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
-        self.assertEqual(down["metrics"]["buy_price_progress_pct"],0.0)
+        self.assertLess(down["metrics"]["buy_price_progress_pct"],0.0)
 
     def test_no_clear_absorption_when_tape_below_minimum(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)

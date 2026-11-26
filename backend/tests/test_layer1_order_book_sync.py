@@ -1,6 +1,8 @@
 import asyncio
+import json
 import time
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from app.market_data.backend_stream import BinanceOrderBookStream
 
@@ -124,6 +126,88 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
     def test_stop_marks_stream_unsynchronized(self):
         self.assertFalse(self.stream.synchronized)
         self.assertIsNotNone(self.stream.last_update_id)
+
+
+class _L12FakeWebsocket:
+    def __init__(self, events, stop_event=None):
+        self.events = events
+        self.stop_event = stop_event
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for event in self.events:
+            await asyncio.sleep(0)
+            yield json.dumps(event)
+        if self.stop_event is not None:
+            self.stop_event.set()
+
+
+class _L12FakeConnection:
+    def __init__(self, websocket):
+        self.websocket = websocket
+
+    async def __aenter__(self):
+        return self.websocket
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class BinanceInitialBridgeReconnectTests(unittest.IsolatedAsyncioTestCase):
+    def _event(self, U, u, pu=None):
+        event = {"U": U, "u": u, "b": [], "a": []}
+        if pu is not None:
+            event["pu"] = pu
+        return event
+
+    def _snapshot(self, update_id, bid_qty=1.0):
+        return {
+            "lastUpdateId": update_id,
+            "bids": [["100.0", str(bid_qty)]],
+            "asks": [["101.0", "1.0"]],
+        }
+
+    async def _run_two_connection_recovery(self, first_event):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        original_sleep = asyncio.sleep
+
+        async def fast_sleep(_seconds):
+            await original_sleep(0)
+
+        first_ws = _L12FakeWebsocket([first_event])
+        second_ws = _L12FakeWebsocket(
+            [self._event(200, 201, pu=199)],
+            stop_event=stream._stop_event,
+        )
+        connections = [_L12FakeConnection(first_ws), _L12FakeConnection(second_ws)]
+        snapshot_fetch = AsyncMock(side_effect=[
+            self._snapshot(100),
+            self._snapshot(200, bid_qty=4.0),
+        ])
+        with patch(
+            "app.market_data.backend_stream.websockets.connect",
+            side_effect=connections,
+        ) as connect_mock, patch.object(
+            stream, "_fetch_snapshot", new=snapshot_fetch
+        ), patch(
+            "app.market_data.backend_stream.asyncio.sleep", new=fast_sleep
+        ):
+            await asyncio.wait_for(stream._run_forever(), timeout=2.0)
+
+        self.assertEqual(connect_mock.call_count, 2)
+        self.assertEqual(snapshot_fetch.await_count, 2)
+        self.assertTrue(stream.synchronized)
+        self.assertEqual(stream.last_update_id, 201)
+        self.assertEqual(stream.bids[100.0], 4.0)
+
+    async def test_closed_websocket_before_snapshot_bridge_reconnects(self):
+        await self._run_two_connection_recovery(self._event(98, 99, pu=97))
+
+    async def test_forward_gap_at_snapshot_plus_one_reconnects(self):
+        # For Futures, U=L+1 does not satisfy the documented U<=L<=u bridge.
+        await self._run_two_connection_recovery(self._event(101, 101, pu=100))
 
 
 if __name__ == "__main__":
