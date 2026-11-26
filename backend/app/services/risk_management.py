@@ -57,8 +57,9 @@ class RiskManagementEngine:
             else: break
         open_risk=0.0; missing_stop_count=0
         for p in positions.values():
-            entry=self._finite(p.get("entry_price")); stop=self._finite(p.get("stop_loss_price")); qty=self._finite(p.get("quantity"))
-            if entry is not None and stop is not None and qty is not None and qty>0: open_risk+=abs(entry-stop)*qty
+            entry=self._finite(p.get("entry_price")); stop=self._finite(p.get("stop_loss_price")); qty=self._finite(p.get("quantity")); side=str(p.get("side","")).lower()
+            valid_stop=entry is not None and stop is not None and qty is not None and qty>0 and ((side=="long" and stop<entry) or (side=="short" and stop>entry))
+            if valid_stop: open_risk+=abs(entry-stop)*qty
             else: missing_stop_count+=1
         per_trade_limit=eq*float(cfg.get("risk_per_trade_pct",0.5))/100
         proposed=self._finite(proposed_trade_risk_cash) if proposed_trade_risk_cash is not None else per_trade_limit
