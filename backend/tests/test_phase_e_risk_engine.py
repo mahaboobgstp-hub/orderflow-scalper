@@ -43,3 +43,18 @@ def test_phase_e_position_without_valid_stop_is_rejected():
     result=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions=pos,symbol="BTCUSDT",config={"cooldown_seconds":0},now_ms=DAY_MS)
     assert result["open_positions_missing_stop"]==1
     assert "OPEN_POSITION_WITHOUT_VALID_STOP_LOSS" in result["blockers"]"
+
+def test_phase_e_manual_order_actual_risk_and_exposure_limits():
+    e=RiskManagementEngine()
+    gate=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions={},symbol="BTCUSDT",
+        config={"risk_per_trade_pct":0.5,"max_total_exposure_pct":10,"max_total_open_risk_pct":2,"cooldown_seconds":0},
+        proposed_trade_risk_cash=60,proposed_notional=11000,now_ms=DAY_MS)
+    assert "PROPOSED_TRADE_RISK_EXCEEDS_PER_TRADE_LIMIT" in gate["blockers"]
+    assert "TOTAL_EXPOSURE_LIMIT_WOULD_BE_EXCEEDED" in gate["blockers"]
+
+def test_phase_e_manual_order_actual_risk_passes_when_within_limits():
+    e=RiskManagementEngine()
+    gate=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions={},symbol="BTCUSDT",
+        config={"risk_per_trade_pct":0.5,"max_total_exposure_pct":25,"max_total_open_risk_pct":3,"cooldown_seconds":0},
+        proposed_trade_risk_cash=25,proposed_notional=2000,now_ms=DAY_MS)
+    assert gate["allowed"] is True
