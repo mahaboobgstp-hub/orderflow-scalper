@@ -57,6 +57,23 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         self.assertEqual(self.stream.asks, before_asks)
         self.assertEqual(self.stream.last_update_id, before_update_id)
 
+    def test_boolean_depth_values_are_rejected_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_update_id = self.stream.last_update_id
+        invalid_events = (
+            {"U": 101, "u": 102, "b": [[True, "1"]], "a": []},
+            {"U": 101, "u": 102, "b": [["99", True]], "a": []},
+            {"U": 101, "u": 102, "b": [], "a": [["101", False]]},
+        )
+        for event in invalid_events:
+            with self.subTest(event=event):
+                with self.assertRaisesRegex(ValueError, "boolean level values"):
+                    self.stream._apply_event(event)
+                self.assertEqual(self.stream.bids, before_bids)
+                self.assertEqual(self.stream.asks, before_asks)
+                self.assertEqual(self.stream.last_update_id, before_update_id)
+
     def test_valid_two_sided_depth_event_applies_atomically(self):
         event = {
             "U": 101, "u": 102,
