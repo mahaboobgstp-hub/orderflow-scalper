@@ -84,9 +84,10 @@ class PaperPersistenceWorker:
                 logger.info("No valid persisted paper state found; starting fresh paper account")
             return restored
         except Exception as exc:
-            self.recovery_report["warnings"].append(f"Recovery error: {type(exc).__name__}")
+            self.risk_control_state={"active":True,"reason":"RISK_CONTROL_STATE_UNAVAILABLE"}
+            self.recovery_report["warnings"].append(f"Recovery error: {type(exc).__name__}; risk halt activated fail-closed")
             self.recovery_report["source"] = "recovery_error"
-            logger.exception("Paper trading recovery failed; simulator remains fresh and empty")
+            logger.exception("Paper trading recovery failed; simulator remains fresh and risk halt is active")
             return False
 
     async def start(self):
