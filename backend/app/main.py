@@ -31,6 +31,7 @@ from app.services.trade_management import TradeManagementEngine, TradeManagement
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 from app.services.controlled_paper_session import ControlledPaperSession
 import logging
+import math
 import os
 import time
 
@@ -224,7 +225,12 @@ async def get_order_book():
     return {"symbol":"BTCUSDT","order_book":book}
 def _feed_health_counts(exchange_connections, unified_market_data):
     """Separate message freshness from a fully synchronized, fresh order book."""
-    stale_after = float(unified_market_data.get("stale_after_seconds", 3.0))
+    try:
+        stale_after = float(unified_market_data.get("stale_after_seconds", 3.0))
+    except (TypeError, ValueError):
+        stale_after = 3.0
+    if not math.isfinite(stale_after) or stale_after <= 0:
+        stale_after = 3.0
     books = unified_market_data.get("books", {})
     fresh_message_feed_count = 0
     healthy_feed_count = 0
@@ -239,7 +245,7 @@ def _feed_health_counts(exchange_connections, unified_market_data):
             age = float(age)
         except (TypeError, ValueError):
             continue
-        if age > stale_after:
+        if not math.isfinite(age) or age < 0 or age > stale_after:
             continue
 
         fresh_message_feed_count += 1
