@@ -177,6 +177,18 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
 
+    def test_subthreshold_midpoint_noise_can_still_score_candidates(self):
+        buy = self._fixed_movement_result("buy", 0.02)
+        sell = self._fixed_movement_result("sell", -0.02)
+        # Small moves below the 0.10% heuristic threshold still leave 0.80 scores.
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], 0.02, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], 0.02, places=6)
+        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 0.8, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 0.8, places=6)
+        self.assertTrue(buy["metrics"]["buy_absorption_candidate"])
+        self.assertTrue(sell["metrics"]["sell_absorption_candidate"])
+
+
 class Phase6SpatialVwapAndApiTests(unittest.TestCase):
     def test_vwap_vs_mid_sign_is_aggressor_side_normalized_not_temporal_progress(self):
         # With a 100.00 bid / 100.10 ask, midpoint is 100.05.
