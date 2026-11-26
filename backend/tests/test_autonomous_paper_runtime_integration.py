@@ -45,7 +45,7 @@ def test_runtime_inactive_controlled_session_never_paper_executes():
 
 def test_runtime_active_controlled_session_paper_executes_only():
     s=ControlledPaperSession({"enabled":True,"max_open_positions":2,"max_trades":5})
-    s.start(10000,now=1000)
+    s.start(10000,now=__import__('time').time())
     runtime=build_runtime(s)
     result=runtime._evaluate_symbol(market_fixture(),{"score":40,"confidence":70,"reasons":["synthetic"]})
     assert result["decision"]=="BUY"
