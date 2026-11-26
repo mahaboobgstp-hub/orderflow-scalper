@@ -344,8 +344,10 @@ class BinanceOrderBookStream:
             raise ValueError(f"Binance snapshot {side_name} must be a list")
         parsed: dict[float, float] = {}
         for row in levels:
-            if not isinstance(row, (list, tuple)) or len(row) < 2:
+            if not isinstance(row, (list, tuple)) or len(row) != 2:
                 raise ValueError(f"Binance snapshot {side_name} contains a malformed level")
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
+                raise ValueError(f"Binance snapshot {side_name} contains boolean level values")
             try:
                 price, quantity = float(row[0]), float(row[1])
             except (TypeError, ValueError) as exc:
@@ -367,6 +369,8 @@ class BinanceOrderBookStream:
         for row in updates:
             if not isinstance(row, (list, tuple)) or len(row) != 2:
                 raise ValueError(f"Binance depth {side_name} contains a malformed level")
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
+                raise ValueError(f"Binance depth {side_name} contains boolean level values")
             try:
                 price, quantity = float(row[0]), float(row[1])
             except (TypeError, ValueError) as exc:
