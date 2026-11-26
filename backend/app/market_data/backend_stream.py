@@ -142,6 +142,46 @@ class BinanceOrderBookStream:
         self._record_synchronized()
         return True
 
+    @staticmethod
+    def _decode_depth_message(message: str | bytes) -> dict[str, Any]:
+        """Decode a Binance depth frame and reject malformed update-ID ranges."""
+        try:
+            event = json.loads(message)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+            raise ValueError("Malformed Binance depth JSON frame") from exc
+        if not isinstance(event, dict):
+            raise ValueError("Binance depth frame must be a JSON object")
+        try:
+            first_raw, final_raw = event["U"], event["u"]
+            if isinstance(first_raw, bool) or isinstance(final_raw, bool):
+                raise ValueError("Update IDs must be integer values")
+            if not isinstance(first_raw, (int, str)) or not isinstance(final_raw, (int, str)):
+                raise ValueError("Update IDs must be integer values")
+            first_update_id, final_update_id = int(first_raw), int(final_raw)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Depth frame must contain valid integer U/u update IDs") from exc
+        if first_update_id < 0 or final_update_id < first_update_id:
+            raise ValueError("Depth frame has an invalid U/u update-ID range")
+        return event
+
+    async def _collect_depth_events(self, websocket, event_queue: asyncio.Queue):
+        """Collect frames and always signal termination so the sync consumer can reconnect."""
+        try:
+            async for message in websocket:
+                self.messages_received += 1
+                self.last_event_at = time.time()
+                try:
+                    event = self._decode_depth_message(message)
+                except ValueError as exc:
+                    self.last_error = str(exc)
+                    logger.warning("Invalid Binance depth frame: %s", exc)
+                    break
+                await event_queue.put(event)
+        finally:
+            # None is reserved as the queue termination sentinel; depth frames are dicts.
+            await event_queue.put(None)
+
+
     # --------------------------------------------------
     # Connection and synchronization
     # --------------------------------------------------
@@ -196,15 +236,8 @@ class BinanceOrderBookStream:
             # Buffer events while the REST snapshot loads.
             event_queue: asyncio.Queue = asyncio.Queue()
 
-            async def collect_events():
-                async for message in websocket:
-                    event = json.loads(message)
-                    self.messages_received += 1
-                    self.last_event_at = time.time()
-                    await event_queue.put(event)
-
             collector_task = asyncio.create_task(
-                collect_events()
+                self._collect_depth_events(websocket, event_queue)
             )
 
             try:
@@ -216,6 +249,9 @@ class BinanceOrderBookStream:
                 # Apply buffered events until the book is synchronized.
                 while not self.synchronized:
                     event = await event_queue.get()
+                    if event is None:
+                        self.last_error = self.last_error or "WebSocket ended before snapshot synchronization"
+                        return
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
@@ -236,6 +272,9 @@ class BinanceOrderBookStream:
                 # Process live updates.
                 while not self._stop_event.is_set():
                     event = await event_queue.get()
+                    if event is None:
+                        self.last_error = self.last_error or "WebSocket stream ended after synchronization"
+                        return
 
                     async with self._lock:
                         if not self._apply_event(event):
