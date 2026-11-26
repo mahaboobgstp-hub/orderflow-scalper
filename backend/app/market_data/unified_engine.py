@@ -212,7 +212,10 @@ class UnifiedMarketDataEngine:
                 quantity_raw = trade_data.get("q", trade_data.get("v", trade_data.get("size", trade_data.get("quantity", 0))))
                 if isinstance(price_raw, bool) or isinstance(quantity_raw, bool):
                     continue
-                price, quantity = float(price_raw), float(quantity_raw)
+                try:
+                    price, quantity = float(price_raw), float(quantity_raw)
+                except (TypeError, ValueError, OverflowError):
+                    continue
                 if not math.isfinite(price) or not math.isfinite(quantity) or price <= 0 or quantity <= 0:
                     continue
                 maker = trade_data.get("m")
