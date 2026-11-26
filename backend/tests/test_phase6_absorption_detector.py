@@ -53,6 +53,17 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["trade_count"],2)
 
+    def test_refuses_nonboolean_sync_and_stale_flags(self):
+        detector = AbsorptionLiquidityDetector()
+        for value in (1, "true", None):
+            with self.subTest(synchronized=value):
+                with self.assertRaisesRegex(ValueError, "unsynchronized"):
+                    detector.analyze(book(synchronized=value), trades())
+        for value in (0, "false", None):
+            with self.subTest(stale=value):
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    detector.analyze(book(stale=value), trades())
+
     def test_refuses_unsynced_and_stale_book(self):
         detector=AbsorptionLiquidityDetector()
         with self.assertRaisesRegex(ValueError,"unsynchronized"):
