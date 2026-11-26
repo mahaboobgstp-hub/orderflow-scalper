@@ -9,10 +9,11 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | Field | Definition |
 |---|---|
 | `stale_after_seconds` | Feed freshness cutoff (default 3 seconds). |
-| `last_event_age_seconds` | Age of the most recently received depth event. |
-| `stale` | True if no depth event has been received or the event age exceeds the cutoff. |
+| `last_event_age_seconds` | Age of the most recently received WebSocket depth message (diagnostic only). |
+| `last_book_update_age_seconds` | Age of the most recent accepted event that advanced the order-book sequence. |
+| `stale` | True when disconnected, unsynchronized, no accepted sequence progress has occurred, or applied-book age exceeds the cutoff. |
 | `fresh` | Logical inverse of `stale`; freshness alone does not imply connectivity or book synchronization. |
-| `healthy` | True only while connected, synchronized, and fresh. |
+| `healthy` | True only while connected, synchronized, and the applied book is fresh. |
 | `connected_duration_seconds` | Time since the current successful WebSocket connection began; resets on reconnect. |
 | `synchronized_duration_seconds` | Time since the current snapshot bridge succeeded; clears on disconnect or sequence gap. |
 | `connection_attempt_count` | WebSocket connection attempts, including failed handshakes. |
@@ -23,6 +24,7 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | `last_disconnect_reason` | Most recent observed connection end or recovery-triggering failure. |
 
 A snapshot is not considered synchronized merely because an event's IDs span the snapshot bridge. The bridge event must also be successfully applied. **For USD-M Futures, the first bridge event must satisfy `U <= snapshot.lastUpdateId <= u` (not the Spot `lastUpdateId + 1` rule). Its `pu` is not compared to the REST snapshot's `lastUpdateId`, because `pu` refers to the previous WebSocket event.** Subsequent events must enforce `pu == previous event's u`. A failed bridge application leaves the book unsynchronized and forces snapshot recovery.
+The read-only order-book endpoint must also refuse to return data when the stream is disconnected or when no accepted sequence-progress event has refreshed the book within the stale cutoff; raw message receipt or duplicate/old sequence events must not refresh usable-book freshness.
 
 ## Frontend and API contract
 
