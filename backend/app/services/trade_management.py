@@ -96,12 +96,12 @@ class TradeManagementEngine:
             initial_stop = entry*(1-self.config.initial_stop_pct/100)
             trail = best*(1-self.config.trailing_stop_pct/100)
             break_even = favorable_best >= self.config.break_even_trigger_pct
-            stop = max(initial_stop, trail, entry*(1+self.config.break_even_offset_pct/100) if break_even else initial_stop)
+            stop = max(initial_stop, trail if favorable_best > 0 else initial_stop, entry*(1+self.config.break_even_offset_pct/100) if break_even else initial_stop)
         else:
             initial_stop = entry*(1+self.config.initial_stop_pct/100)
             trail = best*(1+self.config.trailing_stop_pct/100)
             break_even = favorable_best >= self.config.break_even_trigger_pct
-            stop = min(initial_stop, trail, entry*(1-self.config.break_even_offset_pct/100) if break_even else initial_stop)
+            stop = min(initial_stop, trail if favorable_best > 0 else initial_stop, entry*(1-self.config.break_even_offset_pct/100) if break_even else initial_stop)
         tp_active = favorable_best >= self.config.take_profit_trigger_pct
         tp = best*(1-self.config.trailing_take_profit_pct/100) if side == "long" else best*(1+self.config.trailing_take_profit_pct/100)
         trend_extension = trend >= self.config.trend_extension_score and favorable >= 0
