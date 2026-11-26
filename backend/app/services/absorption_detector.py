@@ -112,8 +112,8 @@ class AbsorptionLiquidityDetector:
         buy_avg=self._safe_ratio(sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="buy"),buy_qty)
         sell_avg=self._safe_ratio(sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="sell"),sell_qty)
         # VWAP-versus-mid is a spatial comparison, not temporal price progress.
-        buy_vwap_vs_mid_pct=(buy_avg-mid)/mid*100 if buy_avg and mid else 0.0
-        sell_vwap_vs_mid_pct=(mid-sell_avg)/mid*100 if sell_avg and mid else 0.0
+        buy_vwap_vs_mid_pct=(mid-buy_avg)/mid*100 if buy_avg and mid else 0.0
+        sell_vwap_vs_mid_pct=(sell_avg-mid)/mid*100 if sell_avg and mid else 0.0
         # Current displayed liquidity at the touch, and concentration in first 5 levels.
         bid5=sorted(bids,key=lambda x:x[0],reverse=True)[:5]; ask5=sorted(asks,key=lambda x:x[0])[:5]
         bid_depth=sum(q for p,q in bid5); ask_depth=sum(q for p,q in ask5)
@@ -141,8 +141,8 @@ class AbsorptionLiquidityDetector:
         # Without a temporal baseline, scores remain zero to avoid false absorption.
         if has_recent_baseline and len(normalized)>=self.min_trades and total_qty>0:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
-            buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
-            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
+            buy_absorption_score=buy_share*max(0.0,1.0-min(max(buy_progress_pct,0.0)/0.10,1.0))
+            sell_absorption_score=sell_share*max(0.0,1.0-min(max(sell_progress_pct,0.0)/0.10,1.0))
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
         sell_absorbed=sell_absorption_score>=self.absorption_threshold
         if buy_absorbed and sell_absorbed: label="MIXED_ABSORPTION"
