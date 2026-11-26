@@ -323,16 +323,10 @@ class BinanceOrderBookStream:
         first_update_id = int(event["U"])
         final_update_id = int(event["u"])
 
-        # Ignore events already covered by the snapshot.
-        if final_update_id < self.last_update_id:
-            return False
-
-        # Binance futures depth synchronization requires the first accepted
-        # event to bridge snapshot_id + 1. Events entirely covered by the
-        # snapshot (u <= snapshot_id) must be discarded, not treated as sync.
-        next_update_id = self.last_update_id + 1
+        # USD-M Futures differs from Spot: the first accepted event must
+        # overlap the REST snapshot's update ID itself (U <= lastUpdateId <= u).
         return (
-            first_update_id <= next_update_id
+            first_update_id <= self.last_update_id
             <= final_update_id
         )
 
