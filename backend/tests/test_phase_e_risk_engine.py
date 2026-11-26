@@ -68,7 +68,7 @@ def test_phase_e_manual_order_configured_leverage_cap():
 
 def test_phase_e_position_notional_cap_is_separate_from_portfolio_exposure():
     e=RiskManagementEngine()
-    sizing=e.calculate({"account_equity":10000,"entry_price":100,"stop_loss_price":90,"side":"long",
+    sizing=e.calculate({"account_equity":10000,"entry_price":100,"stop_loss_price":99.5,"side":"long",
         "risk_per_trade_pct":1,"leverage":1,"max_position_notional_pct":10})
     assert sizing["position_notional"]==1000
     assert sizing["position_limited_by_notional_cap"] is True
