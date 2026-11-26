@@ -111,7 +111,7 @@ class AutonomousPaperRuntime:
         # API or demo/live order endpoint is called from this runtime.
         session_allowed=True; session_blockers=[]
         if self.validation_session:
-            session_allowed,session_blockers=self.validation_session.entry_gate(result.get("side","NEUTRAL"),bool(book),equity)
+            session_allowed,session_blockers=self.validation_session.entry_gate(result.get("side","NEUTRAL"),bool(book),equity,positions)
         result["controlled_session_gate"]={"allowed":session_allowed,"blockers":session_blockers,"session_state":self.validation_session.state if self.validation_session else "NOT_CONFIGURED"}
         if result.get("entry_eligible") and not risk_blockers and session_allowed:
             side="long" if result.get("side")=="BUY" else "short"
