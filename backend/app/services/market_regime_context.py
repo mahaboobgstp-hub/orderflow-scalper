@@ -4,7 +4,15 @@ import math
 from typing import Any
 
 class MarketRegimeContextEngine:
-    def __init__(self, history_limit: int = 500): self.history_limit=max(60,min(int(history_limit),1000))
+    @staticmethod
+    def _period(value, default):
+        try:
+            parsed=int(value)
+        except (TypeError,ValueError,OverflowError):
+            parsed=default
+        return parsed
+    def __init__(self, history_limit: int = 500):
+        self.history_limit=max(60,min(self._period(history_limit,500),1000))
     @staticmethod
     def _num(x):
         try:
@@ -17,10 +25,12 @@ class MarketRegimeContextEngine:
             o,h,l,cl,vol=(self._num(c.get(k)) for k in ("open","high","low","close","volume"))
             if all(x is not None and x>0 for x in (o,h,l,cl)) and h>=max(o,cl) and l<=min(o,cl):
                 valid.append({"open":o,"high":h,"low":l,"close":cl,"volume":max(0,vol or 0)})
-        if len(valid)<max(40,int(slow_period)+2): raise ValueError("At least 40 valid candles are required for regime classification.")
+        fp=max(3,min(self._period(fast_period,12),50))
+        sp=max(fp+1,min(self._period(slow_period,36),200))
+        if len(valid)<max(40,sp+2): raise ValueError("At least 40 valid candles are required for regime classification.")
         closes=[c["close"] for c in valid]; ranges=[(c["high"]-c["low"])/c["close"]*100 for c in valid]; returns=[(closes[i]-closes[i-1])/closes[i-1]*100 for i in range(1,len(closes))]
         def mean(xs): return sum(xs)/len(xs) if xs else 0.0
-        fp=max(3,min(int(fast_period),50)); sp=max(fp+1,min(int(slow_period),200))
+        fp=max(3,min(fp,50)); sp=max(fp+1,min(sp,200))
         fast=mean(closes[-fp:]); slow=mean(closes[-sp:]); drift=(fast-slow)/slow*100 if slow else 0
         recent=returns[-fp:]; baseline=returns[-sp:]; rvol=math.sqrt(mean([x*x for x in recent])) if recent else 0; bvol=math.sqrt(mean([x*x for x in baseline])) if baseline else 0
         rr=mean(ranges[-fp:]); br=mean(ranges[-sp:]); vr=rvol/bvol if bvol else None; range_ratio=rr/br if br else None
