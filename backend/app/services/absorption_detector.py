@@ -29,6 +29,7 @@ class AbsorptionLiquidityDetector:
         if not isinstance(raw,list): return out
         for row in raw:
             if not isinstance(row,(list,tuple)) or len(row)<2: continue
+            if isinstance(row[0],bool) or isinstance(row[1],bool): continue
             try: p,q=float(row[0]),float(row[1])
             except (ValueError,TypeError): continue
             if math.isfinite(p) and math.isfinite(q) and p>0 and q>0: out.append((p,q))
@@ -62,6 +63,7 @@ class AbsorptionLiquidityDetector:
         if not book.get("synchronized",False): raise ValueError("Order book is unsynchronized; absorption analysis refused.")
         if book.get("stale",True): raise ValueError("Order book is stale; analysis refused.")
         age=book.get("age_seconds")
+        if isinstance(age,bool): raise ValueError("Order book age is invalid.")
         try: age_value=float(age)
         except (TypeError,ValueError): raise ValueError("Order book age is invalid.")
         if not math.isfinite(age_value) or age_value<0 or age_value>self.max_book_age_seconds:
@@ -72,6 +74,7 @@ class AbsorptionLiquidityDetector:
         best_bid=max(p for p,q in bids); best_ask=min(p for p,q in asks)
         if best_bid>=best_ask: raise ValueError("Crossed or locked book is invalid.")
         mid=(best_bid+best_ask)/2
+        if isinstance(lookback_seconds,bool): raise ValueError("Lookback must be a finite number.")
         try: lookback=float(lookback_seconds)
         except (TypeError,ValueError): raise ValueError("Lookback must be a finite number.")
         if not math.isfinite(lookback): raise ValueError("Lookback must be a finite number.")
@@ -81,7 +84,11 @@ class AbsorptionLiquidityDetector:
         for t in trades or []:
             if not isinstance(t,dict): continue
             raw_price=t.get("price",0); raw_quantity=t.get("quantity",0)
-            raw_timestamp=t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0
+            raw_timestamp=t.get("received_timestamp_ms")
+            if raw_timestamp is None:
+                raw_timestamp=t.get("exchange_timestamp_ms")
+            if raw_timestamp is None:
+                raw_timestamp=0
             if isinstance(raw_price,bool) or isinstance(raw_quantity,bool): continue
             try: price=float(raw_price); qty=float(raw_quantity)
             except (TypeError,ValueError,OverflowError): continue
