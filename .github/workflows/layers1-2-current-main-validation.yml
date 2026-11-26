@@ -7,6 +7,7 @@ on:
       - "backend/app/market_data/backend_stream.py"
       - "backend/app/services/absorption_detector.py"
       - "backend/tests/test_layer1_order_book_sync.py"
+      - "backend/tests/test_layer1_initial_bridge_integration.py"
       - "backend/tests/test_phase5_imbalance_detector.py"
       - "backend/tests/test_phase6_absorption_detector.py"
       - "backend/tests/test_phase6_absorption_api.py"
@@ -44,7 +45,7 @@ jobs:
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -vv tests/test_layer1_order_book_sync.py tests/test_phase5_imbalance_detector.py tests/test_phase6_absorption_detector.py tests/test_phase6_absorption_api.py
+        run: pytest -vv tests/test_layer1_order_book_sync.py tests/test_layer1_initial_bridge_integration.py tests/test_phase5_imbalance_detector.py tests/test_phase6_absorption_detector.py tests/test_phase6_absorption_api.py
   full-backend:
     runs-on: ubuntu-latest
     steps:
