@@ -7,6 +7,7 @@ on:
       - "backend/app/services/trade_flow_momentum.py"
       - "backend/tests/test_phase8_trade_flow_momentum.py"
       - "backend/tests/test_phase8_api_integration.py"
+      - "backend/tests/test_phase8_nine_layer_integration.py"
       - ".github/workflows/layer4-focused-validation.yml"
   pull_request:
     paths:
@@ -33,4 +34,4 @@ jobs:
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -vv tests/test_phase8_trade_flow_momentum.py tests/test_phase8_api_integration.py
+        run: pytest -vv tests/test_phase8_trade_flow_momentum.py tests/test_phase8_api_integration.py tests/test_phase8_nine_layer_integration.py
