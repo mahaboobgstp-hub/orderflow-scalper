@@ -1,3 +1,5 @@
+import asyncio
+import time
 import unittest
 
 from app.market_data.backend_stream import BinanceOrderBookStream
@@ -91,6 +93,33 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.stream.last_update_id = 101
         with self.assertRaises((ValueError, TypeError)):
             self.stream._apply_event(e)
+
+    def test_stale_book_is_not_returned(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = time.time() - 10
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_duplicate_event_does_not_refresh_stale_book(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        old_progress = time.time() - 10
+        self.stream.last_book_update_at = old_progress
+        self.assertTrue(self.stream._apply_event(self.event(90, 100)))
+        self.assertEqual(self.stream.last_book_update_at, old_progress)
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_progressing_event_refreshes_book_and_returns_age(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = None
+        event = self.event(101, 101, bids=[["99.5", "1.0"]])
+        self.assertTrue(self.stream._apply_event(event))
+        book = asyncio.run(self.stream.get_order_book())
+        self.assertIsNotNone(book)
+        self.assertFalse(book["stale"])
+        self.assertLessEqual(book["age_seconds"], 3.0)
+        self.assertEqual(book["last_update_id"], 101)
 
     def test_stop_marks_stream_unsynchronized(self):
         self.assertFalse(self.stream.synchronized)
