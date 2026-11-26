@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any
@@ -25,7 +25,7 @@ from app.services.paper_trading import PaperTradingEngine, set_persistence_enque
 from app.services.paper_persistence import PaperPersistenceWorker
 from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
-from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
+from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state, _auth as control_auth
 from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
 from app.services.trade_management import TradeManagementEngine, TradeManagementConfig
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
@@ -59,6 +59,9 @@ async def lifespan(app: FastAPI):
     app.state.paper_persistence_worker=persistence_worker
     recovered=await persistence_worker.restore_state(app.state.paper_trading_engine)
     app.state.paper_state_recovered=recovered
+    persisted_halt=persistence_worker.risk_control_state
+    if persisted_halt.get("active"):
+        app.state.risk_management_engine.set_kill_switch(True,persisted_halt.get("reason") or "PERSISTED_EMERGENCY_HALT")
     set_persistence_enqueue(persistence_worker.enqueue)
     await persistence_worker.start()
     app.state.backtesting_engine=BacktestEngine()
@@ -414,8 +417,16 @@ async def market_context_regime(symbol:str,interval:str="1m",limit:int=Query(def
 
 # Phase 10 risk-management endpoints — advisory/calculation only
 @app.get("/api/risk/status")
-async def risk_engine_status():
-    return app.state.risk_management_engine.status()
+async def risk_engine_status(x_control_token: str | None = Header(default=None)):
+    control_auth(x_control_token)
+    engine=app.state.risk_management_engine; paper=app.state.paper_trading_engine
+    config=operator_control_state["config"]
+    account=paper.account()
+    live_gate=engine.evaluate_runtime_gate(account_equity=account.get("equity",0),closed_trades=paper.closed_trades,
+        orders=paper.orders,positions=paper.positions,symbol="RISK_MONITOR",config=config,synchronized_book=True,
+        proposed_trade_risk_cash=0,proposed_notional=0,proposed_leverage=1,risk_limit_basis_equity=account.get("initial_equity",account.get("equity",0)),fee_rate=paper.fee_rate)
+    return {**engine.status(),"mode":"PAPER_ONLY","live_portfolio_gate":live_gate,
+        "account":account,"execution_enabled":False}
 @app.post("/api/risk/position-size")
 async def risk_position_size(request:RiskSizingRequest):
     try: return app.state.risk_management_engine.calculate(request.model_dump())
@@ -452,7 +463,24 @@ async def paper_orders():
     return {"mode":"PAPER_ONLY","real_orders":False,"orders":list(engine.orders[-500:]),"count":len(engine.orders)}
 @app.post("/api/paper/orders")
 async def paper_submit_order(request:PaperOrderRequest):
-    try: return app.state.paper_trading_engine.submit(request.model_dump())
+    risk_engine=app.state.risk_management_engine; paper_engine=app.state.paper_trading_engine
+    if risk_engine.kill_switch_status()["active"]:
+        raise HTTPException(status_code=423,detail="Emergency risk kill switch is active; paper entries are blocked.")
+    if request.stop_loss_price is None:
+        raise HTTPException(status_code=422,detail="Phase E requires a protective stop-loss for every new paper entry.")
+    side=request.side.lower()
+    if side not in ("long","short") or (side=="long" and request.stop_loss_price>=request.price) or (side=="short" and request.stop_loss_price<=request.price):
+        raise HTTPException(status_code=422,detail="Stop-loss must be on the protective side of the entry price.")
+    config=operator_control_state["config"]
+    actual_risk=abs(request.price-request.stop_loss_price)*request.quantity+request.quantity*(request.price+request.stop_loss_price)*paper_engine.fee_rate
+    notional=request.price*request.quantity
+    account=paper_engine.account()
+    gate=risk_engine.evaluate_runtime_gate(account_equity=account["equity"],closed_trades=paper_engine.closed_trades,
+        orders=paper_engine.orders,positions=paper_engine.positions,symbol=request.symbol.upper(),config=config,
+        synchronized_book=True,proposed_trade_risk_cash=actual_risk,proposed_notional=notional,proposed_leverage=request.leverage,risk_limit_basis_equity=account.get("initial_equity",account.get("equity",0)),fee_rate=paper_engine.fee_rate)
+    if not gate["allowed"]:
+        raise HTTPException(status_code=409,detail={"message":"Phase E risk gate rejected paper entry.","blockers":gate["blockers"],"risk":gate})
+    try: return paper_engine.submit(request.model_dump())
     except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
 @app.post("/api/paper/manage/{symbol}")
 async def paper_manage_position(symbol:str,request:PaperManagementRequest):

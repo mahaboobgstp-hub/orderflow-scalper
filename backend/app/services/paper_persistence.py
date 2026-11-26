@@ -18,6 +18,7 @@ class PaperPersistenceWorker:
         self.failed_count = 0
         self.last_processed_event: str | None = None
         self.last_error: str | None = None
+        self.risk_control_state: dict[str, Any] = {"active": False, "reason": None}
         self.recovery_report: dict[str, Any] = {
             "attempted": False, "restored": False, "source": "none",
             "open_position_count": 0, "snapshot_valid": False, "warnings": [],
@@ -39,6 +40,12 @@ class PaperPersistenceWorker:
             self.recovery_report["attempted"] = True
             saved = await self.repo.load_paper_state()
             wrapped = saved.get("snapshot", {})
+            if isinstance(wrapped, dict) and isinstance(wrapped.get("risk_kill_switch"), dict):
+                persisted_halt=wrapped["risk_kill_switch"]
+                self.risk_control_state={"active":bool(persisted_halt.get("active")),"reason":persisted_halt.get("reason")}
+            elif isinstance(wrapped,dict) and "paper_account" in wrapped:
+                # Legacy persisted paper state predates the explicit risk-halt flag.
+                self.risk_control_state={"active":True,"reason":"RISK_CONTROL_STATE_MISSING"}
             account = wrapped.get("paper_account", {}) if isinstance(wrapped, dict) else {}
             snapshot_valid = engine.restore_persistence_snapshot(account)
             restored = snapshot_valid
@@ -80,9 +87,10 @@ class PaperPersistenceWorker:
                 logger.info("No valid persisted paper state found; starting fresh paper account")
             return restored
         except Exception as exc:
-            self.recovery_report["warnings"].append(f"Recovery error: {type(exc).__name__}")
+            self.risk_control_state={"active":True,"reason":"RISK_CONTROL_STATE_UNAVAILABLE"}
+            self.recovery_report["warnings"].append(f"Recovery error: {type(exc).__name__}; risk halt activated fail-closed")
             self.recovery_report["source"] = "recovery_error"
-            logger.exception("Paper trading recovery failed; simulator remains fresh and empty")
+            logger.exception("Paper trading recovery failed; simulator remains fresh and risk halt is active")
             return False
 
     async def start(self):
@@ -131,6 +139,7 @@ class PaperPersistenceWorker:
             "last_processed_event": self.last_processed_event,
             "last_error": self.last_error,
             "recovery": self.recovery_report,
+            "risk_control_state": dict(self.risk_control_state),
             "mode": "PAPER_ONLY",
         }
 
