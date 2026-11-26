@@ -313,5 +313,75 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(result["fresh_message_feed_count"], 1)
                 self.assertEqual(result["healthy_feed_count"], 1)
 
+    def test_depth_frame_decoder_accepts_valid_update_ids(self):
+        event = self.stream._decode_depth_message(
+            '{"U":100,"u":101,"pu":99,"b":[],"a":[]}'
+        )
+        self.assertEqual(event["U"], 100)
+        self.assertEqual(event["u"], 101)
+
+    def test_depth_frame_decoder_rejects_malformed_shapes_and_ranges(self):
+        invalid_frames = (
+            "{",
+            "[]",
+            '{"U":100}',
+            '{"U":102,"u":101}',
+            '{"U":true,"u":101}',
+            '{"U":100.5,"u":101}',
+        )
+        for frame in invalid_frames:
+            with self.subTest(frame=frame):
+                with self.assertRaises(ValueError):
+                    self.stream._decode_depth_message(frame)
+
+    def test_collector_signals_termination_after_malformed_frame(self):
+        class FakeWebSocket:
+            def __init__(self, messages):
+                self.messages = messages
+
+            def __aiter__(self):
+                async def iterate():
+                    for message in self.messages:
+                        yield message
+                return iterate()
+
+        async def run_collector():
+            queue = asyncio.Queue()
+            await self.stream._collect_depth_events(
+                FakeWebSocket(['{"U":100,"u":101,"b":[],"a":[]}', "{broken-json"]),
+                queue,
+            )
+            return await queue.get(), await queue.get()
+
+        first, sentinel = asyncio.run(run_collector())
+        self.assertEqual(first["U"], 100)
+        self.assertIsNone(sentinel)
+        self.assertEqual(self.stream.messages_received, 2)
+        self.assertEqual(self.stream.last_error, "Malformed Binance depth JSON frame")
+
+    def test_collector_signals_normal_websocket_end(self):
+        class FakeWebSocket:
+            def __init__(self, messages):
+                self.messages = messages
+
+            def __aiter__(self):
+                async def iterate():
+                    for message in self.messages:
+                        yield message
+                return iterate()
+
+        async def run_collector():
+            queue = asyncio.Queue()
+            await self.stream._collect_depth_events(
+                FakeWebSocket(['{"U":100,"u":101,"b":[],"a":[]}']),
+                queue,
+            )
+            return await queue.get(), await queue.get()
+
+        event, sentinel = asyncio.run(run_collector())
+        self.assertEqual(event["u"], 101)
+        self.assertIsNone(sentinel)
+        self.assertIsNone(self.stream.last_error)
+
 if __name__ == "__main__":
     unittest.main()
