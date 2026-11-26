@@ -104,6 +104,16 @@ class BinanceDemoBookIntegrityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "finite"):
                     BinanceOrderBookStream(max_book_age_seconds=value)
 
+    def test_buffered_event_preserves_receive_time_for_freshness(self):
+        stream = self.ready_stream()
+        received_at = time.monotonic() - stream.max_book_age_seconds - 1.0
+        event = depth_event(101, 102, 100, bids=[["100.0", "3.0"]])
+        event["_received_monotonic"] = received_at
+
+        self.assertTrue(stream._apply_event(event))
+        self.assertEqual(stream._last_event_received_at, received_at)
+        self.assertIsNone(__import__("asyncio").run(stream.get_order_book()))
+
     def test_snapshot_integer_string_update_id_is_supported(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         stream._load_snapshot({**valid_snapshot(), "lastUpdateId": "100"})
