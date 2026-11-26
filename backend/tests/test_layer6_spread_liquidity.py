@@ -2,7 +2,7 @@ import pytest
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 
 def eval_market(market,config=None):
-    return NineLayerDecisionEngine(config).evaluate("BTCUSDT",{"market":market},risk={"allowed":True,"blockers":[]})
+    return NineLayerDecisionEngine(config).evaluate("BTCUSDT",{"market":market,"imbalance":{"metrics":{"weighted_imbalance":0.2}},"trade_flow":{"metrics":{"delta_ratio":0.2,"price_move_pct":0.2},"trade_count":20}},risk={"allowed":True,"blockers":[]})
 
 def l6(result):
     return result["layers"]["spread_liquidity"]
