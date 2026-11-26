@@ -136,9 +136,12 @@ class NineLayerDecisionEngine:
         put("broader_market_context",c_score,context.get("confidence",0) if isinstance(context,dict) else 0,
             context.get("reasons",[]) if isinstance(context,dict) else ["Broader context unavailable"],context or {},available=c_score is not None)
         # L9: hard execution/risk gate, not a directional signal.
-        risk=risk or {}
-        blockers=list(risk.get("blockers",[]))
-        risk_pass=bool(risk.get("allowed",False)) and not blockers
+        risk=risk if isinstance(risk,dict) else {}
+        raw_blockers=risk.get("blockers",[])
+        blockers=list(raw_blockers) if isinstance(raw_blockers,(list,tuple)) else ["INVALID_RISK_BLOCKERS_FORMAT"]
+        risk_pass=(risk.get("allowed") is True) and not blockers
+        if risk.get("allowed") is not True and not blockers:
+            blockers=["RISK_PERMISSION_NOT_EXPLICITLY_ALLOWED"]
         put("risk_execution",100 if risk_pass else -100,100,
             ["Risk and execution gate "+("passed" if risk_pass else "blocked")],risk,available=True,direction="NEUTRAL" if risk_pass else "BLOCK")
         eligible=[layers[k] for k in LAYER_NAMES[:8] if layers[k]["available"] and layers[k]["direction"] in ("BUY","SELL")]
