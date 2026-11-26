@@ -168,7 +168,10 @@ class UnifiedMarketDataEngine:
                 if typ == "snapshot":
                     valid = self.update_book(book, data.get("b", []), data.get("a", []), snapshot=True)
                 elif typ == "delta":
-                    if book.sequence is None or sequence <= book.sequence:
+                    if not book.synchronized or book.sequence is None:
+                        self.invalidate_book(ex, book, "Delta received before synchronized snapshot")
+                        valid = False
+                    elif sequence <= book.sequence:
                         self.invalidate_book(ex, book, "Non-progressing order-book sequence")
                         valid = False
                     else:
