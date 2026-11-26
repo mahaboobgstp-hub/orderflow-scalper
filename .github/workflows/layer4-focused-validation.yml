@@ -1,0 +1,36 @@
+name: Layer 4 Focused Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/services/trade_flow_momentum.py"
+      - "backend/tests/test_phase8_trade_flow_momentum.py"
+      - "backend/tests/test_phase8_api_integration.py"
+      - ".github/workflows/layer4-focused-validation.yml"
+  pull_request:
+    paths:
+      - "backend/app/services/trade_flow_momentum.py"
+      - "backend/tests/test_phase8_trade_flow_momentum.py"
+      - "backend/tests/test_phase8_api_integration.py"
+      - ".github/workflows/layer4-focused-validation.yml"
+
+jobs:
+  layer4-trade-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile Layer 4 source and tests
+        run: python -m compileall -q backend/app/services/trade_flow_momentum.py backend/tests/test_phase8_trade_flow_momentum.py backend/tests/test_phase8_api_integration.py
+      - name: Run Layer 4 focused suite
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -vv tests/test_phase8_trade_flow_momentum.py tests/test_phase8_api_integration.py
