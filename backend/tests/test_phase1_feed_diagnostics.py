@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unittest
 from unittest.mock import patch
 
@@ -36,6 +37,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             self.stream.synchronized_since = 95.0
             self.stream.last_event_at = 98.5
             self.stream.last_book_update_at = 98.5
+            self.stream.last_book_update_monotonic = time.monotonic() - 1.5
             status = __import__("asyncio").run(self.stream.get_status())
         self.assertFalse(status["stale"])
         self.assertTrue(status["fresh"])
@@ -52,6 +54,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             self.stream.synchronized_since = 95.0
             self.stream.last_event_at = 96.0
             self.stream.last_book_update_at = 96.0
+            self.stream.last_book_update_monotonic = time.monotonic() - 4.0
             status = __import__("asyncio").run(self.stream.get_status())
         self.assertTrue(status["synchronized"])
         self.assertTrue(status["stale"])
@@ -76,7 +79,9 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
     def test_snapshot_bridge_accepts_event_without_snapshot_pu_match(self):
         with patch("app.market_data.backend_stream.time.time", return_value=50.0):
-            self.stream.last_update_id = 100
+            self.stream._load_snapshot({
+                "lastUpdateId": 100, "bids": [["99.9", "2"]], "asks": [["100.1", "2"]]
+            })
             self.stream.successful_connection_count = 1
             event = {"U": 100, "u": 101, "pu": 99, "b": [["100", "1"]], "a": []}
             self.assertTrue(self.stream._event_bridges_snapshot(event))
@@ -87,7 +92,9 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
 
     def test_snapshot_bridge_rejects_non_overlapping_event(self):
-        self.stream.last_update_id = 100
+        self.stream._load_snapshot({
+            "lastUpdateId": 100, "bids": [["99.9", "2"]], "asks": [["100.1", "2"]]
+        })
         event = {"U": 102, "u": 103, "pu": 100, "b": [["100", "1"]], "a": []}
         self.assertFalse(self.stream._event_bridges_snapshot(event))
         self.assertFalse(self.stream._apply_snapshot_bridge(event))
@@ -96,7 +103,9 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
 
     def test_live_events_enforce_pu_after_snapshot_bridge(self):
-        self.stream.last_update_id = 100
+        self.stream._load_snapshot({
+            "lastUpdateId": 100, "bids": [["99.9", "2"]], "asks": [["100.1", "2"]]
+        })
         bridge = {"U": 100, "u": 101, "pu": 99, "b": [], "a": []}
         self.assertTrue(self.stream._apply_snapshot_bridge(bridge))
         self.assertTrue(self.stream._apply_event({"U": 102, "u": 103, "pu": 101, "b": [], "a": []}))
@@ -106,7 +115,9 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
     def test_snapshot_bridge_marks_sync_only_after_event_applies(self):
         with patch("app.market_data.backend_stream.time.time", return_value=50.0):
-            self.stream.last_update_id = 100
+            self.stream._load_snapshot({
+                "lastUpdateId": 100, "bids": [["99.9", "2"]], "asks": [["100.1", "2"]]
+            })
             self.stream.successful_connection_count = 1
             event = {"U": 100, "u": 101, "pu": 100, "b": [["100", "2"]], "a": [["101", "1"]]}
             self.assertTrue(self.stream._apply_snapshot_bridge(event))

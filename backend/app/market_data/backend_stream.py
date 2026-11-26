@@ -10,6 +10,7 @@ Market data only:
 import asyncio
 import json
 import logging
+import math
 import time
 from collections import deque
 from typing import Any
@@ -34,7 +35,15 @@ class BinanceOrderBookStream:
         self.symbol = symbol.upper()
         self.stream_symbol = symbol.lower()
         self.snapshot_limit = snapshot_limit
-        self.stale_after_seconds = max(0.1, float(stale_after_seconds))
+        if isinstance(stale_after_seconds, bool):
+            raise ValueError("Stale threshold must be finite numeric.")
+        try:
+            stale_age = float(stale_after_seconds)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("Stale threshold must be finite numeric.") from None
+        if not math.isfinite(stale_age):
+            raise ValueError("Stale threshold must be finite.")
+        self.stale_after_seconds = max(0.1, stale_age)
 
         self.bids: dict[float, float] = {}
         self.asks: dict[float, float] = {}
@@ -47,6 +56,8 @@ class BinanceOrderBookStream:
         self.last_event_at: float | None = None
         # Timestamp only when a depth update advances the book sequence.
         self.last_book_update_at: float | None = None
+        # Monotonic clock for freshness; wall-clock changes cannot make data fresh.
+        self.last_book_update_monotonic: float | None = None
         self.last_sync_at: float | None = None
         self.last_disconnect_at: float | None = None
         self.messages_received = 0
@@ -113,6 +124,7 @@ class BinanceOrderBookStream:
         self.synchronized_since = None
         self.last_event_at = None
         self.last_book_update_at = None
+        self.last_book_update_monotonic = None
         self.last_error = None
 
     def _record_disconnect(self, reason: str):
@@ -199,6 +211,8 @@ class BinanceOrderBookStream:
             async def collect_events():
                 async for message in websocket:
                     event = json.loads(message)
+                    if isinstance(event, dict):
+                        event["_received_monotonic"] = time.monotonic()
                     self.messages_received += 1
                     self.last_event_at = time.time()
                     await event_queue.put(event)
@@ -206,6 +220,42 @@ class BinanceOrderBookStream:
             collector_task = asyncio.create_task(
                 collect_events()
             )
+
+            async def next_event():
+                # Drain buffered updates before interpreting collector closure.
+                if not event_queue.empty():
+                    return event_queue.get_nowait()
+                if collector_task.done():
+                    if collector_task.cancelled():
+                        raise ConnectionError("Depth stream collector was cancelled.")
+                    error = collector_task.exception()
+                    if error:
+                        raise error
+                    raise ConnectionError("Depth stream closed.")
+
+                event_task = asyncio.create_task(event_queue.get())
+                done, _ = await asyncio.wait(
+                    {event_task, collector_task},
+                    timeout=5.0,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if event_task in done:
+                    return event_task.result()
+                event_task.cancel()
+                try:
+                    await event_task
+                except asyncio.CancelledError:
+                    pass
+                if not done:
+                    raise TimeoutError("Depth stream timed out waiting for an update.")
+                if not event_queue.empty():
+                    return event_queue.get_nowait()
+                if collector_task.cancelled():
+                    raise ConnectionError("Depth stream collector was cancelled.")
+                error = collector_task.exception()
+                if error:
+                    raise error
+                raise ConnectionError("Depth stream closed.")
 
             try:
                 snapshot = await self._fetch_snapshot()
@@ -215,7 +265,10 @@ class BinanceOrderBookStream:
 
                 # Apply buffered events until the book is synchronized.
                 while not self.synchronized:
-                    event = await event_queue.get()
+                    event = await next_event()
+
+                    if self._snapshot_bridge_gap(event):
+                        raise ConnectionError("Initial depth event skipped the Futures snapshot bridge; resynchronizing.")
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
@@ -235,7 +288,7 @@ class BinanceOrderBookStream:
 
                 # Process live updates.
                 while not self._stop_event.is_set():
-                    event = await event_queue.get()
+                    event = await next_event()
 
                     async with self._lock:
                         if not self._apply_event(event):
@@ -284,27 +337,98 @@ class BinanceOrderBookStream:
             return response.json()
 
     # --------------------------------------------------
+    # --------------------------------------------------
     # Order-book operations
     # --------------------------------------------------
 
+    @staticmethod
+    def _parse_snapshot_levels(raw: Any) -> dict[float, float]:
+        if not isinstance(raw, list):
+            raise ValueError("Snapshot levels must be a list.")
+        parsed: dict[float, float] = {}
+        for row in raw:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                raise ValueError("Snapshot contains a malformed level.")
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
+                raise ValueError("Snapshot contains boolean level data.")
+            try:
+                price, quantity = float(row[0]), float(row[1])
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("Snapshot contains a nonnumeric level.") from None
+            if not math.isfinite(price) or not math.isfinite(quantity) or price <= 0 or quantity <= 0:
+                raise ValueError("Snapshot contains a nonfinite or nonpositive level.")
+            parsed[price] = quantity
+        return parsed
+
+    @staticmethod
+    def _validate_event_levels(raw: Any) -> bool:
+        if not isinstance(raw, (list, tuple)):
+            return False
+        for row in raw:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                return False
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
+                return False
+            try:
+                price, quantity = float(row[0]), float(row[1])
+            except (TypeError, ValueError, OverflowError):
+                return False
+            if not math.isfinite(price) or not math.isfinite(quantity) or price <= 0 or quantity < 0:
+                return False
+        return True
+
+    @staticmethod
+    def _book_integrity_valid(bids: dict[float, float], asks: dict[float, float]) -> bool:
+        if not bids or not asks:
+            return False
+        if any(not math.isfinite(p) or not math.isfinite(q) or p <= 0 or q <= 0 for p, q in bids.items()):
+            return False
+        if any(not math.isfinite(p) or not math.isfinite(q) or p <= 0 or q <= 0 for p, q in asks.items()):
+            return False
+        return max(bids) < min(asks)
+
+    @staticmethod
+    def _parse_update_id(value: Any) -> int | None:
+        """Accept nonnegative integer sequence IDs, never bools or fractional values."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            value = value.strip()
+            if value and value.isascii() and value.isdigit():
+                try:
+                    return int(value)
+                except (ValueError, OverflowError):
+                    return None
+        return None
+
+    def _snapshot_bridge_gap(self, event: dict[str, Any]) -> bool:
+        """First USD-M Futures event must overlap the snapshot ID itself."""
+        if self.last_update_id is None or not isinstance(event, dict):
+            return True
+        first_update_id = self._parse_update_id(event.get("U"))
+        final_update_id = self._parse_update_id(event.get("u"))
+        if first_update_id is None or final_update_id is None or first_update_id > final_update_id:
+            return True
+        return first_update_id > self.last_update_id
+
     def _load_snapshot(self, snapshot: dict[str, Any]):
-        self.bids = {
-            float(price): float(quantity)
-            for price, quantity in snapshot.get("bids", [])
-            if float(quantity) > 0
-        }
-
-        self.asks = {
-            float(price): float(quantity)
-            for price, quantity in snapshot.get("asks", [])
-            if float(quantity) > 0
-        }
-
-        self.last_update_id = int(
-            snapshot["lastUpdateId"]
-        )
-
+        if not isinstance(snapshot, dict):
+            raise ValueError("Snapshot must be an object.")
+        bids = self._parse_snapshot_levels(snapshot.get("bids", []))
+        asks = self._parse_snapshot_levels(snapshot.get("asks", []))
+        update_id = self._parse_update_id(snapshot.get("lastUpdateId"))
+        if update_id is None:
+            raise ValueError("Snapshot update ID is invalid.")
+        if not self._book_integrity_valid(bids, asks):
+            raise ValueError("Snapshot book is empty, invalid, crossed, or locked.")
+        self.bids = bids
+        self.asks = asks
+        self.last_update_id = update_id
         self.synchronized = False
+        self.last_book_update_at = None
+        self.last_book_update_monotonic = None
         self.snapshot_count += 1
         self.last_error = None
 
@@ -313,26 +437,16 @@ class BinanceOrderBookStream:
         event: dict[str, Any],
     ) -> bool:
         """
-        Binance depth events contain:
-        U = first update ID
-        u = final update ID
-
-        The first event after the snapshot must bridge
-        the snapshot update ID.
+        Binance USD-M Futures snapshot bridge: U <= lastUpdateId <= u.
+        Do not apply the Spot L+1 convention to this Futures feed.
         """
-
-        if self.last_update_id is None:
+        if self.last_update_id is None or not isinstance(event, dict):
             return False
-
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
-
-        # USD-M Futures differs from Spot: the first accepted event must
-        # overlap the REST snapshot's update ID itself (U <= lastUpdateId <= u).
-        return (
-            first_update_id <= self.last_update_id
-            <= final_update_id
-        )
+        first_update_id = self._parse_update_id(event.get("U"))
+        final_update_id = self._parse_update_id(event.get("u"))
+        if first_update_id is None or final_update_id is None or first_update_id > final_update_id:
+            return False
+        return first_update_id <= self.last_update_id <= final_update_id
 
     def _apply_event(
         self,
@@ -340,49 +454,55 @@ class BinanceOrderBookStream:
         *,
         validate_previous_sequence: bool = True,
     ) -> bool:
-        """
-        Apply a depth event.
-
-        Returns False when a sequence gap is detected.
-        """
-
-        if self.last_update_id is None:
+        """Validate sequence and book changes transactionally; False means reject/resync."""
+        if self.last_update_id is None or not isinstance(event, dict):
+            return False
+        first_update_id = self._parse_update_id(event.get("U"))
+        final_update_id = self._parse_update_id(event.get("u"))
+        if first_update_id is None or final_update_id is None or first_update_id > final_update_id:
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
-
-        # Ignore old events.
         if final_update_id <= self.last_update_id:
             return True
 
-        # Snapshot-bridge events are validated by U/u overlap with the REST
-        # snapshot. Only events after that bridge enforce pu continuity.
         if validate_previous_sequence:
             previous_final_id = event.get("pu")
-
             if previous_final_id is not None:
-                if int(previous_final_id) != self.last_update_id:
+                parsed_previous_id = self._parse_update_id(previous_final_id)
+                if parsed_previous_id is None or parsed_previous_id != self.last_update_id:
                     return False
-
             elif first_update_id > self.last_update_id + 1:
                 return False
 
-        self._update_levels(
-            self.bids,
-            event.get("b", []),
-        )
+        bid_updates = event.get("b", [])
+        ask_updates = event.get("a", [])
+        if not self._validate_event_levels(bid_updates) or not self._validate_event_levels(ask_updates):
+            return False
 
-        self._update_levels(
-            self.asks,
-            event.get("a", []),
-        )
+        new_bids = dict(self.bids)
+        new_asks = dict(self.asks)
+        try:
+            self._update_levels(new_bids, bid_updates)
+            self._update_levels(new_asks, ask_updates)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not self._book_integrity_valid(new_bids, new_asks):
+            return False
 
+        self.bids = new_bids
+        self.asks = new_asks
         self.last_update_id = final_update_id
-        # A progressing, accepted depth event—not mere message receipt—refreshes
-        # the book's usable-data freshness clock.
         self.last_book_update_at = time.time()
-
+        received_at = event.get("_received_monotonic")
+        now_monotonic = time.monotonic()
+        if (
+            isinstance(received_at, bool)
+            or not isinstance(received_at, (int, float))
+            or not math.isfinite(received_at)
+            or received_at > now_monotonic
+        ):
+            received_at = now_monotonic
+        self.last_book_update_monotonic = received_at
         return True
 
     @staticmethod
@@ -409,8 +529,8 @@ class BinanceOrderBookStream:
         sync_age = max(0.0, now - self.last_sync_at) if self.last_sync_at is not None else None
         recovery_age = max(0.0, now - self.last_recovery_at) if self.last_recovery_at is not None else None
         book_age = (
-            max(0.0, now - self.last_book_update_at)
-            if self.last_book_update_at is not None
+            max(0.0, time.monotonic() - self.last_book_update_monotonic)
+            if self.last_book_update_monotonic is not None
             else None
         )
         stale = (
@@ -465,8 +585,8 @@ class BinanceOrderBookStream:
 
         async with self._lock:
             age_seconds = (
-                max(0.0, time.time() - self.last_book_update_at)
-                if self.last_book_update_at is not None
+                max(0.0, time.monotonic() - self.last_book_update_monotonic)
+                if self.last_book_update_monotonic is not None
                 else None
             )
             if (
@@ -475,6 +595,7 @@ class BinanceOrderBookStream:
                 or self.last_update_id is None
                 or age_seconds is None
                 or age_seconds > self.stale_after_seconds
+                or not self._book_integrity_valid(self.bids, self.asks)
             ):
                 return None
 
