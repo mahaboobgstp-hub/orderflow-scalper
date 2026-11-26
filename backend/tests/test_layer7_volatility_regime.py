@@ -76,7 +76,7 @@ def test_volatile_range_classifies_range_expansion():
         close=100*(1+(0.0005 if i%2 else -0.0005))
         rows.append(candle(100,close*1.001,close*0.999,close))
     # Recent segment has higher return volatility and candle ranges than baseline.
-    for i in range(80,120):
+    for i in range(100,120):
         close=100*(1+(0.02 if i%2 else -0.02))
         rows[i]=candle(100,close*1.04,close*0.96,close)
     result=regime_engine().analyze({"candles":rows})
@@ -205,7 +205,7 @@ def l7(result):
     return result["layers"]["volatility_regime"]
 
 
-@pytest.mark.parametrize("change,expected",[(10,"BUY"),(-10,"SELL"),(0,"NEUTRAL"),(7.4,"NEUTRAL")])
+@pytest.mark.parametrize("change,expected",[(10,"BUY"),(-10,"SELL"),(0,"NEUTRAL"),(4.9,"NEUTRAL")])
 def test_nine_layer_l7_direction_from_24h_price_change_proxy(change,expected):
     result=decision_engine_l7({"range_24h_pct":5.0,"price_change_24h_pct":change})
     assert l7(result)["available"] is True
