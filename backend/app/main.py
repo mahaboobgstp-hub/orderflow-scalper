@@ -152,7 +152,13 @@ class PaperOrderRequest(BaseModel):
     ttp_enabled:bool=False
     ttp_activation_pct:float|None=Field(default=None,gt=0,lt=100)
     ttp_trail_pct:float|None=Field(default=None,gt=0,lt=100)
-class PhaseDManagementEvaluationRequest(BaseModel):\n    position: dict[str, Any]\n    market: dict[str, Any]\n    config: dict[str, Any] = Field(default_factory=dict)\n    now_seconds: float | None = None\n\nclass PaperManagementRequest(BaseModel):
+class PhaseDManagementEvaluationRequest(BaseModel):
+    position: dict[str, Any]
+    market: dict[str, Any]
+    config: dict[str, Any] = Field(default_factory=dict)
+    now_seconds: float | None = None
+
+class PaperManagementRequest(BaseModel):
     stop_loss_price:float|None=None
     take_profit_price:float|None=None
     tsl_enabled:bool|None=None
