@@ -94,3 +94,11 @@ def test_phase_e_daily_loss_limit_does_not_expand_after_profit():
         config={"max_daily_loss_pct":2,"cooldown_seconds":0},risk_limit_basis_equity=10000,now_ms=DAY_MS)
     assert result["risk_limit_basis_equity"]==10000
     assert result["daily_loss_limit"]==200
+
+def test_phase_e_position_sizing_includes_entry_and_stop_exit_fees():
+    e=RiskManagementEngine()
+    result=e.calculate({"account_equity":10000,"entry_price":100,"stop_loss_price":90,"side":"long",
+        "risk_per_trade_pct":1,"leverage":1,"fee_rate":0.001})
+    assert result["estimated_loss_at_stop"]<=result["risk_budget"]
+    assert result["estimated_fees_at_stop"]>0
+    assert result["position_quantity"]<10
