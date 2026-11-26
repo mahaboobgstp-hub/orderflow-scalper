@@ -42,6 +42,7 @@ class ManagementResult:
     symbol: str
     side: str
     mark_price: float
+    best_price: float
     favorable_move_pct: float
     adverse_move_pct: float
     initial_stop_price: float
