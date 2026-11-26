@@ -71,7 +71,7 @@ def test_non_list_trade_payload_returns_insufficient_data():
 
 def test_exact_delta_ratio_thresholds():
     buys=[{"side":"buy","price":100,"quantity":1,"received_timestamp_ms":int(time.time()*1000)} for _ in range(6)]
-    sells=[{"side":"sell","price":100,"quantity":4,"received_timestamp_ms":int(time.time()*1000)} for _ in range(4)]
+    sells=[{"side":"sell","price":100,"quantity":1,"received_timestamp_ms":int(time.time()*1000)} for _ in range(4)]
     r=TradeFlowMomentumDetector().analyze(book(),buys+sells,15)
     assert r["metrics"]["delta_ratio"] == pytest.approx(0.2,abs=1e-5)
     assert r["flow_classification"] == "BUY_DOMINANT"
