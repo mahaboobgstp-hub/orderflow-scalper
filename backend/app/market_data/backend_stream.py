@@ -162,6 +162,16 @@ class BinanceOrderBookStream:
             raise ValueError("Depth frame must contain valid integer U/u update IDs") from exc
         if first_update_id < 0 or final_update_id < first_update_id:
             raise ValueError("Depth frame has an invalid U/u update-ID range")
+        if "pu" in event:
+            previous_raw = event["pu"]
+            if isinstance(previous_raw, bool) or not isinstance(previous_raw, (int, str)):
+                raise ValueError("Previous update ID pu must be an integer value")
+            try:
+                previous_update_id = int(previous_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Previous update ID pu must be an integer value") from exc
+            if previous_update_id < 0:
+                raise ValueError("Depth frame has an invalid previous update ID pu")
         return event
 
     async def _collect_depth_events(self, websocket, event_queue: asyncio.Queue):
