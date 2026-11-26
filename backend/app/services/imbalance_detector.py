@@ -74,9 +74,9 @@ class OrderBookImbalanceDetector:
         symbol = str(book.get("symbol", "")).upper()
         if not exchange or not symbol:
             raise ValueError("Order book exchange and symbol are required.")
-        if not book.get("synchronized", False):
+        if book.get("synchronized") is not True:
             raise ValueError("Order book is unsynchronized; imbalance analysis refused.")
-        if book.get("stale", True):
+        if book.get("stale") is not False:
             raise ValueError("Order book is stale; imbalance analysis refused.")
         age = book.get("age_seconds")
         try:
