@@ -392,9 +392,23 @@ async def paper_orders():
     return {"mode":"PAPER_ONLY","real_orders":False,"orders":list(engine.orders[-500:]),"count":len(engine.orders)}
 @app.post("/api/paper/orders")
 async def paper_submit_order(request:PaperOrderRequest):
-    if app.state.risk_management_engine.kill_switch_status()["active"]:
+    risk_engine=app.state.risk_management_engine; paper_engine=app.state.paper_trading_engine
+    if risk_engine.kill_switch_status()["active"]:
         raise HTTPException(status_code=423,detail="Emergency risk kill switch is active; paper entries are blocked.")
-    try: return app.state.paper_trading_engine.submit(request.model_dump())
+    if request.stop_loss_price is None:
+        raise HTTPException(status_code=422,detail="Phase E requires a protective stop-loss for every new paper entry.")
+    side=request.side.lower()
+    if side not in ("long","short") or (side=="long" and request.stop_loss_price>=request.price) or (side=="short" and request.stop_loss_price<=request.price):
+        raise HTTPException(status_code=422,detail="Stop-loss must be on the protective side of the entry price.")
+    config=operator_control_state["config"]
+    actual_risk=abs(request.price-request.stop_loss_price)*request.quantity
+    notional=request.price*request.quantity
+    gate=risk_engine.evaluate_runtime_gate(account_equity=paper_engine.account()["equity"],closed_trades=paper_engine.closed_trades,
+        orders=paper_engine.orders,positions=paper_engine.positions,symbol=request.symbol.upper(),config=config,
+        synchronized_book=True,proposed_trade_risk_cash=actual_risk,proposed_notional=notional)
+    if not gate["allowed"]:
+        raise HTTPException(status_code=409,detail={"message":"Phase E risk gate rejected paper entry.","blockers":gate["blockers"],"risk":gate})
+    try: return paper_engine.submit(request.model_dump())
     except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
 @app.post("/api/paper/manage/{symbol}")
 async def paper_manage_position(symbol:str,request:PaperManagementRequest):
