@@ -78,3 +78,127 @@ class PaperStateRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fresh.restore_persistence_snapshot({"version":1,"mode":"LIVE"}))
         invalid={"version":1,"mode":"PAPER_ONLY","initial_equity":1000,"cash":900,"fee_rate":0.0004,"positions":{"BAD":{"symbol":"BAD","side":"long","quantity":1,"entry_price":10}}}
         self.assertFalse(fresh.restore_persistence_snapshot(invalid))
+
+
+class PaperPersistenceRepositoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_repository_loads_snapshot_and_open_positions(self):
+        from app.database.repository import OrderFlowRepository
+
+        snapshot = {"paper_account": {"mode": "PAPER_ONLY", "cash": 2100.0}}
+        open_positions = [{"id": "db-pos-1", "symbol": "BTCUSDT", "status": "OPEN"}]
+        db = FakeDBForRepository([[
+            {"state_json": snapshot, "updated_at": "2026-11-26T00:00:00Z"}
+        ], open_positions])
+        repo = OrderFlowRepository(db)
+
+        loaded = await repo.load_paper_state()
+
+        self.assertEqual(loaded["snapshot"], snapshot)
+        self.assertEqual(loaded["open_positions"], open_positions)
+        self.assertEqual(db.select.await_count, 2)
+        self.assertEqual(db.select.await_args_list[0].args[0], "engine_state")
+        self.assertEqual(db.select.await_args_list[1].args[0], "positions")
+        self.assertEqual(db.select.await_args_list[1].kwargs["filters"], {"status": "eq.OPEN"})
+
+    async def test_repository_save_paper_state_preserves_account_snapshot(self):
+        from app.database.repository import OrderFlowRepository
+
+        prior = {"paper_account": {"older": True}, "other_metadata": "keep"}
+        snapshot = {"mode": "PAPER_ONLY", "cash": 2200.0}
+        db = FakeDBForRepository([[{"id": "state-1", "state_json": prior}]])
+        repo = OrderFlowRepository(db)
+
+        saved = await repo.save_paper_state(snapshot)
+
+        self.assertTrue(saved)
+        payload = db.update.await_args.args[1]
+        self.assertEqual(payload["mode"], "DEMO_PAPER_ONLY")
+        self.assertFalse(payload["execution_enabled"])
+        self.assertEqual(payload["state_json"]["paper_account"], snapshot)
+        self.assertEqual(payload["state_json"]["other_metadata"], "keep")
+
+
+class FakeDBForRepository:
+    def __init__(self, select_results):
+        from unittest.mock import AsyncMock
+        self.select = AsyncMock(side_effect=select_results)
+        self.update = AsyncMock(return_value=None)
+        self.insert = AsyncMock(return_value=None)
+
+
+class PaperPersistenceWorkerRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    class RecoveryRepo:
+        def __init__(self, saved):
+            self.saved = saved
+
+        async def load_paper_state(self):
+            return self.saved
+
+    async def test_worker_restores_paper_account_snapshot_and_position_ids(self):
+        from app.services.paper_trading import PaperTradingEngine
+
+        source = PaperTradingEngine(initial_equity=2500.0)
+        source.cash = 2100.0
+        source.positions = {
+            "BTCUSDT": {
+                "position_id": "p-1", "symbol": "BTCUSDT", "side": "long",
+                "quantity": 0.01, "entry_price": 100.0, "margin": 100.0,
+            }
+        }
+        source.mark_prices = {"BTCUSDT": 105.0}
+        snapshot = source.persistence_snapshot()
+        saved = {
+            "snapshot": {"paper_account": snapshot},
+            "open_positions": [{"id": "db-pos-1", "symbol": "BTCUSDT"}],
+        }
+        worker = PaperPersistenceWorker(self.RecoveryRepo(saved))
+        fresh = PaperTradingEngine(initial_equity=10000.0)
+
+        restored = await worker.restore_state(fresh)
+
+        self.assertTrue(restored)
+        self.assertTrue(worker.recovery_report["snapshot_valid"])
+        self.assertEqual(worker.recovery_report["source"], "account_snapshot")
+        self.assertEqual(fresh.cash, 2100.0)
+        self.assertEqual(fresh.positions["BTCUSDT"]["position_id"], "p-1")
+        self.assertEqual(fresh.mark_prices["BTCUSDT"], 105.0)
+        self.assertEqual(worker.position_ids["BTCUSDT"], "db-pos-1")
+
+    async def test_worker_falls_back_to_open_position_rows_when_snapshot_missing(self):
+        from app.services.paper_trading import PaperTradingEngine
+
+        position = {
+            "position_id": "p-fallback", "symbol": "ETHUSDT", "side": "short",
+            "quantity": 0.02, "entry_price": 2000.0, "margin": 200.0,
+        }
+        saved = {
+            "snapshot": {},
+            "open_positions": [{
+                "id": "db-eth-1", "symbol": "ETHUSDT", "mark_price": 1980.0,
+                "position_data": position,
+            }],
+        }
+        worker = PaperPersistenceWorker(self.RecoveryRepo(saved))
+        fresh = PaperTradingEngine(initial_equity=10000.0)
+
+        restored = await worker.restore_state(fresh)
+
+        self.assertTrue(restored)
+        self.assertEqual(worker.recovery_report["source"], "open_position_fallback")
+        self.assertEqual(worker.recovery_report["open_position_count"], 1)
+        self.assertEqual(fresh.positions["ETHUSDT"]["position_id"], "p-fallback")
+        self.assertEqual(fresh.mark_prices["ETHUSDT"], 1980.0)
+        self.assertEqual(worker.position_ids["ETHUSDT"], "db-eth-1")
+        self.assertTrue(any("incomplete" in warning for warning in worker.recovery_report["warnings"]))
+
+    async def test_worker_starts_fresh_when_database_has_no_recoverable_state(self):
+        from app.services.paper_trading import PaperTradingEngine
+
+        worker = PaperPersistenceWorker(self.RecoveryRepo({"snapshot": {}, "open_positions": []}))
+        fresh = PaperTradingEngine(initial_equity=10000.0)
+
+        restored = await worker.restore_state(fresh)
+
+        self.assertFalse(restored)
+        self.assertEqual(worker.recovery_report["source"], "fresh_account")
+        self.assertFalse(fresh.positions)
