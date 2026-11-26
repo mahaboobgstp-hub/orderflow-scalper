@@ -332,7 +332,18 @@ class BinanceOrderBookStream:
     # Order-book operations
     # --------------------------------------------------
 
+    @staticmethod
+    def _valid_update_id(value: Any) -> bool:
+        """Binance update IDs are non-negative integer sequence values, not coercible numbers."""
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
     def _load_snapshot(self, snapshot: dict[str, Any]):
+        if not isinstance(snapshot, dict):
+            raise ValueError("Depth snapshot must be an object.")
+        raw_update_id = snapshot.get("lastUpdateId")
+        if not self._valid_update_id(raw_update_id):
+            raise ValueError("Snapshot lastUpdateId must be a non-negative integer.")
+
         self.bids = {
             float(price): float(quantity)
             for price, quantity in snapshot.get("bids", [])
@@ -345,9 +356,7 @@ class BinanceOrderBookStream:
             if float(quantity) > 0
         }
 
-        self.last_update_id = int(
-            snapshot["lastUpdateId"]
-        )
+        self.last_update_id = raw_update_id
 
         self.synchronized = False
         self.snapshot_count += 1
@@ -357,10 +366,9 @@ class BinanceOrderBookStream:
         """Detect an initial diff that starts after the Futures snapshot boundary."""
         if self.last_update_id is None or not isinstance(event, dict):
             return False
-        try:
-            first_update_id = int(event["U"])
-            final_update_id = int(event["u"])
-        except (KeyError, TypeError, ValueError, OverflowError):
+        first_update_id = event.get("U")
+        final_update_id = event.get("u")
+        if not self._valid_update_id(first_update_id) or not self._valid_update_id(final_update_id):
             return False
         if first_update_id > final_update_id:
             return False
@@ -368,31 +376,27 @@ class BinanceOrderBookStream:
         # event beginning at L+1 is a gap; it is not a Spot-style bridge.
         return first_update_id > self.last_update_id and final_update_id >= self.last_update_id
 
+
     def _event_bridges_snapshot(
         self,
         event: dict[str, Any],
     ) -> bool:
         """
-        Binance depth events contain:
-        U = first update ID
-        u = final update ID
-
-        The first event after the snapshot must bridge
-        the snapshot update ID.
+        Binance depth events contain U (first update ID) and u (final update ID).
+        The first event must overlap the REST snapshot update ID.
         """
 
-        if self.last_update_id is None:
+        if self.last_update_id is None or not isinstance(event, dict):
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
+        first_update_id = event.get("U")
+        final_update_id = event.get("u")
+        if not self._valid_update_id(first_update_id) or not self._valid_update_id(final_update_id):
+            return False
 
-        # USD-M Futures differs from Spot: the first accepted event must
-        # overlap the REST snapshot's update ID itself (U <= lastUpdateId <= u).
-        return (
-            first_update_id <= self.last_update_id
-            <= final_update_id
-        )
+        # USD-M Futures: U <= lastUpdateId <= u.
+        return first_update_id <= self.last_update_id <= final_update_id
+
 
     def _apply_event(
         self,
@@ -403,29 +407,28 @@ class BinanceOrderBookStream:
         """
         Apply a depth event.
 
-        Returns False when a sequence gap is detected.
+        Returns False when sequence continuity or event IDs are invalid.
         """
 
-        if self.last_update_id is None:
+        if self.last_update_id is None or not isinstance(event, dict):
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
+        first_update_id = event.get("U")
+        final_update_id = event.get("u")
+        if not self._valid_update_id(first_update_id) or not self._valid_update_id(final_update_id):
+            return False
 
-        # Ignore old events.
+        # Ignore old events after validating their sequence ID types.
         if final_update_id <= self.last_update_id:
             return True
 
-        # Snapshot-bridge events are validated by U/u overlap with the REST
-        # snapshot. Only events after that bridge enforce pu continuity.
+        # USD-M Futures live diff events must carry pu; no U-only fallback is
+        # permitted because it can accept a malformed or unsequenced event.
         if validate_previous_sequence:
             previous_final_id = event.get("pu")
-
-            if previous_final_id is not None:
-                if int(previous_final_id) != self.last_update_id:
-                    return False
-
-            elif first_update_id > self.last_update_id + 1:
+            if not self._valid_update_id(previous_final_id):
+                return False
+            if previous_final_id != self.last_update_id:
                 return False
 
         self._update_levels(
