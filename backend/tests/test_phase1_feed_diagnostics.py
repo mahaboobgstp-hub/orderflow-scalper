@@ -328,6 +328,9 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             '{"U":102,"u":101}',
             '{"U":true,"u":101}',
             '{"U":100.5,"u":101}',
+            '{"U":100,"u":101,"pu":100.5}',
+            '{"U":100,"u":101,"pu":true}',
+            '{"U":100,"u":101,"pu":-1}',
         )
         for frame in invalid_frames:
             with self.subTest(frame=frame):
