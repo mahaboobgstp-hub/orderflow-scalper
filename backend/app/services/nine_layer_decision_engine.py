@@ -81,13 +81,28 @@ class NineLayerDecisionEngine:
         put("aggressive_order_flow",delta_ratio*100 if delta_ratio is not None else None,
             min(100,(tf or {}).get("trade_count",0)*8) if isinstance(tf,dict) else 0,
             ["Aggressive trade delta"],tm,available=delta_ratio is not None)
-        # L5: momentum combines delta change and volume acceleration; the detector's
-        # score is used as direction and activity supplies confidence only.
-        momentum_score=_finite((tf or {}).get("flow_strength_score"))
-        momentum_conf=50 if isinstance(tf,dict) and momentum_score is not None else 0
-        put("momentum",momentum_score,momentum_conf,
-            [str((tf or {}).get("momentum_activity","Momentum unavailable"))],
-            (tf or {}).get("metrics",{}),available=momentum_score is not None)
+        # L5: momentum is price progress, deliberately independent of L4's trade delta.
+        # Delta/flow activity may support confidence, but cannot set L5 direction.
+        momentum_metrics=tm if isinstance(tm,dict) else {}
+        price_move=_finite(momentum_metrics.get("price_move_pct"))
+        trade_count=_finite((tf or {}).get("trade_count")) if isinstance(tf,dict) else None
+        min_momentum_trades=max(3,min(500,int(self.config.get("momentum_min_trades",8))))
+        scale=_finite(self.config.get("momentum_price_move_scale_pct"))
+        scale=scale if scale is not None and scale>0 else 0.5
+        momentum_available=price_move is not None and trade_count is not None and trade_count>=min_momentum_trades
+        momentum_score=max(-100,min(100,(price_move/scale)*100)) if momentum_available else None
+        momentum_activity=str((tf or {}).get("momentum_activity","Momentum activity unavailable"))
+        momentum_conf=0
+        if momentum_available:
+            momentum_conf=min(100,50+min(30,trade_count-min_momentum_trades)*2+
+                (20 if momentum_activity=="ACCELERATING" else 0))
+        momentum_reasons=["Price-progress momentum, not aggressive-trade delta"]
+        if momentum_activity!="Momentum activity unavailable":
+            momentum_reasons.append("Volume activity used for confidence support only")
+        put("momentum",momentum_score,momentum_conf,momentum_reasons,
+            {"price_move_pct":price_move,"score_scale_pct":scale,"trade_count":trade_count,
+             "minimum_trades":min_momentum_trades,"activity":momentum_activity,
+             "direction_source":"price_move_pct"},available=momentum_available)
         # L6: strict spread/liquidity gate and a bounded score.
         market=inputs.get("market",{}) if isinstance(inputs.get("market"),dict) else {}
         spread=_finite(market.get("spread_pct")); qv=_finite(market.get("quote_volume_24h"))
