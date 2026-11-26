@@ -13,13 +13,19 @@ from typing import Any
 class AbsorptionLiquidityDetector:
     def __init__(self, history_size: int = 30, max_book_age_seconds: float = 3.0,
                  min_trades: int = 5, absorption_threshold: float = 0.60):
-        self.history_size=max(3,min(int(history_size),200))
+        if isinstance(history_size, bool) or not isinstance(history_size, int):
+            raise ValueError("history_size must be an integer.")
+        if isinstance(min_trades, bool) or not isinstance(min_trades, int):
+            raise ValueError("min_trades must be an integer.")
+        if isinstance(max_book_age_seconds, bool) or isinstance(absorption_threshold, bool):
+            raise ValueError("Detector configuration must be finite numeric values.")
+        self.history_size=max(3,min(history_size,200))
         max_age=float(max_book_age_seconds)
         threshold=float(absorption_threshold)
         if not math.isfinite(max_age) or not math.isfinite(threshold):
             raise ValueError("Detector configuration must be finite.")
         self.max_book_age_seconds=max(0.1,max_age)
-        self.min_trades=max(3,min(int(min_trades),500))
+        self.min_trades=max(3,min(min_trades,500))
         self.absorption_threshold=max(0.1,min(threshold,0.95))
         self._history: dict[str,deque[dict[str,Any]]]={}
 
@@ -29,6 +35,7 @@ class AbsorptionLiquidityDetector:
         if not isinstance(raw,list): return out
         for row in raw:
             if not isinstance(row,(list,tuple)) or len(row)<2: continue
+            if isinstance(row[0],bool) or isinstance(row[1],bool): continue
             try: p,q=float(row[0]),float(row[1])
             except (ValueError,TypeError): continue
             if math.isfinite(p) and math.isfinite(q) and p>0 and q>0: out.append((p,q))
@@ -38,13 +45,31 @@ class AbsorptionLiquidityDetector:
     def _safe_ratio(a,b):
         return a/b if b>0 else 0.0
 
+    @staticmethod
+    def _parse_timestamp_ms(value):
+        """Accept integer millisecond timestamps only; never truncate floats or bools."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if text and (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+                try:
+                    return int(text)
+                except ValueError:
+                    return None
+        return None
+
+
     def analyze(self,book:dict[str,Any],trades:list[dict[str,Any]],lookback_seconds:float=15.0)->dict[str,Any]:
         if not isinstance(book,dict): raise ValueError("Normalized order book is required.")
         exchange=str(book.get("exchange","")).lower(); symbol=str(book.get("symbol","")).upper()
         if not exchange or not symbol: raise ValueError("Exchange and symbol are required.")
-        if not book.get("synchronized",False): raise ValueError("Order book is unsynchronized; absorption analysis refused.")
-        if book.get("stale",True): raise ValueError("Order book is stale; analysis refused.")
+        if book.get("synchronized") is not True: raise ValueError("Order book is unsynchronized; absorption analysis refused.")
+        if book.get("stale") is not False: raise ValueError("Order book is stale; analysis refused.")
         age=book.get("age_seconds")
+        if isinstance(age,bool): raise ValueError("Order book age is invalid.")
         try: age_value=float(age)
         except (TypeError,ValueError): raise ValueError("Order book age is invalid.")
         if not math.isfinite(age_value) or age_value<0 or age_value>self.max_book_age_seconds:
@@ -55,6 +80,7 @@ class AbsorptionLiquidityDetector:
         best_bid=max(p for p,q in bids); best_ask=min(p for p,q in asks)
         if best_bid>=best_ask: raise ValueError("Crossed or locked book is invalid.")
         mid=(best_bid+best_ask)/2
+        if isinstance(lookback_seconds,bool): raise ValueError("Lookback must be a finite number.")
         try: lookback=float(lookback_seconds)
         except (TypeError,ValueError): raise ValueError("Lookback must be a finite number.")
         if not math.isfinite(lookback): raise ValueError("Lookback must be a finite number.")
@@ -63,13 +89,21 @@ class AbsorptionLiquidityDetector:
         normalized=[]
         for t in trades or []:
             if not isinstance(t,dict): continue
-            try: price=float(t.get("price",0)); qty=float(t.get("quantity",0)); ts=int(t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0)
+            raw_price=t.get("price",0); raw_quantity=t.get("quantity",0)
+            raw_timestamp=t.get("received_timestamp_ms")
+            if raw_timestamp is None:
+                raw_timestamp=t.get("exchange_timestamp_ms")
+            if raw_timestamp is None:
+                raw_timestamp=0
+            if isinstance(raw_price,bool) or isinstance(raw_quantity,bool): continue
+            try: price=float(raw_price); qty=float(raw_quantity)
             except (TypeError,ValueError,OverflowError): continue
+            ts=self._parse_timestamp_ms(raw_timestamp)
+            if ts is None: continue
             side=str(t.get("side","")).lower()
             if side not in ("buy","sell") or price<=0 or qty<=0 or not math.isfinite(price) or not math.isfinite(qty): continue
             if ts>=cutoff and ts<=now_ms+5000: normalized.append({"price":price,"quantity":qty,"side":side,"ts":ts})
-        # Sort by timestamp so temporal diagnostics are independent of arrival ordering.
-        normalized.sort(key=lambda t: t["ts"])
+        normalized.sort(key=lambda t:t["ts"])
         buy_qty=sum(t["quantity"] for t in normalized if t["side"]=="buy")
         sell_qty=sum(t["quantity"] for t in normalized if t["side"]=="sell")
         buy_count=sum(1 for t in normalized if t["side"]=="buy"); sell_count=len(normalized)-buy_count
@@ -85,7 +119,10 @@ class AbsorptionLiquidityDetector:
         bid5=sorted(bids,key=lambda x:x[0],reverse=True)[:5]; ask5=sorted(asks,key=lambda x:x[0])[:5]
         bid_depth=sum(q for p,q in bid5); ask_depth=sum(q for p,q in ask5)
         key=f"{exchange}:{symbol}"; history=self._history.setdefault(key,deque(maxlen=self.history_size))
-        prior=history[-1] if history else None
+        # A baseline must be strictly earlier and within the requested lookback.
+        # Older observations cannot support current liquidity-change diagnostics.
+        prior=next((sample for sample in reversed(history)
+                    if 0 < now_ms-sample["timestamp"] <= lookback*1000),None)
         history.append({"timestamp":now_ms,"mid":mid,"bid5":bid_depth,"ask5":ask_depth,"buy_qty":buy_qty,"sell_qty":sell_qty})
         replenishment=None; depletion=None
         if prior:
@@ -99,22 +136,31 @@ class AbsorptionLiquidityDetector:
         buy_progress_pct=0.0; sell_progress_pct=0.0
         prior_sample_age_ms=(now_ms-prior["timestamp"]) if prior else None
         # Temporal progress requires a recent prior midpoint sample.
-        has_recent_baseline=prior is not None and 0 <= prior_sample_age_ms <= lookback*1000
+        has_recent_baseline=prior is not None and 0 < prior_sample_age_ms <= lookback*1000
         if has_recent_baseline and prior["mid"]>0:
-            buy_progress_pct=max(0.0,(mid-prior["mid"])/prior["mid"]*100)
-            sell_progress_pct=max(0.0,(prior["mid"]-mid)/prior["mid"]*100)
+            # Signed directional progress: positive is favorable to the
+            # aggressor side, negative is adverse movement.
+            buy_progress_pct=(mid-prior["mid"])/prior["mid"]*100
+            sell_progress_pct=(prior["mid"]-mid)/prior["mid"]*100
         # Without a temporal baseline, scores remain zero to avoid false absorption.
+        # Penalize midpoint movement in either direction: adverse movement is
+        # not "zero progress" and must not receive a maximum absorption score.
         if has_recent_baseline and len(normalized)>=self.min_trades and total_qty>0:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
-            buy_absorption_score=buy_share*max(0.0,1.0-min(buy_progress_pct/0.10,1.0))
-            sell_absorption_score=sell_share*max(0.0,1.0-min(sell_progress_pct/0.10,1.0))
+            buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
+            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
         sell_absorbed=sell_absorption_score>=self.absorption_threshold
         if buy_absorbed and sell_absorbed: label="MIXED_ABSORPTION"
         elif buy_absorbed: label="POSSIBLE_BUY_ABSORPTION" # buy aggression may be absorbed by passive sellers
         elif sell_absorbed: label="POSSIBLE_SELL_ABSORPTION" # sell aggression may be absorbed by passive buyers
         else: label="NO_CLEAR_ABSORPTION"
-        confidence_quality=min(100, round(30*(len(normalized)/self.min_trades if normalized else 0)+25*(prior is not None)+25*(book.get("synchronized") is True)+20*(book.get("stale") is False),2))
+        base_quality=min(100, round(30*(len(normalized)/self.min_trades if normalized else 0)+25*(prior is not None)+25*(book.get("synchronized") is True)+20*(book.get("stale") is False),2))
+        # Displayed depth is measured in the same base-asset quantity as the
+        # aggressive tape. A thin book relative to recent volume lowers evidence
+        # quality, while candidate labels remain research hypotheses.
+        depth_coverage_ratio=min(1.0,self._safe_ratio(bid_depth+ask_depth,total_qty)) if total_qty>0 else 0.0
+        confidence_quality=round(base_quality*depth_coverage_ratio,2)
         exhaustion="INSUFFICIENT_TRADE_DATA"
         if len(normalized)>=self.min_trades:
             recent=normalized[-max(3,len(normalized)//3):]
@@ -133,8 +179,8 @@ class AbsorptionLiquidityDetector:
             "buy_absorption_candidate":buy_absorbed,"sell_absorption_candidate":sell_absorbed,
             "top5_bid_depth":round(bid_depth,8),"top5_ask_depth":round(ask_depth,8)},
             "liquidity_observation":{"previous_sample_available":prior is not None,"replenishment":replenishment,"depletion":depletion},
-            "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"note":"Evidence-quality heuristic, not a prediction or win probability."},
-            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
+            "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"depth_coverage_ratio":round(depth_coverage_ratio,6),"note":"Evidence-quality heuristic includes top-five displayed depth relative to recent aggressive volume; not a prediction or win probability."},
+            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","Progress is signed by aggressor direction; scoring penalizes absolute midpoint movement in either direction.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","Thin books may still produce hypotheses; depth coverage lowers evidence quality but is not a hard candidate gate.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
     def status(self):
         return {"phase":6,"engine":"absorption_liquidity_behavior_detector","tracked_symbols":len(self._history),
                 "min_trades":self.min_trades,"absorption_threshold":self.absorption_threshold,
