@@ -54,6 +54,7 @@ async def lifespan(app: FastAPI):
     app.state.market_regime_context_engine=MarketRegimeContextEngine()
     app.state.risk_management_engine=RiskManagementEngine()
     app.state.paper_trading_engine=PaperTradingEngine()
+    app.state.trade_management_engine=TradeManagementEngine()
     persistence_worker=PaperPersistenceWorker(repository)
     app.state.paper_persistence_worker=persistence_worker
     recovered=await persistence_worker.restore_state(app.state.paper_trading_engine)
