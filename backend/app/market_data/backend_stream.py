@@ -258,9 +258,12 @@ class BinanceOrderBookStream:
         if final_update_id < self.last_update_id:
             return False
 
+        # Binance futures depth synchronization requires the first accepted
+        # event to bridge snapshot_id + 1. Events entirely covered by the
+        # snapshot (u <= snapshot_id) must be discarded, not treated as sync.
+        next_update_id = self.last_update_id + 1
         return (
-            first_update_id
-            <= self.last_update_id
+            first_update_id <= next_update_id
             <= final_update_id
         )
 
