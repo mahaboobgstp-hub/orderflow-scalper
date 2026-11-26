@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock
 from app.services.paper_persistence import PaperPersistenceWorker
 
 class FakeDB:
-    update = AsyncMock(return_value=None)
+    def __init__(self):
+        self.update=AsyncMock(return_value=None)
 
 class FakeRepo:
     def __init__(self):
@@ -76,4 +77,4 @@ class PaperStateRecoveryTests(unittest.IsolatedAsyncioTestCase):
         fresh=PaperTradingEngine()
         self.assertFalse(fresh.restore_persistence_snapshot({"version":1,"mode":"LIVE"}))
         invalid={"version":1,"mode":"PAPER_ONLY","initial_equity":1000,"cash":900,"fee_rate":0.0004,"positions":{"BAD":{"symbol":"BAD","side":"long","quantity":1,"entry_price":10}}}
-        self.assertFalse(fresh.restore_persistence_snapshot(invalid))
+        self.assertFalse(fresh.restore_persistence_snapshot(invalid)
