@@ -53,9 +53,10 @@ class RiskManagementEngine:
     def evaluate_portfolio(self, account_equity: float, daily_realized_loss: float = 0.0, open_risk: float = 0.0, open_positions: int = 0, consecutive_losses: int = 0, risk_per_trade_pct: float | None = None) -> dict[str,Any]:
         eq=self._finite(account_equity)
         if eq is None or eq<=0: raise ValueError("account_equity must be positive.")
-        daily=self._finite(daily_realized_loss) or 0.0; opened=self._finite(open_risk) or 0.0
+        daily=max(0.0,self._finite(daily_realized_loss) or 0.0); opened=max(0.0,self._finite(open_risk) or 0.0)
         positions=max(0,int(open_positions)); losses=max(0,int(consecutive_losses))
-        trade_risk=risk_per_trade_pct if risk_per_trade_pct is not None else self.defaults["risk_per_trade_pct"]
+        trade_risk=self._finite(risk_per_trade_pct) if risk_per_trade_pct is not None else self.defaults["risk_per_trade_pct"]
+        trade_risk=max(0.0,trade_risk or 0.0)
         daily_limit=eq*self.defaults["max_daily_loss_pct"]/100; open_limit=eq*self.defaults["max_total_open_risk_pct"]/100; next_risk=eq*trade_risk/100
         blockers=[]
         if daily>=daily_limit: blockers.append("DAILY_LOSS_LIMIT_REACHED")
