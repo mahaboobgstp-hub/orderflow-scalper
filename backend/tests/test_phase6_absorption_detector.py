@@ -70,7 +70,7 @@ class Phase6DetectorTests(unittest.TestCase):
         result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=7),15)
         self.assertIn("flow_exhaustion",result)
         self.assertIn("quality",result)
-        self.assertIn("not an entry",result["diagnostics"][4].lower())
+        self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
 
 
     def test_rejects_negative_and_nonfinite_book_age(self):
@@ -133,6 +133,44 @@ class Phase6DetectorTests(unittest.TestCase):
         result=detector.analyze(book(),trades("buy"),lookback_seconds=1)
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
+
+
+    def test_interpretation_maps_aggressive_buy_absorption_to_bearish_caution(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("buy"),15)
+        result=detector.analyze(book(),trades("buy"),15)
+        self.assertEqual(result["interpretation"]["passive_side"],"SELLERS")
+        self.assertEqual(result["interpretation"]["directional_bias"],"BEARISH_CAUTION")
+
+    def test_interpretation_maps_aggressive_sell_absorption_to_bullish_caution(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("sell"),15)
+        result=detector.analyze(book(),trades("sell"),15)
+        self.assertEqual(result["interpretation"]["passive_side"],"BUYERS")
+        self.assertEqual(result["interpretation"]["directional_bias"],"BULLISH_CAUTION")
+
+    def test_trade_notional_metrics_are_reported(self):
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",qty=2,count=5,price=100.05),15)
+        metrics=result["metrics"]
+        self.assertEqual(metrics["aggressive_buy_notional"],1000.5)
+        self.assertEqual(metrics["aggressive_sell_notional"],0.0)
+        self.assertEqual(metrics["total_aggressive_notional"],1000.5)
+
+    def test_quality_does_not_count_stale_temporal_baseline(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("buy"),15)
+        detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=20000
+        result=detector.analyze(book(),trades("buy"),15)
+        self.assertEqual(result["quality"]["score"],93.0)
+
+
+    def test_overflowing_trade_notional_is_filtered(self):
+        now_ms=int(__import__("time").time()*1000)
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=3)+[
+            {"side":"buy","price":1e308,"quantity":1e308,"received_timestamp_ms":now_ms}
+        ],15)
+        self.assertEqual(result["trade_count"],3)
+        self.assertEqual(result["metrics"]["aggressive_buy_notional"],300.15)
 
 if __name__=="__main__":
     unittest.main()

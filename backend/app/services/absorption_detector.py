@@ -67,6 +67,9 @@ class AbsorptionLiquidityDetector:
             except (TypeError,ValueError,OverflowError): continue
             side=str(t.get("side","")).lower()
             if side not in ("buy","sell") or price<=0 or qty<=0 or not math.isfinite(price) or not math.isfinite(qty): continue
+            # Reject overflowed notional before it can contaminate sums or metrics.
+            notional=price*qty
+            if not math.isfinite(notional): continue
             if ts>=cutoff and ts<=now_ms+5000: normalized.append({"price":price,"quantity":qty,"side":side,"ts":ts})
         # Sort by timestamp so temporal diagnostics are independent of arrival ordering.
         normalized.sort(key=lambda t: t["ts"])
@@ -74,6 +77,9 @@ class AbsorptionLiquidityDetector:
         sell_qty=sum(t["quantity"] for t in normalized if t["side"]=="sell")
         buy_count=sum(1 for t in normalized if t["side"]=="buy"); sell_count=len(normalized)-buy_count
         total_qty=buy_qty+sell_qty
+        buy_notional=sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="buy")
+        sell_notional=sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="sell")
+        total_notional=buy_notional+sell_notional
         delta=buy_qty-sell_qty
         flow_ratio=self._safe_ratio(abs(delta),total_qty)
         buy_avg=self._safe_ratio(sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="buy"),buy_qty)
@@ -114,7 +120,13 @@ class AbsorptionLiquidityDetector:
         elif buy_absorbed: label="POSSIBLE_BUY_ABSORPTION" # buy aggression may be absorbed by passive sellers
         elif sell_absorbed: label="POSSIBLE_SELL_ABSORPTION" # sell aggression may be absorbed by passive buyers
         else: label="NO_CLEAR_ABSORPTION"
-        confidence_quality=min(100, round(30*(len(normalized)/self.min_trades if normalized else 0)+25*(prior is not None)+25*(book.get("synchronized") is True)+20*(book.get("stale") is False),2))
+        confidence_quality=min(100, round(30*(len(normalized)/self.min_trades if normalized else 0)+25*(has_recent_baseline)+25*(book.get("synchronized") is True)+20*(book.get("stale") is False),2))
+        interpretation={
+            "POSSIBLE_BUY_ABSORPTION":{"passive_side":"SELLERS","directional_bias":"BEARISH_CAUTION","description":"Aggressive buy flow with limited upward price progress; passive sell-side absorption is possible."},
+            "POSSIBLE_SELL_ABSORPTION":{"passive_side":"BUYERS","directional_bias":"BULLISH_CAUTION","description":"Aggressive sell flow with limited downward price progress; passive buy-side absorption is possible."},
+            "MIXED_ABSORPTION":{"passive_side":"UNKNOWN","directional_bias":"NEUTRAL","description":"Both-side absorption candidates; direction is ambiguous."},
+            "NO_CLEAR_ABSORPTION":{"passive_side":"UNKNOWN","directional_bias":"NEUTRAL","description":"No absorption candidate met the configured threshold."},
+        }.get(label)
         exhaustion="INSUFFICIENT_TRADE_DATA"
         if len(normalized)>=self.min_trades:
             recent=normalized[-max(3,len(normalized)//3):]
@@ -123,8 +135,10 @@ class AbsorptionLiquidityDetector:
             exhaustion="FLOW_WEAKENING" if earlier and recent_vol<earlier_vol else "FLOW_STABLE_OR_INCREASING"
         return {"detector":"phase6_absorption_liquidity_behavior","exchange":exchange,"symbol":symbol,
             "analysis_timestamp_ms":now_ms,"lookback_seconds":lookback,"trade_count":len(normalized),
-            "classification":label,"metrics":{"aggressive_buy_quantity":round(buy_qty,8),"aggressive_sell_quantity":round(sell_qty,8),
+            "classification":label,"interpretation":interpretation,"metrics":{"aggressive_buy_quantity":round(buy_qty,8),"aggressive_sell_quantity":round(sell_qty,8),
             "buy_trade_count":buy_count,"sell_trade_count":sell_count,"net_aggressive_delta":round(delta,8),
+            "aggressive_buy_notional":round(buy_notional,8),"aggressive_sell_notional":round(sell_notional,8),
+            "total_aggressive_notional":round(total_notional,8),
             "aggressive_delta_ratio":round(delta/total_qty,6) if total_qty else 0.0,"absolute_flow_imbalance":round(flow_ratio,6),
             "buy_vwap":round(buy_avg,8) if buy_qty else None,"sell_vwap":round(sell_avg,8) if sell_qty else None,
             "mid_price":round(mid,8),"buy_price_progress_pct":round(buy_progress_pct,6),"sell_price_progress_pct":round(sell_progress_pct,6),
@@ -134,7 +148,7 @@ class AbsorptionLiquidityDetector:
             "top5_bid_depth":round(bid_depth,8),"top5_ask_depth":round(ask_depth,8)},
             "liquidity_observation":{"previous_sample_available":prior is not None,"replenishment":replenishment,"depletion":depletion},
             "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"note":"Evidence-quality heuristic, not a prediction or win probability."},
-            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
+            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Quality score only counts a temporal baseline when it is within the requested lookback.","Aggressive notional is trade price multiplied by quantity; exchange trade-side correctness is still required.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
     def status(self):
         return {"phase":6,"engine":"absorption_liquidity_behavior_detector","tracked_symbols":len(self._history),
                 "min_trades":self.min_trades,"absorption_threshold":self.absorption_threshold,

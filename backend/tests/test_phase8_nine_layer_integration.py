@@ -30,3 +30,17 @@ def test_layer4_balanced_flow_is_neutral():
     assert layer["available"] is True
     assert layer["score"]==0
     assert layer["direction"]=="NEUTRAL"
+
+def test_layer2_buy_absorption_is_bearish_caution():
+    engine=NineLayerDecisionEngine()
+    result=engine.evaluate("BTCUSDT",{"absorption":{"metrics":{"buy_absorption_score":0.9,"sell_absorption_score":0.0},"quality":{"score":80}}},risk={"allowed":True,"blockers":[]})
+    layer=result["layers"]["absorption"]
+    assert layer["direction"]=="SELL"
+    assert layer["score"]==-90
+
+def test_layer2_sell_absorption_is_bullish_caution():
+    engine=NineLayerDecisionEngine()
+    result=engine.evaluate("BTCUSDT",{"absorption":{"metrics":{"buy_absorption_score":0.0,"sell_absorption_score":0.9},"quality":{"score":80}}},risk={"allowed":True,"blockers":[]})
+    layer=result["layers"]["absorption"]
+    assert layer["direction"]=="BUY"
+    assert layer["score"]==90
