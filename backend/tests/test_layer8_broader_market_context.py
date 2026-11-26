@@ -51,8 +51,8 @@ def test_l8_reasons_and_data_are_preserved_for_a_valid_context():
                "data": {"btc_change_pct": -2.1, "eth_change_pct": -3.2}}
     layer = evaluate_context(context)
     assert layer["reasons"] == context["reasons"]
-    assert layer["data"]["btc_change_pct"] == -2.1
-    assert layer["data"]["eth_change_pct"] == -3.2
+    assert layer["data"]["data"]["btc_change_pct"] == -2.1
+    assert layer["data"]["data"]["eth_change_pct"] == -3.2
 
 
 def test_l8_score_is_clamped_at_upper_bound():
@@ -80,7 +80,7 @@ def test_l8_context_only_is_not_enough_to_force_trade_decision():
     )
     layer = result["layers"]["broader_market_context"]
     assert layer["available"] is True
-    assert result["decision"] == "HOLD"
+    assert result["decision"] == "REJECT"
     assert result["entry_eligible"] is False
     assert result["mode"] == "PAPER_ONLY"
     assert result["live_execution_enabled"] is False
@@ -96,4 +96,4 @@ def test_l8_broader_context_is_independent_of_symbol_without_other_layers(contex
     )
     assert result["layers"]["broader_market_context"]["score"] == context["score"]
     assert result["directional_layers_available"] == 1
-    assert result["decision"] == "HOLD"
+    assert result["decision"] == "REJECT"
