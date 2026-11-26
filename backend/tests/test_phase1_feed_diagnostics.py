@@ -210,6 +210,56 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "PUBLIC_MARKET_DATA_PAPER_ONLY")
         self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
         self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
+        self.assertEqual(payload["summary"]["fresh_message_feed_count"], 1)
+
+    def test_healthy_feed_count_requires_fresh_synchronized_book(self):
+        class FakeUnified:
+            def get_status(self):
+                return {
+                    "stale_after_seconds": 3.0,
+                    "books": {
+                        "bybit:BTCUSDT": {
+                            "synchronized": True, "stale": False, "integrity_error": None
+                        },
+                        "delta:BTCUSDT": {
+                            "synchronized": False, "stale": False, "integrity_error": "awaiting snapshot"
+                        },
+                    },
+                    "exchanges": {},
+                    "trade_streams": {},
+                    "errors": {},
+                }
+
+        class FakePrimary:
+            async def get_status(self):
+                return {"symbol": "BTCUSDT", "connected": False, "synchronized": False, "stale": True}
+
+        class FakeExchanges:
+            async def status(self):
+                return {"exchanges": [
+                    {"exchange": "bybit", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2, "last_error": None},
+                    {"exchange": "delta", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2, "last_error": None},
+                ]}
+
+        state = main.app.state
+        names = ("market_stream", "unified_market_data", "exchange_manager")
+        originals = {name: getattr(state, name, None) for name in names}
+        missing = {name: not hasattr(state, name) for name in names}
+        state.market_stream = FakePrimary()
+        state.unified_market_data = FakeUnified()
+        state.exchange_manager = FakeExchanges()
+        try:
+            payload = asyncio.run(main.market_data_observability())
+        finally:
+            for name in names:
+                if missing[name]:
+                    delattr(state, name)
+                else:
+                    setattr(state, name, originals[name])
+
+        self.assertEqual(payload["summary"]["fresh_message_feed_count"], 2)
+        self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
+        self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
 
 if __name__ == "__main__":
     unittest.main()
