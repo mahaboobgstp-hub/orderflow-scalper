@@ -154,10 +154,35 @@ class BinanceOrderBookStream:
                 while not self.synchronized:
                     event = await event_queue.get()
 
+                    if not isinstance(event, dict):
+                        raise ConnectionError(
+                            "Malformed depth event before snapshot bridge; resynchronizing."
+                        )
+                    first_update_id = self._parse_sequence_id(event.get("U"))
+                    final_update_id = self._parse_sequence_id(event.get("u"))
+                    if (
+                        first_update_id is None
+                        or final_update_id is None
+                        or first_update_id > final_update_id
+                    ):
+                        raise ConnectionError(
+                            "Invalid depth sequence before snapshot bridge; resynchronizing."
+                        )
+                    if self._snapshot_bridge_gap(event):
+                        raise ConnectionError(
+                            "Depth stream gap before snapshot bridge; resynchronizing."
+                        )
+
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
-                            self._apply_event(event)
-
+                            applied = self._apply_event(
+                                event,
+                                initial_snapshot_bridge=True,
+                            )
+                        if not applied:
+                            raise ConnectionError(
+                                "Snapshot bridge event failed validation; resynchronizing."
+                            )
                         self.synchronized = True
 
                 logger.info(
@@ -235,81 +260,91 @@ class BinanceOrderBookStream:
 
         self.synchronized = False
 
+    @staticmethod
+    def _parse_sequence_id(value: Any) -> int | None:
+        """Parse nonnegative integer sequence IDs without bool/float truncation."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            value = value.strip()
+            if value and value.isascii() and value.isdigit():
+                try:
+                    return int(value)
+                except (ValueError, OverflowError):
+                    return None
+        return None
+
+    def _snapshot_bridge_gap(self, event: dict[str, Any]) -> bool:
+        """Detect an initial forward gap that cannot be bridged by later events."""
+        if self.last_update_id is None or not isinstance(event, dict):
+            return False
+        first_update_id = self._parse_sequence_id(event.get("U"))
+        final_update_id = self._parse_sequence_id(event.get("u"))
+        if first_update_id is None or final_update_id is None:
+            return False
+        if first_update_id > final_update_id:
+            return False
+        return first_update_id > self.last_update_id + 1
+
     def _event_bridges_snapshot(
         self,
         event: dict[str, Any],
     ) -> bool:
         """
-        Binance depth events contain:
-        U = first update ID
-        u = final update ID
-
-        The first event after the snapshot must bridge
-        the snapshot update ID.
+        Validate Binance Futures snapshot-to-stream synchronization.
+        The first accepted event must cover snapshot lastUpdateId + 1.
+        Events already covered by the snapshot are discarded.
         """
-
-        if self.last_update_id is None:
+        if self.last_update_id is None or not isinstance(event, dict):
             return False
-
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
-
-        # Ignore events already covered by the snapshot.
-        if final_update_id < self.last_update_id:
+        first_update_id = self._parse_sequence_id(event.get("U"))
+        final_update_id = self._parse_sequence_id(event.get("u"))
+        if first_update_id is None or final_update_id is None:
             return False
-
-        # Binance futures depth synchronization requires the first accepted
-        # event to bridge snapshot_id + 1. Events entirely covered by the
-        # snapshot (u <= snapshot_id) must be discarded, not treated as sync.
+        if first_update_id > final_update_id:
+            return False
         next_update_id = self.last_update_id + 1
-        return (
-            first_update_id <= next_update_id
-            <= final_update_id
-        )
+        return first_update_id <= next_update_id <= final_update_id
 
     def _apply_event(
         self,
         event: dict[str, Any],
+        initial_snapshot_bridge: bool = False,
     ) -> bool:
         """
         Apply a depth event.
-
-        Returns False when a sequence gap is detected.
+        Initial bridge is validated by U/u and ignores pu, because pu refers
+        to the stream predecessor rather than the REST snapshot. Subsequent
+        events require pu continuity or U/u gap fallback.
         """
-
-        if self.last_update_id is None:
+        if self.last_update_id is None or not isinstance(event, dict):
+            return False
+        first_update_id = self._parse_sequence_id(event.get("U"))
+        final_update_id = self._parse_sequence_id(event.get("u"))
+        if first_update_id is None or final_update_id is None:
+            return False
+        if first_update_id > final_update_id:
             return False
 
-        first_update_id = int(event["U"])
-        final_update_id = int(event["u"])
-
-        # Ignore old events.
-        if final_update_id <= self.last_update_id:
-            return True
-
-        # For subsequent events, pu should match the
-        # previous event's final update ID.
-        previous_final_id = event.get("pu")
-
-        if previous_final_id is not None:
-            if int(previous_final_id) != self.last_update_id:
+        if initial_snapshot_bridge:
+            if not self._event_bridges_snapshot(event):
+                return False
+        else:
+            if final_update_id <= self.last_update_id:
+                return True
+            previous_final_id = event.get("pu")
+            if previous_final_id is not None:
+                parsed_previous_final_id = self._parse_sequence_id(previous_final_id)
+                if parsed_previous_final_id is None or parsed_previous_final_id != self.last_update_id:
+                    return False
+            elif first_update_id > self.last_update_id + 1:
                 return False
 
-        elif first_update_id > self.last_update_id + 1:
-            return False
-
-        self._update_levels(
-            self.bids,
-            event.get("b", []),
-        )
-
-        self._update_levels(
-            self.asks,
-            event.get("a", []),
-        )
-
+        self._update_levels(self.bids, event.get("b", []))
+        self._update_levels(self.asks, event.get("a", []))
         self.last_update_id = final_update_id
-
         return True
 
     @staticmethod
