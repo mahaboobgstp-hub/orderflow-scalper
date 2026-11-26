@@ -93,12 +93,12 @@ class AutonomousPaperRuntime:
             stop_price=price*(1-stop_pct/100) if side=="long" else price*(1+stop_pct/100)
             sizing=self.risk_engine.calculate({"symbol":symbol,"account_equity":equity,"entry_price":price,
                 "stop_loss_price":stop_price,"side":side,"risk_per_trade_pct":min(float(cfg.get("risk_per_trade_pct",0.5)),float(self.validation_session.config_values.get("max_single_trade_risk_pct",0.5)) if self.validation_session else 0.5),
-                "leverage":min(float(cfg.get("max_leverage",1)),5,float(self.validation_session.config_values.get("max_leverage",5)) if self.validation_session else 5),"max_position_notional_pct":cfg.get("max_position_notional_pct",25)})
+                "leverage":min(float(cfg.get("max_leverage",1)),5,float(self.validation_session.config_values.get("max_leverage",5)) if self.validation_session else 5),"max_position_notional_pct":cfg.get("max_position_notional_pct",25),"fee_rate":self.paper_engine.fee_rate})
             if sizing.get("position_quantity",0)>0:
                 qty=float(sizing["position_quantity"])
                 post_sizing_gate=self.risk_engine.evaluate_runtime_gate(account_equity=equity,closed_trades=self.paper_engine.closed_trades,
                     orders=self.paper_engine.orders,positions=self.paper_engine.positions,symbol=symbol,config=cfg,synchronized_book=bool(book),
-                    proposed_trade_risk_cash=abs(price-stop_price)*qty,proposed_notional=price*qty,proposed_leverage=float(sizing.get("leverage",1)),risk_limit_basis_equity=risk_basis)
+                    proposed_trade_risk_cash=abs(price-stop_price)*qty+qty*(price+stop_price)*self.paper_engine.fee_rate,proposed_notional=price*qty,proposed_leverage=float(sizing.get("leverage",1)),risk_limit_basis_equity=risk_basis)
                 result["post_sizing_risk_gate"]=post_sizing_gate
                 if not post_sizing_gate["allowed"]:
                     result["paper_execution"]={"status":"REJECTED","reason":"Post-sizing risk gate rejected the entry","blockers":post_sizing_gate["blockers"],"sizing":sizing}
