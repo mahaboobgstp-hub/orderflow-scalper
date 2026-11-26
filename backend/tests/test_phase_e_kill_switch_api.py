@@ -168,3 +168,14 @@ async def test_phase_e_persistence_worker_restores_halt_state():
     await worker.restore_state(engine)
     assert worker.risk_control_state["active"] is True
     assert worker.risk_control_state["reason"]=="persisted emergency"
+
+@pytest.mark.anyio
+async def test_phase_e_state_recovery_failure_activates_fail_closed_halt():
+    from app.services.paper_persistence import PaperPersistenceWorker
+    class RepoStub:
+        async def load_paper_state(self): raise RuntimeError("storage unavailable")
+    worker=PaperPersistenceWorker(repo=RepoStub())
+    engine=PaperTradingEngine(10000)
+    await worker.restore_state(engine)
+    assert worker.risk_control_state["active"] is True
+    assert worker.risk_control_state["reason"]=="RISK_CONTROL_STATE_UNAVAILABLE"
