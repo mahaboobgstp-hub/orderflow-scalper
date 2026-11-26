@@ -70,13 +70,35 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["last_reconnect_at"], 20.0)
         self.assertEqual(status["last_recovery_at"], 21.0)
 
-    def test_snapshot_bridge_rejects_failed_continuity_application(self):
+    def test_snapshot_bridge_accepts_event_without_snapshot_pu_match(self):
+        with patch("app.market_data.backend_stream.time.time", return_value=50.0):
+            self.stream.last_update_id = 100
+            self.stream.successful_connection_count = 1
+            event = {"U": 100, "u": 101, "pu": 99, "b": [["100", "1"]], "a": []}
+            self.assertTrue(self.stream._event_bridges_snapshot(event))
+            self.assertTrue(self.stream._apply_snapshot_bridge(event))
+        self.assertTrue(self.stream.synchronized)
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.bids[100.0], 1.0)
+
+
+    def test_snapshot_bridge_rejects_non_overlapping_event(self):
         self.stream.last_update_id = 100
-        event = {"U": 100, "u": 101, "pu": 99, "b": [["100", "1"]], "a": []}
-        self.assertTrue(self.stream._event_bridges_snapshot(event))
+        event = {"U": 102, "u": 103, "pu": 100, "b": [["100", "1"]], "a": []}
+        self.assertFalse(self.stream._event_bridges_snapshot(event))
         self.assertFalse(self.stream._apply_snapshot_bridge(event))
         self.assertFalse(self.stream.synchronized)
         self.assertEqual(self.stream.last_update_id, 100)
+
+
+    def test_live_events_enforce_pu_after_snapshot_bridge(self):
+        self.stream.last_update_id = 100
+        bridge = {"U": 100, "u": 101, "pu": 99, "b": [], "a": []}
+        self.assertTrue(self.stream._apply_snapshot_bridge(bridge))
+        self.assertTrue(self.stream._apply_event({"U": 102, "u": 103, "pu": 101, "b": [], "a": []}))
+        self.assertEqual(self.stream.last_update_id, 103)
+        self.assertFalse(self.stream._apply_event({"U": 104, "u": 105, "pu": 102, "b": [], "a": []}))
+        self.assertEqual(self.stream.last_update_id, 103)
 
     def test_snapshot_bridge_marks_sync_only_after_event_applies(self):
         with patch("app.market_data.backend_stream.time.time", return_value=50.0):
