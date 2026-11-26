@@ -58,3 +58,10 @@ def test_phase_e_manual_order_actual_risk_passes_when_within_limits():
         config={"risk_per_trade_pct":0.5,"max_total_exposure_pct":25,"max_total_open_risk_pct":3,"cooldown_seconds":0},
         proposed_trade_risk_cash=25,proposed_notional=2000,now_ms=DAY_MS)
     assert gate["allowed"] is True
+
+def test_phase_e_manual_order_configured_leverage_cap():
+    e=RiskManagementEngine()
+    result=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions={},symbol="BTCUSDT",
+        config={"risk_per_trade_pct":1,"max_leverage":2,"max_total_exposure_pct":25,"max_total_open_risk_pct":3,"cooldown_seconds":0},
+        proposed_trade_risk_cash=20,proposed_notional=2000,proposed_leverage=3,now_ms=DAY_MS)
+    assert "PROPOSED_LEVERAGE_EXCEEDS_CONFIGURED_LIMIT" in result["blockers"]
