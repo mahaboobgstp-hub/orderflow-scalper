@@ -24,8 +24,6 @@ state: dict[str, Any] = {
         "max_open_positions": 3,
         "max_leverage": 5,
         "max_total_exposure_pct": 25.0,
-        "max_position_notional_pct": 25.0,
-        "max_total_open_risk_pct": 3.0,
         "max_trades_per_day": 20,
         "max_consecutive_losses": 3,
         "min_risk_reward": 1.5,
@@ -107,22 +105,11 @@ async def engine_command(request: EngineCommandRequest, x_control_token: str | N
         elif command == "RESUME":
             runtime.resume()
             state["engine_state"] = "RUNNING"
-        elif command == "EMERGENCY_HALT":
-            risk_engine=getattr(runtime,"risk_engine",None)
-            result=risk_engine.set_kill_switch(True,"OPERATOR_EMERGENCY_HALT") if risk_engine else {"active":True,"reason":"OPERATOR_EMERGENCY_HALT"}
-            repository=getattr(runtime,"repository",None)
-            persisted=False
-            if repository and hasattr(repository,"engine_state"):
-                try: persisted=await repository.engine_state(status=str(runtime.status().get("state","STOPPED")).lower(),execution_enabled=False,state={"risk_kill_switch":result})
-                except Exception: persisted=False
-            # Keep the scan/mark loop alive so existing paper positions continue
-            # to receive simulated price updates and exit management. New entries are blocked.
-            state["engine_state"] = runtime.status().get("state", "STOPPED")
         else:
             await runtime.stop()
             state["engine_state"] = "STOPPED"
         _event("engine_command_applied", {"command": command})
-        return {"applied": True, "command": command, "engine_state": state["engine_state"], "risk_kill_switch_persisted": persisted if command == "EMERGENCY_HALT" else None, "runtime": runtime.status()}
+        return {"applied": True, "command": command, "engine_state": state["engine_state"], "runtime": runtime.status()}
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
@@ -133,7 +120,7 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
     numeric_limits = {
         "risk_per_trade_pct": (0.01, 5), "max_daily_loss_pct": (0.1, 20),
         "max_open_positions": (1, 50), "max_leverage": (1, 5),
-        "max_total_exposure_pct": (1, 100), "max_position_notional_pct": (1, 100), "max_total_open_risk_pct": (0.1, 20), "max_trades_per_day": (1, 500),
+        "max_total_exposure_pct": (1, 100), "max_trades_per_day": (1, 500),
         "max_consecutive_losses": (1, 20), "min_risk_reward": (0.1, 20),
         "cooldown_seconds": (0, 86400), "trailing_stop_pct": (0.05, 50),
         "trailing_take_profit_activation_pct": (0.05, 50), "trailing_take_profit_pct": (0.05, 50),
@@ -178,29 +165,6 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
         runtime.apply_config(state["config"])
     _event("configuration_updated", request.config)
     return {"accepted": True, "config": state["config"], "persisted": False, "message": "Configuration applied to runtime process memory; no automatic trade execution is enabled."}
-
-@router.post("/risk/kill-switch/reset")
-async def reset_risk_kill_switch(x_control_token: str | None = Header(default=None)):
-    _auth(x_control_token)
-    if runtime is None:
-        raise HTTPException(status_code=503, detail="Runtime service is not connected.")
-    if runtime.status().get("state") != "STOPPED":
-        raise HTTPException(status_code=409, detail="Stop the paper runtime before resetting the emergency risk halt.")
-    engine=getattr(runtime,"risk_engine",None)
-    if engine is None:
-        raise HTTPException(status_code=503, detail="Risk engine is not connected.")
-    repository=getattr(runtime,"repository",None)
-    if not repository or not hasattr(repository,"engine_state"):
-        raise HTTPException(status_code=503, detail="Persistent risk-control storage is unavailable; kill switch remains active.")
-    try:
-        persisted=await repository.engine_state(status="stopped",execution_enabled=False,state={"risk_kill_switch":{"active":False,"reason":None}})
-    except Exception:
-        persisted=False
-    if not persisted:
-        raise HTTPException(status_code=503,detail="Could not persist risk halt reset; kill switch remains active.")
-    result=engine.set_kill_switch(False)
-    _event("risk_kill_switch_reset", result)
-    return {"reset":True,"persisted":True,"kill_switch":result,"engine_state":state["engine_state"]}
 
 @router.post("/watchlist/add")
 def watchlist_add(request: WatchlistRequest, x_control_token: str | None = Header(default=None)):
