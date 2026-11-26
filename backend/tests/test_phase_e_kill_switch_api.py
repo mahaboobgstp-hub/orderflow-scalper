@@ -30,7 +30,7 @@ async def test_phase_e_manual_paper_order_allowed_when_halt_clear():
     app.state.risk_management_engine=RiskManagementEngine()
     app.state.paper_trading_engine=PaperTradingEngine(10000)
     try:
-        request=PaperOrderRequest(symbol="BTCUSDT",side="long",quantity=0.01,price=50000)
+        request=PaperOrderRequest(symbol="BTCUSDT",side="long",quantity=0.01,price=50000,stop_loss_price=49000)
         result=await paper_submit_order(request)
         assert result["order"]["status"]=="FILLED_SIMULATED"
         assert app.state.paper_trading_engine.account()["open_position_count"]==1
