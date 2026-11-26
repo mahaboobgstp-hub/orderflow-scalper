@@ -108,8 +108,10 @@ async def engine_command(request: EngineCommandRequest, x_control_token: str | N
             state["engine_state"] = "RUNNING"
         elif command == "EMERGENCY_HALT":
             if getattr(runtime, "risk_engine", None): runtime.risk_engine.set_kill_switch(True, "OPERATOR_EMERGENCY_HALT")
-            await runtime.stop()
-            state["engine_state"] = "STOPPED"
+            # Keep the scan/mark loop alive so existing paper positions continue
+            # to receive simulated price updates and exit management. The kill
+            # switch blocks every new entry; it is not a runtime shutdown.
+            state["engine_state"] = runtime.status().get("state", "STOPPED")
         else:
             await runtime.stop()
             state["engine_state"] = "STOPPED"
