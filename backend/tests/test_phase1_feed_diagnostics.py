@@ -148,7 +148,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 return {
                     "stale_after_seconds": 3.0,
                     "books": {
-                        "bybit:BTCUSDT": {"synchronized": True, "stale": False}
+                        "bybit:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None}
                     },
                     "exchanges": {
                         "bybit": {"messages_received": 12, "last_message_age_seconds": 0.25}
@@ -176,7 +176,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         class FakeExchanges:
             async def status(self):
                 return {"exchanges": [{
-                    "exchange": "bybit", "connected": True,
+                    "exchange": "bybit", "symbol": "BTCUSDT", "connected": True,
                     "last_message_age_seconds": 0.25, "last_error": None,
                 }]}
 
