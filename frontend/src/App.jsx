@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { isFreshMessageFeed } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -223,7 +224,7 @@ export default function App() {
     const books=unified.books||{};
     const primary=payload.primary_binance_demo_stream||{};
     const primaryStale=primary.stale??(primary.last_event_age_seconds==null||primary.last_event_age_seconds>(primary.stale_after_seconds??3));
-    const freshMessages=(x)=>x.enabled!==false && x.connected && x.last_message_age_seconds!=null && x.last_message_age_seconds<= (unified.stale_after_seconds||3);
+    const freshMessages=(x)=>isFreshMessageFeed(x,unified.stale_after_seconds);
     return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
       <div className="stats-grid">
         {stat("Connected Feeds",summary.fresh_message_feed_count??summary.healthy_feed_count??0,"Fresh messages within stale threshold")}
