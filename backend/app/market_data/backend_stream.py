@@ -55,6 +55,13 @@ class BinanceOrderBookStream:
         self._stop_event = asyncio.Event()
         self._lock = asyncio.Lock()
 
+    @staticmethod
+    def _stamp_event_received(event: Any) -> Any:
+        """Attach a monotonic receive timestamp to buffered stream events."""
+        if isinstance(event, dict):
+            event["_received_monotonic"] = time.monotonic()
+        return event
+
     # --------------------------------------------------
     # Lifecycle
     # --------------------------------------------------
@@ -148,7 +155,7 @@ class BinanceOrderBookStream:
 
             async def collect_events():
                 async for message in websocket:
-                    event = json.loads(message)
+                    event = self._stamp_event_received(json.loads(message))
                     await event_queue.put(event)
 
             collector_task = asyncio.create_task(
@@ -470,7 +477,16 @@ class BinanceOrderBookStream:
         self.last_update_id = final_update_id
         # Freshness tracks sequence progress, not merely event receipt. Ignored
         # duplicates/old updates must not keep a stalled book marked fresh.
-        self._last_event_received_at = time.monotonic()
+        received_at = event.get("_received_monotonic")
+        now_monotonic = time.monotonic()
+        if (
+            isinstance(received_at, bool)
+            or not isinstance(received_at, (int, float))
+            or not math.isfinite(received_at)
+            or received_at > now_monotonic
+        ):
+            received_at = now_monotonic
+        self._last_event_received_at = received_at
 
         return True
 

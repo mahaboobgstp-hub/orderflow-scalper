@@ -1,5 +1,6 @@
 import time
 import unittest
+from unittest.mock import patch
 
 from app.market_data.backend_stream import BinanceOrderBookStream
 
@@ -113,6 +114,14 @@ class BinanceDemoBookIntegrityTests(unittest.TestCase):
         self.assertTrue(stream._apply_event(event))
         self.assertEqual(stream._last_event_received_at, received_at)
         self.assertIsNone(__import__("asyncio").run(stream.get_order_book()))
+
+    def test_receive_timestamp_is_stamped_on_event_capture(self):
+        stream = self.ready_stream()
+        event = {"U": 101, "u": 101}
+        with patch("app.market_data.backend_stream.time.monotonic", return_value=123.456):
+            stamped = stream._stamp_event_received(event)
+        self.assertIs(stamped, event)
+        self.assertEqual(stamped["_received_monotonic"], 123.456)
 
     def test_snapshot_integer_string_update_id_is_supported(self):
         stream = BinanceOrderBookStream("BTCUSDT")
