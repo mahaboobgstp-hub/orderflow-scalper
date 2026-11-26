@@ -73,6 +73,31 @@ class BinanceDemoBookIntegrityTests(unittest.TestCase):
                 self.assertEqual(stream.asks, before_asks)
                 self.assertEqual(stream.last_update_id, before_id)
 
+    def test_snapshot_and_event_levels_reject_boolean_values(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        bad_snapshots = (
+            {**valid_snapshot(), "bids": [[True, "2.0"]]},
+            {**valid_snapshot(), "asks": [["101.0", True]]},
+        )
+        for snapshot in bad_snapshots:
+            with self.subTest(snapshot=snapshot):
+                with self.assertRaises(ValueError):
+                    stream._load_snapshot(snapshot)
+
+        stream = self.ready_stream()
+        before_bids, before_asks, before_id = dict(stream.bids), dict(stream.asks), stream.last_update_id
+        invalid_events = (
+            depth_event(101, 102, 100, bids=[[True, 1.0]]),
+            depth_event(101, 102, 100, bids=[[100.0, True]]),
+            depth_event(101, 102, 100, asks=[[101.0, True]]),
+        )
+        for event in invalid_events:
+            with self.subTest(event=event):
+                self.assertFalse(stream._apply_event(event))
+                self.assertEqual(stream.bids, before_bids)
+                self.assertEqual(stream.asks, before_asks)
+                self.assertEqual(stream.last_update_id, before_id)
+
     def test_snapshot_integer_string_update_id_is_supported(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         stream._load_snapshot({**valid_snapshot(), "lastUpdateId": "100"})
