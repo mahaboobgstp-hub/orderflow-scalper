@@ -222,3 +222,24 @@ async def test_phase_e_legacy_paper_snapshot_without_halt_flag_fails_closed():
     await worker.restore_state(PaperTradingEngine(10000))
     assert worker.risk_control_state["active"] is True
     assert worker.risk_control_state["reason"]=="RISK_CONTROL_STATE_MISSING"
+
+@pytest.mark.anyio
+async def test_phase_e_exchange_enabled_config_uses_exchange_keys(monkeypatch):
+    from app.services import operator_control
+    old_runtime=operator_control.runtime
+    old_config=dict(operator_control.state["config"])
+    old_events=list(operator_control.state["events"])
+    old_updated=operator_control.state["updated_at"]
+    operator_control.set_runtime(None)
+    monkeypatch.setenv("CONTROL_API_TOKEN","test-control-token")
+    try:
+        request=operator_control.ConfigRequest(config={"exchange_enabled":{"binance":True,"bybit":False,"delta":False}})
+        result=await operator_control.update_config(request,"test-control-token")
+        assert result["accepted"] is True
+        assert operator_control.state["config"]["exchange_enabled"]["binance"] is True
+    finally:
+        operator_control.set_runtime(old_runtime)
+        operator_control.state["config"].clear()
+        operator_control.state["config"].update(old_config)
+        operator_control.state["events"]=old_events
+        operator_control.state["updated_at"]=old_updated
