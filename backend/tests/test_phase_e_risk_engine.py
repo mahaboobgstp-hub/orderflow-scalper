@@ -87,3 +87,10 @@ def test_phase_e_single_position_notional_limit_is_enforced():
         proposed_trade_risk_cash=20,proposed_notional=2000,proposed_leverage=1,now_ms=DAY_MS)
     assert "PROPOSED_POSITION_NOTIONAL_EXCEEDS_SINGLE_POSITION_LIMIT" in result["blockers"]
     assert "TOTAL_EXPOSURE_LIMIT_WOULD_BE_EXCEEDED" not in result["blockers"]
+
+def test_phase_e_daily_loss_limit_does_not_expand_after_profit():
+    e=RiskManagementEngine()
+    result=e.evaluate_runtime_gate(account_equity=12000,closed_trades=[],orders=[],positions={},symbol="BTCUSDT",
+        config={"max_daily_loss_pct":2,"cooldown_seconds":0},risk_limit_basis_equity=10000,now_ms=DAY_MS)
+    assert result["risk_limit_basis_equity"]==10000
+    assert result["daily_loss_limit"]==200
