@@ -103,6 +103,21 @@ class ImbalanceDetectorTests(unittest.TestCase):
         self.assertAlmostEqual(result["metrics"]["raw_imbalance"], 0.0, places=6)
         self.assertFalse(result["quality"]["raw_weighted_direction_agreement"])
 
+    def test_boolean_levels_and_age_are_rejected_or_filtered(self):
+        detector = OrderBookImbalanceDetector()
+        invalid_book = book(
+            bids=[[True, 99.0], [100.0, True], [99.9, 1.0]],
+            asks=[[100.1, 1.0], [100.2, 1.0]],
+        )
+        result = detector.analyze(invalid_book, levels=10)
+        self.assertEqual(result["metrics"]["best_bid"], 99.9)
+        self.assertEqual(result["metrics"]["raw_bid_quantity"], 1.0)
+
+        with self.assertRaisesRegex(ValueError, "age"):
+            detector.analyze(book(age_seconds=True))
+        with self.assertRaisesRegex(ValueError, "level count"):
+            detector.analyze(book(), levels=True)
+
     def test_invalid_levels_are_ignored_safely(self):
         detector = OrderBookImbalanceDetector()
         book = sample_book(
