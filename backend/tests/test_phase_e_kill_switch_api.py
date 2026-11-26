@@ -211,3 +211,14 @@ async def test_phase_e_live_risk_telemetry_requires_control_token(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await risk_engine_status()
     assert exc.value.status_code==401
+
+@pytest.mark.anyio
+async def test_phase_e_legacy_paper_snapshot_without_halt_flag_fails_closed():
+    from app.services.paper_persistence import PaperPersistenceWorker
+    class RepoStub:
+        async def load_paper_state(self):
+            return {"snapshot":{"paper_account":{"version":1,"mode":"PAPER_ONLY"}},"open_positions":[]}
+    worker=PaperPersistenceWorker(repo=RepoStub())
+    await worker.restore_state(PaperTradingEngine(10000))
+    assert worker.risk_control_state["active"] is True
+    assert worker.risk_control_state["reason"]=="RISK_CONTROL_STATE_MISSING"
