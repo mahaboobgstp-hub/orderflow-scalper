@@ -138,6 +138,7 @@ class AutonomousPaperRuntime:
                 result["paper_execution"]={"status":"REJECTED","reason":"Risk sizing returned zero quantity","sizing":sizing}
         else:
             result["paper_execution"]={"status":"NOT_EXECUTED","reason":"Decision, risk gate, or controlled-session gate did not permit entry","session_blockers":session_blockers}
+        result["evaluated_at"] = time.time()
         return result
 
     async def _persist_decision(self, result):
