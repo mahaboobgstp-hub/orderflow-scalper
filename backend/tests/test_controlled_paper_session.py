@@ -6,7 +6,7 @@ def active_session(**overrides):
             "max_session_minutes":60,"max_single_trade_risk_pct":0.5,"max_leverage":3}
     config.update(overrides)
     s=ControlledPaperSession(config)
-    s.start(10000,now=1000)
+    s.start(10000,now=__import__('time').time())
     return s
 
 def test_controller_disabled_by_default_blocks_entries():
@@ -54,6 +54,7 @@ def test_loss_limit_auto_pauses():
 
 def test_duration_auto_pauses(monkeypatch):
     s=active_session(max_session_minutes=1)
+    s.started_at=1000
     monkeypatch.setattr("app.services.controlled_paper_session.time.time",lambda:1061)
     allowed,blockers=s.entry_gate("buy",True)
     assert not allowed and s.state=="PAUSED"
