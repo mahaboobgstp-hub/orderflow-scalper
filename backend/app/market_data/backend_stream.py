@@ -111,6 +111,8 @@ class BinanceOrderBookStream:
             self.last_reconnect_at = now
         self.synchronized = False
         self.synchronized_since = None
+        self.last_event_at = None
+        self.last_book_update_at = None
         self.last_error = None
 
     def _record_disconnect(self, reason: str):
