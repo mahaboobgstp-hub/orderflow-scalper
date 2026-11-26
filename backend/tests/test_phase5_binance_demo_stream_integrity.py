@@ -60,6 +60,24 @@ class BinanceDemoBookIntegrityTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     stream._load_snapshot(snapshot)
 
+    def test_snapshot_update_id_rejects_float_bool_negative_and_malformed(self):
+        stream = self.ready_stream()
+        before_bids, before_asks, before_id = dict(stream.bids), dict(stream.asks), stream.last_update_id
+        invalid_ids = (100.5, 100.0, True, False, -1, float("nan"), float("inf"), "100.5", "bad", None)
+        for update_id in invalid_ids:
+            snapshot = {**valid_snapshot(), "lastUpdateId": update_id}
+            with self.subTest(update_id=update_id):
+                with self.assertRaises(ValueError):
+                    stream._load_snapshot(snapshot)
+                self.assertEqual(stream.bids, before_bids)
+                self.assertEqual(stream.asks, before_asks)
+                self.assertEqual(stream.last_update_id, before_id)
+
+    def test_snapshot_integer_string_update_id_is_supported(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        stream._load_snapshot({**valid_snapshot(), "lastUpdateId": "100"})
+        self.assertEqual(stream.last_update_id, 100)
+
     def test_invalid_event_rejected_without_partial_mutation(self):
         stream = self.ready_stream()
         before_bids, before_asks, before_id = dict(stream.bids), dict(stream.asks), stream.last_update_id
