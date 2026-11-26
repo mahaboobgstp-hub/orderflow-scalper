@@ -132,7 +132,8 @@ class BinanceOrderBookStream:
         """Apply the first event bridging the REST snapshot before marking the book synced."""
         if not self._event_bridges_snapshot(event):
             return False
-        if not self._apply_event(event):
+        # The first buffered event is validated by U/u snapshot overlap, not pu.
+        if not self._apply_event(event, validate_previous_sequence=False):
             return False
         self._record_synchronized()
         return True
@@ -338,6 +339,8 @@ class BinanceOrderBookStream:
     def _apply_event(
         self,
         event: dict[str, Any],
+        *,
+        validate_previous_sequence: bool = True,
     ) -> bool:
         """
         Apply a depth event.
@@ -355,16 +358,17 @@ class BinanceOrderBookStream:
         if final_update_id <= self.last_update_id:
             return True
 
-        # For subsequent events, pu should match the
-        # previous event's final update ID.
-        previous_final_id = event.get("pu")
+        # Snapshot-bridge events are validated by U/u overlap with the REST
+        # snapshot. Only events after that bridge enforce pu continuity.
+        if validate_previous_sequence:
+            previous_final_id = event.get("pu")
 
-        if previous_final_id is not None:
-            if int(previous_final_id) != self.last_update_id:
+            if previous_final_id is not None:
+                if int(previous_final_id) != self.last_update_id:
+                    return False
+
+            elif first_update_id > self.last_update_id + 1:
                 return False
-
-        elif first_update_id > self.last_update_id + 1:
-            return False
 
         self._update_levels(
             self.bids,
