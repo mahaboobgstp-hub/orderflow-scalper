@@ -8,7 +8,7 @@ const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
 const capacitor = JSON.parse(fs.readFileSync(capacitorPath, "utf8"));
 
 const errors = [];
-if (!capacitor.appId || !/^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$/.test(capacitor.appId)) {
+if (!capacitor.appId || !/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(capacitor.appId)) {
   errors.push("capacitor.appId must be a valid reverse-domain Android identifier");
 }
 if (capacitor.webDir !== "dist") errors.push('capacitor.webDir must be "dist" for the Vite build output');
