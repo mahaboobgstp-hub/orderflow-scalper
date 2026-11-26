@@ -72,3 +72,10 @@ def test_phase_e_position_notional_cap_is_separate_from_portfolio_exposure():
         "risk_per_trade_pct":1,"leverage":1,"max_position_notional_pct":10})
     assert sizing["position_notional"]==1000
     assert sizing["position_limited_by_notional_cap"] is True
+
+def test_phase_e_invalid_direction_stop_loss_is_treated_as_unprotected():
+    e=RiskManagementEngine()
+    positions={"XRPUSDT":{"side":"long","entry_price":100,"stop_loss_price":105,"quantity":1}}
+    result=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions=positions,symbol="BTCUSDT",config={"cooldown_seconds":0},now_ms=DAY_MS)
+    assert result["open_positions_missing_stop"]==1
+    assert "OPEN_POSITION_WITHOUT_VALID_STOP_LOSS" in result["blockers"]
