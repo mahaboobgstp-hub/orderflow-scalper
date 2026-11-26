@@ -95,18 +95,26 @@ class AutonomousPaperRuntime:
                 "stop_loss_price":stop_price,"side":side,"risk_per_trade_pct":min(float(cfg.get("risk_per_trade_pct",0.5)),float(self.validation_session.config_values.get("max_single_trade_risk_pct",0.5)) if self.validation_session else 0.5),
                 "leverage":min(float(cfg.get("max_leverage",1)),5,float(self.validation_session.config_values.get("max_leverage",5)) if self.validation_session else 5),"max_position_notional_pct":cfg.get("max_total_exposure_pct",25)})
             if sizing.get("position_quantity",0)>0:
-                try:
-                    self.paper_engine.submit({"symbol":symbol,"side":side,"quantity":sizing["position_quantity"],"price":price,
-                        "leverage":sizing["leverage"],"stop_loss_price":stop_price,
-                        "tsl_enabled":bool(cfg.get("trailing_stop_enabled",True)),
-                        "tsl_distance_pct":float(cfg.get("trailing_stop_pct",1.0)),
-                        "ttp_enabled":bool(cfg.get("trailing_take_profit_enabled",True)),
-                        "ttp_activation_pct":float(cfg.get("trailing_take_profit_activation_pct",1.0)),
-                        "ttp_trail_pct":float(cfg.get("trailing_take_profit_pct",0.5))})
-                    result["paper_execution"]={"status":"SIMULATED_OPEN","sizing":sizing}
-                    if self.validation_session: self.validation_session.record_entry(symbol,side,{"decision_score":result.get("score")})
-                except (ValueError,TypeError) as exc:
-                    result["paper_execution"]={"status":"REJECTED","reason":str(exc)}
+                qty=float(sizing["position_quantity"])
+                post_sizing_gate=self.risk_engine.evaluate_runtime_gate(account_equity=equity,closed_trades=self.paper_engine.closed_trades,
+                    orders=self.paper_engine.orders,positions=self.paper_engine.positions,symbol=symbol,config=cfg,synchronized_book=bool(book),
+                    proposed_trade_risk_cash=abs(price-stop_price)*qty,proposed_notional=price*qty,proposed_leverage=float(sizing.get("leverage",1)))
+                result["post_sizing_risk_gate"]=post_sizing_gate
+                if not post_sizing_gate["allowed"]:
+                    result["paper_execution"]={"status":"REJECTED","reason":"Post-sizing risk gate rejected the entry","blockers":post_sizing_gate["blockers"],"sizing":sizing}
+                else:
+                    try:
+                        self.paper_engine.submit({"symbol":symbol,"side":side,"quantity":qty,"price":price,
+                            "leverage":sizing["leverage"],"stop_loss_price":stop_price,
+                            "tsl_enabled":bool(cfg.get("trailing_stop_enabled",True)),
+                            "tsl_distance_pct":float(cfg.get("trailing_stop_pct",1.0)),
+                            "ttp_enabled":bool(cfg.get("trailing_take_profit_enabled",True)),
+                            "ttp_activation_pct":float(cfg.get("trailing_take_profit_activation_pct",1.0)),
+                            "ttp_trail_pct":float(cfg.get("trailing_take_profit_pct",0.5))})
+                        result["paper_execution"]={"status":"SIMULATED_OPEN","sizing":sizing,"final_risk_gate":"PASSED"}
+                        if self.validation_session: self.validation_session.record_entry(symbol,side,{"decision_score":result.get("score")})
+                    except (ValueError,TypeError) as exc:
+                        result["paper_execution"]={"status":"REJECTED","reason":str(exc)}
             else:
                 result["paper_execution"]={"status":"REJECTED","reason":"Risk sizing returned zero quantity","sizing":sizing}
         else:
