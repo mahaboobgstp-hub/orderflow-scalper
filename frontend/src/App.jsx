@@ -223,7 +223,8 @@ export default function App() {
     const adapterList=payload.exchange_connections?.exchanges||[];
     const books=unified.books||{};
     const primary=payload.primary_binance_demo_stream||{};
-    const primaryBookState=getPrimaryBookState(primary);\n    const primaryBookFresh=primaryBookState==="HEALTHY"||primaryBookState==="FRESH (LEGACY)";
+    const primaryBookState=getPrimaryBookState(primary);
+    const primaryBookFresh=primaryBookState==="HEALTHY"||primaryBookState==="FRESH (LEGACY)";
     const freshMessages=(x)=>isFreshMessageFeed(x,unified.stale_after_seconds);
     return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
       <div className="stats-grid">
@@ -236,9 +237,11 @@ export default function App() {
       <div className="panel"><div className="panel-title"><h2>Safety & Runtime Boundary</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
         <div className="list-row"><b>Market data mode</b><span>{payload.mode||"Unknown"}</span></div>
         <div className="list-row"><b>Real exchange execution</b><span className="negative">Disabled</span></div>
-        <div className="list-row"><b>Primary Binance demo book</b><span>{primary.synchronized&&!primaryStale?"SYNCHRONIZED & FRESH":primary.synchronized&&primaryStale?"SYNCHRONIZED / STALE":primary.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
+        <div className="list-row"><b>Primary Binance demo book</b><span>{primaryBookFresh?"SYNCHRONIZED & FRESH":primary.synchronized?"SYNCHRONIZED / STALE":primary.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
         <div className="list-row"><b>Binance demo last update ID</b><span>{value(payload.primary_binance_demo_stream?.last_update_id)}</span></div>
-        <div className="list-row"><b>Primary book freshness</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primaryBookState}</span></div>\n        <div className="list-row"><b>Last depth message age</b><span>{primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s"}</span></div>\n        <div className="list-row"><b>Applied book update age</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primary.last_book_update_age_seconds==null?"--":primary.last_book_update_age_seconds+"s"}</span></div>
+        <div className="list-row"><b>Primary book freshness</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primaryBookState}</span></div>
+        <div className="list-row"><b>Last depth message age</b><span>{primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s"}</span></div>
+        <div className="list-row"><b>Applied book update age</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primary.last_book_update_age_seconds==null?"--":primary.last_book_update_age_seconds+"s"}</span></div>
         <div className="list-row"><b>Connected for</b><span>{primary.connected_duration_seconds==null?"--":primary.connected_duration_seconds+"s"}</span></div>
         <div className="list-row"><b>Synchronized for</b><span>{primary.synchronized_duration_seconds==null?"--":primary.synchronized_duration_seconds+"s"}</span></div>
         <div className="list-row"><b>Connection attempts / successes</b><span>{primary.connection_attempt_count??0} / {primary.successful_connection_count??0}</span></div>
