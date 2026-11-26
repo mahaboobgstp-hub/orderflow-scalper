@@ -65,3 +65,21 @@ def test_invalid_prices_rejected(side):
 def test_config_rejects_bad_trailing_parameters():
     with pytest.raises(ValueError):
         TradeManagementEngine(TradeManagementConfig(trailing_stop_pct=0))
+
+
+def test_best_price_extreme_is_returned_for_state_persistence():
+    engine = TradeManagementEngine()
+    long_result = engine.evaluate({"symbol":"L","side":"long","entry_price":100,"best_price":100},
+                                 {"mark_price":102,"trend_score":80})
+    short_result = engine.evaluate({"symbol":"S","side":"short","entry_price":100,"best_price":100},
+                                  {"mark_price":98,"trend_score":80})
+    assert long_result.best_price == 102
+    assert short_result.best_price == 98
+
+
+def test_trailing_stop_does_not_tighten_before_favorable_move():
+    engine = TradeManagementEngine()
+    result = engine.evaluate({"symbol":"L","side":"long","entry_price":100,"best_price":100},
+                             {"mark_price":100,"trend_score":50})
+    assert result.stop_price == result.initial_stop_price
+    assert result.trailing_stop_active is False
