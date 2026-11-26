@@ -9,6 +9,7 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | Field | Definition |
 |---|---|
 | `stale_after_seconds` | Feed freshness cutoff (default 3 seconds). |
+| Primary Binance stream cutoff normalization | Invalid, non-finite, boolean, or nonpositive values fall back to 3 seconds; positive values below 0.1 seconds clamp to 0.1 seconds. |
 | `last_event_age_seconds` | Age of the most recently received WebSocket depth message (diagnostic only). |
 | `last_book_update_age_seconds` | Age of the most recent accepted event that advanced the order-book sequence. |
 | `stale` | True when disconnected, unsynchronized, no accepted sequence progress has occurred, or applied-book age exceeds the cutoff. |
