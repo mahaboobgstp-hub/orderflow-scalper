@@ -67,6 +67,9 @@ class AbsorptionLiquidityDetector:
             except (TypeError,ValueError,OverflowError): continue
             side=str(t.get("side","")).lower()
             if side not in ("buy","sell") or price<=0 or qty<=0 or not math.isfinite(price) or not math.isfinite(qty): continue
+            # Reject overflowed notional before it can contaminate sums or metrics.
+            notional=price*qty
+            if not math.isfinite(notional): continue
             if ts>=cutoff and ts<=now_ms+5000: normalized.append({"price":price,"quantity":qty,"side":side,"ts":ts})
         # Sort by timestamp so temporal diagnostics are independent of arrival ordering.
         normalized.sort(key=lambda t: t["ts"])
