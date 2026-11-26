@@ -91,8 +91,8 @@ class TradeManagementEngine:
             raise ValueError("trend_score must be between 0 and 100")
         favorable = (mark-entry)/entry*100 if side == "long" else (entry-mark)/entry*100
         adverse = max(0.0, -favorable)
-        favorable_best = (best-entry)/entry*100 if side == "long" else (entry-best)/entry*100
         best = max(best, mark) if side == "long" else min(best, mark)
+        favorable_best = (best-entry)/entry*100 if side == "long" else (entry-best)/entry*100
         if side == "long":
             initial_stop = entry*(1-self.config.initial_stop_pct/100)
             trail = best*(1-self.config.trailing_stop_pct/100)
