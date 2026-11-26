@@ -450,6 +450,8 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 heartbeat.assert_not_awaited()
                 return payload
 
+        route = next(route for route in main.app.routes if getattr(route, "path", None) == "/api/database/status")
+        self.assertEqual(route.methods, {"GET"})
         payload = asyncio.run(invoke())
         self.assertEqual(payload["diagnostic_mode"], "read_only")
         self.assertIsNone(payload["heartbeat_write_verified"])
