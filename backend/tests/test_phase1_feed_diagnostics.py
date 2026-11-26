@@ -386,5 +386,36 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(sentinel)
         self.assertIsNone(self.stream.last_error)
 
+    def test_snapshot_loader_rejects_invalid_levels_without_mutating_book(self):
+        self.stream.bids = {100.0: 2.0}
+        self.stream.asks = {101.0: 3.0}
+        self.stream.last_update_id = 42
+        invalid_snapshots = (
+            {"lastUpdateId": 43, "bids": [["nan", "1"]], "asks": [["101", "1"]]},
+            {"lastUpdateId": 43, "bids": [["100", "1"]], "asks": [["101", "inf"]]},
+            {"lastUpdateId": 43, "bids": [["-100", "1"]], "asks": [["101", "1"]]},
+            {"lastUpdateId": 43, "bids": [["100", "-1"]], "asks": [["101", "1"]]},
+            {"lastUpdateId": 43, "bids": [["100"]], "asks": [["101", "1"]]},
+            {"lastUpdateId": 43, "bids": [["100", "1"]], "asks": []},
+            {"lastUpdateId": 43.0, "bids": [["100", "1"]], "asks": [["101", "1"]]},
+        )
+        for snapshot in invalid_snapshots:
+            with self.subTest(snapshot=snapshot):
+                with self.assertRaises(ValueError):
+                    self.stream._load_snapshot(snapshot)
+                self.assertEqual(self.stream.bids, {100.0: 2.0})
+                self.assertEqual(self.stream.asks, {101.0: 3.0})
+                self.assertEqual(self.stream.last_update_id, 42)
+
+    def test_snapshot_loader_discards_zero_quantity_levels(self):
+        self.stream._load_snapshot({
+            "lastUpdateId": 42,
+            "bids": [["100", "2"], ["99", "0"]],
+            "asks": [["101", "3"], ["102", "0"]],
+        })
+        self.assertEqual(self.stream.bids, {100.0: 2.0})
+        self.assertEqual(self.stream.asks, {101.0: 3.0})
+        self.assertFalse(self.stream.synchronized)
+
 if __name__ == "__main__":
     unittest.main()
