@@ -24,7 +24,7 @@ from app.services.paper_trading import PaperTradingEngine, set_persistence_enque
 from app.services.paper_persistence import PaperPersistenceWorker
 from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
-from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
+from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state, _auth as control_auth
 from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 from app.services.controlled_paper_session import ControlledPaperSession
@@ -357,7 +357,8 @@ async def market_context_regime(symbol:str,interval:str="1m",limit:int=Query(def
 
 # Phase 10 risk-management endpoints — advisory/calculation only
 @app.get("/api/risk/status")
-async def risk_engine_status():
+async def risk_engine_status(x_control_token: str | None = Header(default=None)):
+    control_auth(x_control_token)
     engine=app.state.risk_management_engine; paper=app.state.paper_trading_engine
     config=operator_control_state["config"]
     account=paper.account()
