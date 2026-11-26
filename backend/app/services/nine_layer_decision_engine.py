@@ -110,7 +110,7 @@ class NineLayerDecisionEngine:
         configured_spread_max=_finite(self.config.get("max_spread_pct"))
         spread_max=configured_spread_max if configured_spread_max is not None and configured_spread_max>0 else 0.12
         configured_min_qv=_finite(self.config.get("min_24h_volume_usd"))
-        min_qv=configured_min_qv if configured_min_qv is not None and configured_min_qv>0 else 1_000_000
+        min_qv=configured_min_qv if configured_min_qv is not None and configured_min_qv>0 else 5_000_000
         spread_valid=spread is not None and spread>=0
         volume_valid=qv is not None and qv>=0
         liquidity_ok=spread_valid and volume_valid and spread<=spread_max and qv>=min_qv
