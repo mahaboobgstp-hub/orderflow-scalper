@@ -102,3 +102,10 @@ def test_phase_e_position_sizing_includes_entry_and_stop_exit_fees():
     assert result["estimated_loss_at_stop"]<=result["risk_budget"]
     assert result["estimated_fees_at_stop"]>0
     assert result["position_quantity"]<10
+
+def test_phase_e_open_stop_risk_includes_future_exit_fee():
+    e=RiskManagementEngine()
+    positions={"ETHUSDT":{"side":"long","entry_price":100,"stop_loss_price":95,"quantity":2}}
+    result=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions=positions,symbol="BTCUSDT",
+        config={"cooldown_seconds":0},fee_rate=0.001,now_ms=DAY_MS)
+    assert result["open_stop_risk"]==10.19
