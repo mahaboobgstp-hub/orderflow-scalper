@@ -176,5 +176,71 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
 
+class Phase6SpatialVwapAndApiTests(unittest.TestCase):
+    def test_vwap_vs_mid_sign_is_aggressor_side_normalized_not_temporal_progress(self):
+        # With a 100.00 bid / 100.10 ask, midpoint is 100.05.
+        buy_at_ask = AbsorptionLiquidityDetector().analyze(
+            book(), trades("buy", count=8, price=100.10), 15
+        )
+        sell_at_bid = AbsorptionLiquidityDetector().analyze(
+            book(), trades("sell", count=8, price=100.00), 15
+        )
+        buy_below_mid = AbsorptionLiquidityDetector().analyze(
+            book(), trades("buy", count=8, price=100.00), 15
+        )
+        sell_above_mid = AbsorptionLiquidityDetector().analyze(
+            book(), trades("sell", count=8, price=100.10), 15
+        )
+        self.assertGreater(buy_at_ask["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertGreater(sell_at_bid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
+        self.assertLess(buy_below_mid["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertLess(sell_above_mid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
+        # Spatial VWAP offset alone is not temporal midpoint progress.
+        self.assertEqual(buy_at_ask["metrics"]["buy_price_progress_pct"], 0.0)
+        self.assertEqual(sell_at_bid["metrics"]["sell_price_progress_pct"], 0.0)
+        self.assertEqual(buy_at_ask["metrics"]["buy_absorption_score"], 0.0)
+        self.assertEqual(sell_at_bid["metrics"]["sell_absorption_score"], 0.0)
+
+    def test_api_exposes_spatial_temporal_metrics_and_uncalibrated_micro_volume_candidate(self):
+        import asyncio
+        from app import main
+
+        now_ms = int(time.time() * 1000)
+        tiny_tape = [
+            {"side": "buy", "quantity": 1e-9, "price": 100.10,
+             "received_timestamp_ms": now_ms}
+            for _ in range(8)
+        ]
+        thin_book = book(
+            bids=[[100.00, 1e-8]],
+            asks=[[100.10, 1e-8]],
+        )
+        class MarketStub:
+            def get_book(self, exchange, symbol):
+                return thin_book
+            def get_recent_trades(self, exchange, symbol, limit):
+                return tiny_tape[:limit]
+
+        detector = AbsorptionLiquidityDetector()
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0), \
+             patch.object(main.app.state, "unified_market_data", MarketStub(), create=True), \
+             patch.object(main.app.state, "absorption_detector", detector, create=True):
+            # First request establishes temporal baseline; second returns API metrics.
+            asyncio.run(main.analyze_absorption("bybit", "BTCUSDT", 15, 500))
+            result = asyncio.run(main.analyze_absorption("bybit", "BTCUSDT", 15, 500))
+
+        metrics = result["metrics"]
+        self.assertIn("buy_vwap_vs_mid_pct", metrics)
+        self.assertIn("sell_vwap_vs_mid_pct", metrics)
+        self.assertIn("buy_price_progress_pct", metrics)
+        self.assertIn("sell_price_progress_pct", metrics)
+        self.assertGreater(metrics["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertEqual(metrics["buy_price_progress_pct"], 0.0)
+        self.assertEqual(metrics["buy_absorption_score"], 1.0)
+        self.assertTrue(metrics["buy_absorption_candidate"])
+        self.assertEqual(metrics["top5_bid_depth"], 1e-8)
+        self.assertEqual(metrics["top5_ask_depth"], 1e-8)
+        self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
+
 if __name__=="__main__":
     unittest.main()
