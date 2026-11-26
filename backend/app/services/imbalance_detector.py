@@ -34,6 +34,8 @@ class OrderBookImbalanceDetector:
         for row in raw:
             if not isinstance(row, (list, tuple)) or len(row) < 2:
                 continue
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
+                continue
             try:
                 price, quantity = float(row[0]), float(row[1])
             except (ValueError, TypeError):
@@ -79,6 +81,8 @@ class OrderBookImbalanceDetector:
         if book.get("stale", True):
             raise ValueError("Order book is stale; imbalance analysis refused.")
         age = book.get("age_seconds")
+        if isinstance(age, bool):
+            raise ValueError("Order book age is missing or invalid; imbalance analysis refused.")
         try:
             age_value = float(age)
         except (TypeError, ValueError):
@@ -87,6 +91,8 @@ class OrderBookImbalanceDetector:
             raise ValueError("Order book exceeds allowed age or has invalid age; analysis refused.")
         if book.get("integrity_error"):
             raise ValueError(f"Order book integrity error: {book['integrity_error']}")
+        if isinstance(levels, bool):
+            raise ValueError("Requested level count must be an integer.")
         requested_levels = max(1, min(int(levels), 20))
         bids = self._levels(book.get("bids"), "bids")[:requested_levels]
         asks = self._levels(book.get("asks"), "asks")[:requested_levels]

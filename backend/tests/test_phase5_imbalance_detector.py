@@ -103,6 +103,21 @@ class ImbalanceDetectorTests(unittest.TestCase):
         self.assertAlmostEqual(result["metrics"]["raw_imbalance"], 0.0, places=6)
         self.assertFalse(result["quality"]["raw_weighted_direction_agreement"])
 
+    def test_boolean_levels_and_age_are_rejected_or_filtered(self):
+        detector = OrderBookImbalanceDetector()
+        invalid_book = sample_book(
+            bids=[[True, 99.0], [100.0, True], [99.9, 1.0]],
+            asks=[[100.1, 1.0], [100.2, 1.0]],
+        )
+        result = detector.analyze(invalid_book, levels=10)
+        self.assertEqual(result["metrics"]["best_bid"], 99.9)
+        self.assertEqual(result["metrics"]["raw_bid_quantity"], 1.0)
+
+        with self.assertRaisesRegex(ValueError, "age"):
+            detector.analyze(sample_book(age_seconds=True))
+        with self.assertRaisesRegex(ValueError, "level count"):
+            detector.analyze(sample_book(), levels=True)
+
     def test_invalid_levels_are_ignored_safely(self):
         detector = OrderBookImbalanceDetector()
         book = sample_book(
@@ -128,6 +143,44 @@ class ImbalanceDetectorTests(unittest.TestCase):
         self.assertEqual(other_symbol["persistence"]["samples"], 1)
         self.assertEqual(other_exchange["persistence"]["samples"], 1)
         self.assertEqual(detector.status()["tracked_streams"], 3)
+
+    def test_alternating_pressure_noise_is_visible_in_persistence(self):
+        detector = OrderBookImbalanceDetector()
+        buy_book = sample_book()
+        sell_book = sample_book(
+            bids=[[100.0, 1.0], [99.9, 1.0]],
+            asks=[[100.1, 10.0], [100.2, 8.0]],
+        )
+        results = [detector.analyze(book, levels=2) for book in (buy_book, sell_book, buy_book, sell_book)]
+        self.assertEqual(
+            [result["classification"] for result in results],
+            ["BUY_PRESSURE", "SELL_PRESSURE", "BUY_PRESSURE", "SELL_PRESSURE"],
+        )
+        latest = results[-1]
+        self.assertEqual(latest["persistence"]["samples"], 4)
+        self.assertEqual(latest["persistence"]["sell_pressure_samples"], 2)
+        self.assertAlmostEqual(latest["persistence"]["current_pressure_persistence"], 0.5)
+        # Instantaneous classification still follows the latest sample. The
+        # quality heuristic remains high in this alternating/noisy pattern;
+        # this is a known limitation, not a signal-smoothing guarantee.
+        self.assertEqual(latest["quality"]["score"], 85.0)
+
+    def test_absolute_thin_volume_is_not_depth_quality_penalized(self):
+        thick_book = sample_book()
+        thin_book = sample_book(
+            bids=[[100.0, 1e-9], [99.9, 8e-10], [99.8, 6e-10]],
+            asks=[[100.1, 2e-10], [100.2, 2e-10], [100.3, 1e-10]],
+        )
+        thick = OrderBookImbalanceDetector().analyze(thick_book, levels=3)
+        thin = OrderBookImbalanceDetector().analyze(thin_book, levels=3)
+        self.assertAlmostEqual(thick["metrics"]["weighted_imbalance"], thin["metrics"]["weighted_imbalance"])
+        self.assertEqual(thick["classification"], thin["classification"])
+        self.assertEqual(thick["quality"]["score"], thin["quality"]["score"])
+        self.assertLess(thin["metrics"]["raw_bid_quantity"], 1e-6)
+        self.assertEqual(thin["quality"]["depth_coverage"], 1.0)
+        # The detector does not compare absolute liquidity against recent
+        # volume/notional; this characterization records that limitation.
+        self.assertEqual(thin["quality"]["score"], 100.0)
 
     def test_threshold_is_clamped_to_supported_range(self):
         self.assertEqual(OrderBookImbalanceDetector(pressure_threshold=-10).pressure_threshold, 0.01)
