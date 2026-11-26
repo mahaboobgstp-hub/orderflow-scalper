@@ -13,6 +13,7 @@ from app.market_data.backend_stream import BinanceOrderBookStream
 from app.market_data.unified_engine import UnifiedMarketDataEngine
 from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BybitPublicAdapter, DeltaPublicAdapter
 from app.services.coin_scanner import CoinMarketScanner
+from app.services.opportunity_ranker import OpportunityRanker
 from app.services.imbalance_detector import OrderBookImbalanceDetector
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 from app.services.liquidity_zone_detector import LiquidityZoneDetector
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
     app.state.coin_scanner=CoinMarketScanner()
+    app.state.opportunity_ranker=OpportunityRanker()
     app.state.imbalance_detector=OrderBookImbalanceDetector()
     app.state.absorption_detector=AbsorptionLiquidityDetector()
     app.state.liquidity_zone_detector=LiquidityZoneDetector()
@@ -338,6 +340,40 @@ async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bo
         return await app.state.coin_scanner.scan(limit=limit,include_rejected=include_rejected)
     except Exception as exc:
         raise HTTPException(status_code=502,detail=f"Coin scan failed: {exc}")
+
+@app.get("/api/scanner/opportunities")
+async def scan_opportunities(
+    limit:int=Query(default=20,ge=1,le=100),
+    min_score:float=Query(default=0,ge=0,le=100),
+    min_volume_usdt:float=Query(default=0,ge=0),
+    max_spread_pct:float=Query(default=100,ge=0),
+    include_filtered:bool=False,
+):
+    """Read-only Phase C scan with transparent ranking and quality filters."""
+    try:
+        raw=await app.state.coin_scanner.scan(limit=100,include_rejected=True)
+        ranked=app.state.opportunity_ranker.rank(raw.get("markets",[]))
+        markets=ranked.get("markets",[])
+        filtered=[]
+        for row in markets:
+            if row.get("phase_c_score",0)<min_score: continue
+            if row.get("quote_volume_24h",0)<min_volume_usdt: continue
+            if row.get("spread_pct",0)>max_spread_pct: continue
+            if not include_filtered and row.get("phase_c_review_status")!="REVIEW_CANDIDATE": continue
+            filtered.append(row)
+        filtered=filtered[:limit]
+        return {
+            **ranked,
+            "markets":filtered,
+            "filters":{"limit":limit,"min_score":min_score,"min_volume_usdt":min_volume_usdt,
+                "max_spread_pct":max_spread_pct,"include_filtered":include_filtered},
+            "source_scan":{"scanned_at_ms":raw.get("scanned_at_ms"),
+                "total_symbols_scanned":raw.get("total_symbols_scanned"),
+                "candidate_count":raw.get("candidate_count")},
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail=f"Opportunity scan failed: {exc}")
+
 @app.get("/api/demo/account")
 async def demo_account():
     try: return await BinanceDemoClient().get_account()
@@ -437,8 +473,7 @@ app.include_router(operator_control_router)
 async def infrastructure_status():
     database_status = await database.status(refresh=True)
     diagnostics = app.state.monitoring_service.diagnostics(app)
-    return {
-        "service": "orderflow-scalper-api",
+    return {        "service": "orderflow-scalper-api",
         "status": "ready" if diagnostics["status"] == "ok" and database_status.get("connected") else "degraded",
         "core_components_ready": diagnostics["status"] == "ok",
         "database_required_for_testing": True,
