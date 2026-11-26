@@ -75,7 +75,7 @@ class AutonomousPaperRuntime:
         account=self.paper_engine.account()
         equity=float(account.get("equity",0)); risk_basis=float(account.get("initial_equity",equity)); positions=len(self.paper_engine.positions); cfg=self.config
         risk=self.risk_engine.evaluate_runtime_gate(account_equity=equity,closed_trades=self.paper_engine.closed_trades,
-            orders=self.paper_engine.orders,positions=self.paper_engine.positions,symbol=symbol,config=cfg,synchronized_book=bool(book),risk_limit_basis_equity=risk_basis)
+            orders=self.paper_engine.orders,positions=self.paper_engine.positions,symbol=symbol,config=cfg,synchronized_book=bool(book),risk_limit_basis_equity=risk_basis,fee_rate=self.paper_engine.fee_rate)
         risk_blockers=risk["blockers"]
         risk["exchange"]=exchange
         result=self.decision_engine.evaluate(symbol,inputs,risk)
@@ -98,7 +98,7 @@ class AutonomousPaperRuntime:
                 qty=float(sizing["position_quantity"])
                 post_sizing_gate=self.risk_engine.evaluate_runtime_gate(account_equity=equity,closed_trades=self.paper_engine.closed_trades,
                     orders=self.paper_engine.orders,positions=self.paper_engine.positions,symbol=symbol,config=cfg,synchronized_book=bool(book),
-                    proposed_trade_risk_cash=abs(price-stop_price)*qty+qty*(price+stop_price)*self.paper_engine.fee_rate,proposed_notional=price*qty,proposed_leverage=float(sizing.get("leverage",1)),risk_limit_basis_equity=risk_basis)
+                    proposed_trade_risk_cash=abs(price-stop_price)*qty+qty*(price+stop_price)*self.paper_engine.fee_rate,proposed_notional=price*qty,proposed_leverage=float(sizing.get("leverage",1)),risk_limit_basis_equity=risk_basis,fee_rate=self.paper_engine.fee_rate)
                 result["post_sizing_risk_gate"]=post_sizing_gate
                 if not post_sizing_gate["allowed"]:
                     result["paper_execution"]={"status":"REJECTED","reason":"Post-sizing risk gate rejected the entry","blockers":post_sizing_gate["blockers"],"sizing":sizing}
