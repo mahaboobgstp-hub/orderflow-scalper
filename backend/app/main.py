@@ -230,7 +230,7 @@ def _feed_health_counts(exchange_connections, unified_market_data):
     healthy_feed_count = 0
 
     for adapter in exchange_connections.get("exchanges", []):
-        if not adapter.get("connected"):
+        if adapter.get("enabled", True) is False or not adapter.get("connected"):
             continue
         age = adapter.get("last_message_age_seconds")
         if age is None:
