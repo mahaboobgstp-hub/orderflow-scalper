@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
+        run: pip install -r backend/requirements.txt pytest
       - name: Compile backend Python files
         run: python -m compileall -q backend/app backend/tests
       - name: Run repository contract tests
