@@ -186,12 +186,13 @@ async def test_phase_e_risk_status_reports_live_paper_metrics():
     from app.services import operator_control
     old_risk=getattr(app.state,"risk_management_engine",None); old_paper=getattr(app.state,"paper_trading_engine",None)
     old_config=dict(operator_control.state["config"])
+    monkeypatch.setenv("CONTROL_API_TOKEN","test-control-token")
     risk=RiskManagementEngine(); risk.set_kill_switch(True,"telemetry test halt")
     paper=PaperTradingEngine(10000)
     paper.closed_trades.append({"net_pnl":-200,"closed_at_ms":int(time.time()*1000)})
     app.state.risk_management_engine=risk; app.state.paper_trading_engine=paper
     try:
-        result=await risk_engine_status()
+        result=await risk_engine_status("test-control-token")
         gate=result["live_portfolio_gate"]
         assert gate["daily_realized_loss"]>=200
         assert "DAILY_LOSS_LIMIT_REACHED" in gate["blockers"]
