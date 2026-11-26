@@ -35,7 +35,13 @@ class BinanceOrderBookStream:
         self.symbol = symbol.upper()
         self.stream_symbol = symbol.lower()
         self.snapshot_limit = snapshot_limit
-        self.stale_after_seconds = max(0.1, float(stale_after_seconds))
+        try:
+            stale_cutoff = float(stale_after_seconds)
+        except (TypeError, ValueError, OverflowError):
+            stale_cutoff = 3.0
+        if isinstance(stale_after_seconds, bool) or not math.isfinite(stale_cutoff) or stale_cutoff <= 0:
+            stale_cutoff = 3.0
+        self.stale_after_seconds = max(0.1, stale_cutoff)
 
         self.bids: dict[float, float] = {}
         self.asks: dict[float, float] = {}
