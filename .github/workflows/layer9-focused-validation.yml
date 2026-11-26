@@ -6,6 +6,7 @@ on:
       - "backend/app/services/nine_layer_decision_engine.py"
       - "backend/app/services/risk_management.py"
       - "backend/tests/test_layer9_risk_execution_gate.py"
+      - "backend/tests/test_phase10_risk_management.py"
       - ".github/workflows/layer9-focused-validation.yml"
   pull_request:
     paths:
