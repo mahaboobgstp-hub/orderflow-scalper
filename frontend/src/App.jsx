@@ -223,10 +223,11 @@ export default function App() {
     const books=unified.books||{};
     const primary=payload.primary_binance_demo_stream||{};
     const primaryStale=primary.stale??(primary.last_event_age_seconds==null||primary.last_event_age_seconds>(primary.stale_after_seconds??3));
-    const healthy=(x)=>x.connected && x.last_message_age_seconds!=null && x.last_message_age_seconds<= (unified.stale_after_seconds||3);
+    const freshMessages=(x)=>x.connected && x.last_message_age_seconds!=null && x.last_message_age_seconds<= (unified.stale_after_seconds||3);
     return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
       <div className="stats-grid">
-        {stat("Connected Feeds",summary.healthy_feed_count??0,"Fresh messages within stale threshold")}
+        {stat("Connected Feeds",summary.fresh_message_feed_count??summary.healthy_feed_count??0,"Fresh messages within stale threshold")}
+        {stat("Healthy Feeds",summary.healthy_feed_count??0,"Fresh synchronized book per feed")}
         {stat("Synchronized Books",summary.synchronized_book_count??0,"Fresh synchronized books")}
         {stat("Unified Books",summary.unified_book_count??0,"Book entries currently tracked")}
         {stat("Feed Errors",summary.feed_errors??0,"Adapters reporting errors")}
@@ -251,7 +252,7 @@ export default function App() {
       </div>
       <div className="panel"><div className="panel-title"><h2>Exchange Feed Connections</h2></div>
         {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=><div className="event-row full" key={x.exchange}>
-          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+(healthy(x)?"paper":"")}>{x.connected?"CONNECTED":"DISCONNECTED"}</span>
+          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+(freshMessages(x)?"paper":"")}>{x.connected?"CONNECTED":"DISCONNECTED"}</span>
           <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??0}</small>
           <small>Error: {x.last_error||"None"}</small>
         </div>)}
