@@ -107,12 +107,19 @@ class NineLayerDecisionEngine:
         # L6: strict spread/liquidity gate and a bounded score.
         market=inputs.get("market",{}) if isinstance(inputs.get("market"),dict) else {}
         spread=_finite(market.get("spread_pct")); qv=_finite(market.get("quote_volume_24h"))
-        spread_max=_finite(self.config.get("max_spread_pct")) or 0.12
-        min_qv=_finite(self.config.get("min_24h_volume_usd")) or 1_000_000
-        liquidity_ok=spread is not None and qv is not None and spread<=spread_max and qv>=min_qv
-        l6score=60 if liquidity_ok else -100 if spread is not None and spread>spread_max else -60 if qv is not None and qv<min_qv else None
+        configured_spread_max=_finite(self.config.get("max_spread_pct"))
+        spread_max=configured_spread_max if configured_spread_max is not None and configured_spread_max>0 else 0.12
+        configured_min_qv=_finite(self.config.get("min_24h_volume_usd"))
+        min_qv=configured_min_qv if configured_min_qv is not None and configured_min_qv>0 else 1_000_000
+        spread_valid=spread is not None and spread>=0
+        volume_valid=qv is not None and qv>=0
+        liquidity_ok=spread_valid and volume_valid and spread<=spread_max and qv>=min_qv
+        # Fail closed: any missing/invalid input blocks Layer 6, rather than
+        # letting the overall engine accidentally proceed with a neutral gate.
+        l6score=60 if liquidity_ok else -100 if spread_valid and spread>spread_max else -60 if volume_valid and qv<min_qv else -80 if not spread_valid or not volume_valid else None
+        l6direction="NEUTRAL" if liquidity_ok else "BLOCK"
         put("spread_liquidity",l6score,100 if liquidity_ok else 80 if l6score is not None else 0,
-            ["Spread and 24-hour volume thresholds"],{"spread_pct":spread,"quote_volume_24h":qv,"spread_limit_pct":spread_max,"volume_minimum":min_qv,"passed":liquidity_ok},available=l6score is not None,direction="NEUTRAL" if liquidity_ok else "BLOCK")
+            ["Spread and 24-hour volume thresholds; missing/invalid inputs fail closed"],{"spread_pct":spread,"quote_volume_24h":qv,"spread_limit_pct":spread_max,"volume_minimum":min_qv,"passed":liquidity_ok,"spread_valid":spread_valid,"volume_valid":volume_valid},available=l6score is not None,direction=l6direction)
         # L7: scanner 24-hour range is only a proxy; label it explicitly.
         range_pct=_finite(market.get("range_24h_pct"))
         price_change=_finite(market.get("price_change_24h_pct"))
