@@ -212,6 +212,22 @@ async def get_order_book():
     book=await app.state.market_stream.get_order_book()
     if book is None: raise HTTPException(status_code=503,detail="Order book is not synchronized yet.")
     return {"symbol":"BTCUSDT","order_book":book}
+@app.get("/api/market-data/observability")
+async def market_data_observability():
+    """Read-only consolidated feed diagnostics for the monitoring UI."""
+    unified=app.state.unified_market_data.get_status()
+    primary=await app.state.market_stream.get_status()
+    exchanges=await app.state.exchange_manager.status()
+    return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
+        "live_execution_enabled":False,"primary_binance_demo_stream":primary,
+        "unified_market_data":unified,"exchange_connections":exchanges,
+        "summary":{"exchange_adapter_count":len(exchanges.get("exchanges",[])),
+          "unified_book_count":len(unified.get("books",{})),
+          "synchronized_book_count":sum(1 for b in unified.get("books",{}).values() if b.get("synchronized") and not b.get("stale")),
+          "healthy_feed_count":sum(1 for e in exchanges.get("exchanges",[]) if e.get("connected") and e.get("last_message_age_seconds") is not None and e.get("last_message_age_seconds")<=unified.get("stale_after_seconds",3)),
+          "feed_errors":sum(1 for e in exchanges.get("exchanges",[]) if e.get("last_error")),
+          "safety":"PUBLIC_FEEDS_ONLY; REAL_EXCHANGE_ORDERS_DISABLED"}}
+
 @app.get("/api/market-data/unified/status")
 async def unified_status(): return app.state.unified_market_data.get_status()
 @app.get("/api/market-data/unified/book/{exchange}/{symbol}")
