@@ -49,7 +49,7 @@ class FakeConnection:
 
 
 class Layer1SnapshotBridgeIntegrationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_futures_snapshot_bridge_ignores_pu_and_applies_book(selfself):
+    async def test_futures_snapshot_bridge_ignores_pu_and_applies_book(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         ws = FakeWebsocket(
             [depth_event(100, 101, pu=98, bids=[["100.0", "2.5"]])],
@@ -67,7 +67,7 @@ class Layer1SnapshotBridgeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream.bids[100.0], 2.5)
         self.assertEqual(snapshot_fetch.await_count, 1)
 
-    async def test_closed_stream_before_snapshot_bridge_raises_not_hangs(selfself):
+    async def test_closed_stream_before_snapshot_bridge_raises_not_hangs(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         ws = FakeWebsocket([])
         snapshot_fetch = AsyncMock(return_value=snapshot(100))
@@ -81,7 +81,7 @@ class Layer1SnapshotBridgeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stream.synchronized)
         self.assertEqual(snapshot_fetch.await_count, 1)
 
-    async def test_malformed_bridge_update_does_not_mutate_snapshot(selfself):
+    async def test_malformed_bridge_update_does_not_mutate_snapshot(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         ws = FakeWebsocket(
             [depth_event(100, 101, pu=98, bids=[["bad-price", "2.0"]])],
@@ -99,7 +99,7 @@ class Layer1SnapshotBridgeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream.bids[100.0], 1.0)
         self.assertEqual(stream.sequence_gap_count, 1)
 
-    async def test_initial_gap_recovers_with_fresh_snapshot(selfself):
+    async def test_initial_gap_recovers_with_fresh_snapshot(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         original_sleep = asyncio.sleep
 
@@ -128,7 +128,7 @@ class Layer1SnapshotBridgeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stream.synchronized)
         self.assertEqual(stream.sequence_gap_count, 0)
 
-    async def test_closed_stream_after_sync_reconnects_with_fresh_snapshot(selfself):
+    async def test_closed_stream_after_sync_reconnects_with_fresh_snapshot(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         original_sleep = asyncio.sleep
 
