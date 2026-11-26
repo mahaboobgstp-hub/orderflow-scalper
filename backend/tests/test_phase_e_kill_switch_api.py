@@ -12,7 +12,7 @@ async def test_phase_e_emergency_halt_blocks_manual_paper_order():
     app.state.risk_management_engine=risk
     app.state.paper_trading_engine=PaperTradingEngine(10000)
     try:
-        request=PaperOrderRequest(symbol="BTCUSDT",side="long",quantity=0.01,price=50000)
+        request=PaperOrderRequest(symbol="BTCUSDT",side="long",quantity=0.01,price=50000,stop_loss_price=49000)
         with pytest.raises(HTTPException) as exc:
             await paper_submit_order(request)
         assert exc.value.status_code==423
