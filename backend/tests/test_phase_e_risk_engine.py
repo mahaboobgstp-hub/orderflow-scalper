@@ -42,7 +42,7 @@ def test_phase_e_position_without_valid_stop_is_rejected():
     pos={"ADAUSDT":{"entry_price":1.0,"quantity":1000,"stop_loss_price":None}}
     result=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions=pos,symbol="BTCUSDT",config={"cooldown_seconds":0},now_ms=DAY_MS)
     assert result["open_positions_missing_stop"]==1
-    assert "OPEN_POSITION_WITHOUT_VALID_STOP_LOSS" in result["blockers"]"
+    assert "OPEN_POSITION_WITHOUT_VALID_STOP_LOSS" in result["blockers"]
 
 def test_phase_e_manual_order_actual_risk_and_exposure_limits():
     e=RiskManagementEngine()
