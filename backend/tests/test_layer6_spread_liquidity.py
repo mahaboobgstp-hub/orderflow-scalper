@@ -22,7 +22,7 @@ def test_layer6_spread_above_limit_blocks():
     assert r["decision"]=="REJECT"
 
 def test_layer6_volume_below_minimum_blocks():
-    r=eval_market({"spread_pct":0.08,"quote_volume_24h":999_999})
+    r=eval_market({"spread_pct":0.08,"quote_volume_24h":4_999_999})
     assert l6(r)["direction"]=="BLOCK"
     assert l6(r)["score"]==-60
     assert r["decision"]=="REJECT"
