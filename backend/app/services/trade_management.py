@@ -125,7 +125,7 @@ class TradeManagementEngine:
         if self.config.max_hold_seconds is not None and now_seconds is not None and now_seconds-opened >= self.config.max_hold_seconds and not trend_extension:
             exit_reason = exit_reason or "MAX_HOLD_TIME"
         return ManagementResult(
-            symbol=symbol, side=side, mark_price=mark,
+            symbol=symbol, side=side, mark_price=mark, best_price=round(best, 12),
             favorable_move_pct=round(favorable, 8), adverse_move_pct=round(adverse, 8),
             initial_stop_price=round(initial_stop, 12), stop_price=round(stop, 12),
             break_even_active=break_even, trailing_stop_active=favorable_best > 0,
