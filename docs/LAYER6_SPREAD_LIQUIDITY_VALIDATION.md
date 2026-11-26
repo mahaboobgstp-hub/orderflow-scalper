@@ -6,7 +6,7 @@ Layer 6 evaluates whether a market is sufficiently tradable based on the current
 ## Inputs and units
 - `spread_pct`: percentage points, consistent with Phase 4 CoinMarketScanner output.
 - `quote_volume_24h`: quote currency volume, expected USD/USDT-denominated value for the scanner's USDT futures universe.
-- Defaults: maximum spread 0.12%; minimum 24-hour quote volume 1,000,000.
+- Defaults: maximum spread 0.12%; minimum 24-hour quote volume 5,000,000.
 - Both thresholds are configurable.
 
 ## Behavior
