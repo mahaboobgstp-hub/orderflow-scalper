@@ -79,3 +79,11 @@ def test_phase_e_invalid_direction_stop_loss_is_treated_as_unprotected():
     result=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions=positions,symbol="BTCUSDT",config={"cooldown_seconds":0},now_ms=DAY_MS)
     assert result["open_positions_missing_stop"]==1
     assert "OPEN_POSITION_WITHOUT_VALID_STOP_LOSS" in result["blockers"]
+
+def test_phase_e_single_position_notional_limit_is_enforced():
+    e=RiskManagementEngine()
+    result=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions={},symbol="BTCUSDT",
+        config={"risk_per_trade_pct":1,"max_position_notional_pct":10,"max_total_exposure_pct":25,"max_total_open_risk_pct":3,"cooldown_seconds":0},
+        proposed_trade_risk_cash=20,proposed_notional=2000,proposed_leverage=1,now_ms=DAY_MS)
+    assert "PROPOSED_POSITION_NOTIONAL_EXCEEDS_SINGLE_POSITION_LIMIT" in result["blockers"]
+    assert "TOTAL_EXPOSURE_LIMIT_WOULD_BE_EXCEEDED" not in result["blockers"]
