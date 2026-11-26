@@ -10,6 +10,8 @@ on:
       - "backend/tests/test_combined_nine_layer_integration.py"
       - "backend/tests/test_controlled_paper_session.py"
       - "backend/tests/test_autonomous_paper_runtime_integration.py"
+      - "backend/tests/test_paper_persistence.py"
+      - "docs/COMBINED_NINE_LAYER_PAPER_VALIDATION.md"
       - ".github/workflows/combined-paper-validation.yml"
   pull_request:
     paths:
