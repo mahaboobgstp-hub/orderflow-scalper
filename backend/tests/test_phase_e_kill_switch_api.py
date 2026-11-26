@@ -111,3 +111,47 @@ async def test_phase_e_emergency_halt_keeps_runtime_running_for_position_managem
         operator_control.state["engine_state"]=old_engine_state
         operator_control.state["events"]=old_events
         operator_control.state["updated_at"]=old_updated
+
+@pytest.mark.anyio
+async def test_phase_e_kill_switch_reset_persists_before_clearing(monkeypatch):
+    from app.services import operator_control
+    old_runtime=operator_control.runtime; old_state=operator_control.state["engine_state"]
+    old_events=list(operator_control.state["events"]); old_updated=operator_control.state["updated_at"]
+    risk=RiskManagementEngine(); risk.set_kill_switch(True,"persisted test halt")
+    class RepoStub:
+        def __init__(self): self.calls=[]
+        async def engine_state(self,**kwargs): self.calls.append(kwargs); return True
+    class RuntimeStub:
+        def __init__(self): self.risk_engine=risk; self.repository=RepoStub()
+        def status(self): return {"state":"STOPPED"}
+    stub=RuntimeStub(); operator_control.set_runtime(stub)
+    monkeypatch.setenv("CONTROL_API_TOKEN","test-control-token")
+    try:
+        response=await operator_control.reset_risk_kill_switch("test-control-token")
+        assert response["reset"] is True and response["persisted"] is True
+        assert risk.kill_switch_status()["active"] is False
+        assert stub.repository.calls[-1]["state"]["risk_kill_switch"]["active"] is False
+    finally:
+        operator_control.set_runtime(old_runtime); operator_control.state["engine_state"]=old_state
+        operator_control.state["events"]=old_events; operator_control.state["updated_at"]=old_updated
+
+@pytest.mark.anyio
+async def test_phase_e_kill_switch_reset_fails_closed_on_persistence_failure(monkeypatch):
+    from app.services import operator_control
+    old_runtime=operator_control.runtime; old_state=operator_control.state["engine_state"]
+    old_events=list(operator_control.state["events"]); old_updated=operator_control.state["updated_at"]
+    risk=RiskManagementEngine(); risk.set_kill_switch(True,"persist failure test")
+    class RepoStub:
+        async def engine_state(self,**kwargs): return False
+    class RuntimeStub:
+        def __init__(self): self.risk_engine=risk; self.repository=RepoStub()
+        def status(self): return {"state":"STOPPED"}
+    operator_control.set_runtime(RuntimeStub())
+    monkeypatch.setenv("CONTROL_API_TOKEN","test-control-token")
+    try:
+        with pytest.raises(HTTPException) as exc: await operator_control.reset_risk_kill_switch("test-control-token")
+        assert exc.value.status_code==503
+        assert risk.kill_switch_status()["active"] is True
+    finally:
+        operator_control.set_runtime(old_runtime); operator_control.state["engine_state"]=old_state
+        operator_control.state["events"]=old_events; operator_control.state["updated_at"]=old_updated
