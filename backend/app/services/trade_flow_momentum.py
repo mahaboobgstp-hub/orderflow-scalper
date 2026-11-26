@@ -5,9 +5,17 @@ from typing import Any
 
 class TradeFlowMomentumDetector:
     def __init__(self,max_book_age_seconds:float=3.0,min_trades:int=8,history_size:int=30):
-        self.max_book_age_seconds=max(.1,float(max_book_age_seconds))
-        self.min_trades=max(3,min(int(min_trades),500))
-        self.history_size=max(3,min(int(history_size),100))
+        try:
+            age_limit=float(max_book_age_seconds)
+            minimum=int(min_trades)
+            history=int(history_size)
+        except (TypeError,ValueError,OverflowError):
+            raise ValueError("Invalid detector configuration.") from None
+        if not math.isfinite(age_limit):
+            raise ValueError("max_book_age_seconds must be finite.")
+        self.max_book_age_seconds=max(.1,age_limit)
+        self.min_trades=max(3,min(minimum,500))
+        self.history_size=max(3,min(history,100))
         self._history:dict[str,list[dict[str,Any]]]={}
 
     @staticmethod
@@ -19,6 +27,15 @@ class TradeFlowMomentumDetector:
 
     def analyze(self,book:dict[str,Any],trades:list[dict[str,Any]],lookback_seconds:float=15.0)->dict[str,Any]:
         if not isinstance(book,dict): raise ValueError("Normalized order book is required.")
+        try:
+            lookback=float(lookback_seconds)
+        except (TypeError,ValueError,OverflowError):
+            raise ValueError("Invalid lookback duration.") from None
+        if not math.isfinite(lookback) or lookback<=0:
+            raise ValueError("Lookback duration must be positive and finite.")
+        lookback=min(lookback,120.0)
+        if not isinstance(trades,(list,tuple)):
+            trades=[]
         exchange=str(book.get("exchange","")).lower(); symbol=str(book.get("symbol","")).upper()
         if not exchange or not symbol: raise ValueError("Exchange and symbol required.")
         if not book.get("synchronized",False): raise ValueError("Unsynchronized book rejected.")
@@ -36,15 +53,21 @@ class TradeFlowMomentumDetector:
         best_bid=max(p for p,q in bids);best_ask=min(p for p,q in asks)
         if best_bid>=best_ask: raise ValueError("Crossed/locked book rejected.")
         mid=(best_bid+best_ask)/2
-        now=int(time.time()*1000); cutoff=now-max(1,min(float(lookback_seconds),120))*1000
+        now=int(time.time()*1000); cutoff=now-lookback*1000
         normalized=[]
         for tr in trades or []:
             if not isinstance(tr,dict):continue
             p=self._finite(tr.get("price"));q=self._finite(tr.get("quantity"))
-            ts=self._finite(tr.get("received_timestamp_ms") or tr.get("exchange_timestamp_ms"))
+            raw_ts=tr.get("received_timestamp_ms")
+            if raw_ts is None: raw_ts=tr.get("exchange_timestamp_ms")
+            ts=self._finite(raw_ts)
             side=str(tr.get("side","")).lower()
             if p is not None and q is not None and ts is not None and p>0 and q>0 and side in ("buy","sell") and cutoff<=ts<=now+5000:
-                normalized.append({"price":p,"quantity":q,"side":side,"ts":int(ts)})
+                try:
+                    ts_int=int(ts)
+                except (ValueError,TypeError,OverflowError):
+                    continue
+                normalized.append({"price":p,"quantity":q,"side":side,"ts":ts_int})
         normalized.sort(key=lambda x:x["ts"])
         buys=[t for t in normalized if t["side"]=="buy"];sells=[t for t in normalized if t["side"]=="sell"]
         buy_qty=sum(t["quantity"] for t in buys);sell_qty=sum(t["quantity"] for t in sells);total=buy_qty+sell_qty
@@ -53,7 +76,7 @@ class TradeFlowMomentumDetector:
         buy_notional=sum(t["price"]*t["quantity"] for t in buys);sell_notional=sum(t["price"]*t["quantity"] for t in sells)
         buy_vwap=buy_notional/buy_qty if buy_qty else None;sell_vwap=sell_notional/sell_qty if sell_qty else None
         # Short time slices from actual received timestamps; compare early to late activity.
-        buckets=max(2,min(6,int(lookback_seconds)//3 or 2));span=max(1.0,float(lookback_seconds))/buckets
+        buckets=max(2,min(6,int(lookback)//3 or 2));span=max(1.0,lookback)/buckets
         volume=[0.0]*buckets;count=[0]*buckets;delta_b=[0.0]*buckets
         for t in normalized:
             idx=min(buckets-1,max(0,int((t["ts"]-cutoff)/1000/span)))
@@ -86,7 +109,7 @@ class TradeFlowMomentumDetector:
         prior=hist[-2] if len(hist)>1 else None
         delta_acceleration=(delta-prior["delta"]) if prior else None
         return {"engine":"phase8_trade_flow_momentum","exchange":exchange,"symbol":symbol,"timestamp_ms":now,
-            "lookback_seconds":lookback_seconds,"trade_count":len(normalized),
+            "lookback_seconds":lookback,"trade_count":len(normalized),
             "flow_classification":flow,"momentum_activity":activity,"flow_strength_score":score,
             "metrics":{"buy_quantity":round(buy_qty,8),"sell_quantity":round(sell_qty,8),"total_quantity":round(total,8),
             "net_delta":round(delta,8),"delta_ratio":round(ratio,6),"buy_trade_count":len(buys),"sell_trade_count":len(sells),
