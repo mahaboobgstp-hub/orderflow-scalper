@@ -1,11 +1,11 @@
 # Layer 1 — Order Book Imbalance / Synchronization Validation
 
-**Current status: validation in progress.** This document tracks software-only synchronization and detector testing. Certification is not a claim of predictive edge or profitability.
+**Status: focused software certification earned (2026-11-26).** CI run 45750114061 passed 34 tests and 5 subtests. Certification is software-only; it is not a claim of live-feed reliability, predictive edge, or profitability.
 
-## Synchronization fix under test
+## Synchronization fix certified
 The Binance futures diff-depth snapshot bridge now requires the first accepted event to span the next update ID after the snapshot (`snapshot lastUpdateId + 1`). Events already covered by the snapshot are discarded rather than marked synchronized.
 
-## Test coverage
+## Passed test coverage
 - Snapshot bridge: events fully covered by snapshot rejected; bridge/next-sequence accepted; future gap rejected.
 - Snapshot state: missing update ID rejects bridge.
 - Update application: bid/ask update, zero-quantity deletion, overlapping events, old events ignored.
@@ -13,7 +13,7 @@ The Binance futures diff-depth snapshot bridge now requires the first accepted e
 - Invalid update payloads surface validation errors rather than silently mutating the book.
 - Existing detector suite validates fresh/synchronized/non-crossed books, imbalance scoring, pressure persistence, invalid levels, and classification.
 
-## Scope / remaining
+## Certification boundary / remaining
 - Unit tests are deterministic and offline.
 - Network/reconnect, snapshot retry timing, live exchange sequence behavior, latency, data completeness, and spoofing resistance require controlled runtime validation and are not certified by these tests.
 - No live order placement.
