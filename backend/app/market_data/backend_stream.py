@@ -408,7 +408,17 @@ class BinanceOrderBookStream:
         event_age = max(0.0, now - self.last_event_at) if self.last_event_at is not None else None
         sync_age = max(0.0, now - self.last_sync_at) if self.last_sync_at is not None else None
         recovery_age = max(0.0, now - self.last_recovery_at) if self.last_recovery_at is not None else None
-        stale = event_age is None or event_age > self.stale_after_seconds
+        book_age = (
+            max(0.0, now - self.last_book_update_at)
+            if self.last_book_update_at is not None
+            else None
+        )
+        stale = (
+            not self.connected
+            or not self.synchronized
+            or book_age is None
+            or book_age > self.stale_after_seconds
+        )
         synchronized_duration = (
             max(0.0, now - self.synchronized_since)
             if self.synchronized and self.synchronized_since is not None
@@ -432,6 +442,7 @@ class BinanceOrderBookStream:
             "connected_duration_seconds": round(connected_duration, 3) if connected_duration is not None else None,
             "synchronized_duration_seconds": round(synchronized_duration, 3) if synchronized_duration is not None else None,
             "last_event_age_seconds": round(event_age, 3) if event_age is not None else None,
+            "last_book_update_age_seconds": round(book_age, 3) if book_age is not None else None,
             "last_sync_age_seconds": round(sync_age, 3) if sync_age is not None else None,
             "last_disconnect_at": self.last_disconnect_at,
             "last_disconnect_reason": self.last_disconnect_reason,
