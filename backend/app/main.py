@@ -405,7 +405,7 @@ async def paper_submit_order(request:PaperOrderRequest):
     notional=request.price*request.quantity
     gate=risk_engine.evaluate_runtime_gate(account_equity=paper_engine.account()["equity"],closed_trades=paper_engine.closed_trades,
         orders=paper_engine.orders,positions=paper_engine.positions,symbol=request.symbol.upper(),config=config,
-        synchronized_book=True,proposed_trade_risk_cash=actual_risk,proposed_notional=notional)
+        synchronized_book=True,proposed_trade_risk_cash=actual_risk,proposed_notional=notional,proposed_leverage=request.leverage)
     if not gate["allowed"]:
         raise HTTPException(status_code=409,detail={"message":"Phase E risk gate rejected paper entry.","blockers":gate["blockers"],"risk":gate})
     try: return paper_engine.submit(request.model_dump())
