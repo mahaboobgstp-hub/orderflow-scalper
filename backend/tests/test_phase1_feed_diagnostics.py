@@ -279,5 +279,39 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["fresh_message_feed_count"], 2)
         self.assertEqual(result["healthy_feed_count"], 1)
 
+    def test_feed_health_summary_rejects_invalid_message_ages(self):
+        adapters = [
+            {"exchange": "negative", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": -0.1},
+            {"exchange": "nan", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": float("nan")},
+            {"exchange": "infinite", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": float("inf")},
+            {"exchange": "malformed", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": "not-a-number"},
+            {"exchange": "valid", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2},
+        ]
+        result = main._feed_health_counts(
+            {"exchanges": adapters},
+            {"stale_after_seconds": 3.0, "books": {
+                "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+            }},
+        )
+        self.assertEqual(result["fresh_message_feed_count"], 1)
+        self.assertEqual(result["healthy_feed_count"], 1)
+
+    def test_invalid_freshness_threshold_falls_back_safely(self):
+        adapters = [
+            {"exchange": "valid", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 2.5},
+            {"exchange": "too_old", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 3.1},
+        ]
+        books = {
+            "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+        }
+        for threshold in (float("nan"), float("inf"), -1.0, "invalid"):
+            with self.subTest(threshold=threshold):
+                result = main._feed_health_counts(
+                    {"exchanges": adapters},
+                    {"stale_after_seconds": threshold, "books": books},
+                )
+                self.assertEqual(result["fresh_message_feed_count"], 1)
+                self.assertEqual(result["healthy_feed_count"], 1)
+
 if __name__ == "__main__":
     unittest.main()
