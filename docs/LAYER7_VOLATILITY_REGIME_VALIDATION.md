@@ -17,3 +17,6 @@ Dummy-provider metadata and candle shape; schema and diagnostics; rising/falling
 
 ## Certification limitations
 Passing software tests do not prove volatility classifications are accurate for live markets or profitable. Thresholds remain heuristics. Live-data, calibration, backtesting and predictive-value testing are not included.
+
+## Nine-layer integration boundary
+The standalone candle classifier is exposed through Phase 9 market-context endpoints and is not directly wired into the live nine-layer decision-engine aggregation. The nine-layer engine's Layer 7 currently uses the scanner's 24-hour range and price-change proxy to score directional context. Focused tests cover this proxy separately. This certification does not claim full candle-classifier integration into the decision runtime.
