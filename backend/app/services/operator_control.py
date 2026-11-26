@@ -152,9 +152,9 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
             if not isinstance(value, str) or value not in enum_choices[key]:
                 raise HTTPException(status_code=422, detail=f"Invalid value for {key}.")
         elif key in {"strategy_enabled", "exchange_enabled"}:
-            current_keys = set(state["config"]["strategy_enabled"])
+            current_keys = set(state["config"][key])
             if not isinstance(value, dict) or set(value) - current_keys or any(not isinstance(v, bool) for v in value.values()):
-                raise HTTPException(status_code=422, detail="strategy_enabled must contain known strategy keys with boolean values.")
+                raise HTTPException(status_code=422, detail=f"{key} must contain known keys with boolean values.")
         elif key.endswith("_enabled"):
             if not isinstance(value, bool):
                 raise HTTPException(status_code=422, detail=f"{key} must be boolean.")
