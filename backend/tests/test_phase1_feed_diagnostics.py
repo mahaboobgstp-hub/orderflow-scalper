@@ -406,6 +406,9 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             {"lastUpdateId": 43, "bids": [["100"]], "asks": [["101", "1"]]},
             {"lastUpdateId": 43, "bids": [["100", "1"]], "asks": []},
             {"lastUpdateId": 43.0, "bids": [["100", "1"]], "asks": [["101", "1"]]},
+            {"lastUpdateId": 43, "bids": [[True, "1"]], "asks": [["101", "1"]]},
+            {"lastUpdateId": 43, "bids": [["100", True]], "asks": [["101", "1"]]},
+            {"lastUpdateId": 43, "bids": [["100", "1", "extra"]], "asks": [["101", "1"]]},
         )
         for snapshot in invalid_snapshots:
             with self.subTest(snapshot=snapshot):
