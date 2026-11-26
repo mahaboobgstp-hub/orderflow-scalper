@@ -35,6 +35,7 @@ Feed Monitor labels connected time separately from synchronized time, shows fres
 The consolidated observability summary separates recent message receipt from fully healthy order books:
 - `fresh_message_feed_count`: enabled/connected feed adapters whose latest message age is within the configured stale threshold. It does not imply book synchronization.
 - `healthy_feed_count`: fresh-message adapters whose matching `exchange:symbol` book is synchronized, fresh, and has no integrity error.
+- Message ages must be finite and nonnegative. Invalid age values are excluded; invalid/nonpositive stale cutoffs fall back to the 3-second default so malformed diagnostics cannot falsely report fresh feeds.
 - `synchronized_book_count`: books marked synchronized and fresh with no integrity error.
 Older UI/API consumers may fall back to the previous `healthy_feed_count` value for the connected-feed tile; new consumers should use `fresh_message_feed_count` for message freshness and `healthy_feed_count` only for full book health.
 
