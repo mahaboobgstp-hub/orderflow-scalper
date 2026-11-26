@@ -10,6 +10,7 @@ Market data only:
 import asyncio
 import json
 import logging
+import math
 import time
 from collections import deque
 from typing import Any
@@ -336,22 +337,43 @@ class BinanceOrderBookStream:
     # Order-book operations
     # --------------------------------------------------
 
+    @staticmethod
+    def _parse_snapshot_side(levels: Any, side_name: str) -> dict[float, float]:
+        """Validate a REST snapshot side before it can enter the local book."""
+        if not isinstance(levels, list):
+            raise ValueError(f"Binance snapshot {side_name} must be a list")
+        parsed: dict[float, float] = {}
+        for row in levels:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                raise ValueError(f"Binance snapshot {side_name} contains a malformed level")
+            try:
+                price, quantity = float(row[0]), float(row[1])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Binance snapshot {side_name} contains nonnumeric levels") from exc
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError(f"Binance snapshot {side_name} contains an invalid price")
+            if not math.isfinite(quantity) or quantity < 0:
+                raise ValueError(f"Binance snapshot {side_name} contains an invalid quantity")
+            if quantity > 0:
+                parsed[price] = quantity
+        return parsed
+
     def _load_snapshot(self, snapshot: dict[str, Any]):
-        self.bids = {
-            float(price): float(quantity)
-            for price, quantity in snapshot.get("bids", [])
-            if float(quantity) > 0
-        }
+        if not isinstance(snapshot, dict):
+            raise ValueError("Binance REST snapshot must be an object")
+        update_id = snapshot.get("lastUpdateId")
+        if isinstance(update_id, bool) or not isinstance(update_id, int) or update_id < 0:
+            raise ValueError("Binance snapshot lastUpdateId must be a nonnegative integer")
+        # Validate both sides before replacing the current state, so a bad snapshot
+        # cannot leave a partially replaced book.
+        bids = self._parse_snapshot_side(snapshot.get("bids", []), "bids")
+        asks = self._parse_snapshot_side(snapshot.get("asks", []), "asks")
+        if not bids or not asks:
+            raise ValueError("Binance snapshot must contain nonempty bid and ask sides")
 
-        self.asks = {
-            float(price): float(quantity)
-            for price, quantity in snapshot.get("asks", [])
-            if float(quantity) > 0
-        }
-
-        self.last_update_id = int(
-            snapshot["lastUpdateId"]
-        )
+        self.bids = bids
+        self.asks = asks
+        self.last_update_id = update_id
 
         self.synchronized = False
         self.snapshot_count += 1
