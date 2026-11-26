@@ -13,13 +13,19 @@ from typing import Any
 class AbsorptionLiquidityDetector:
     def __init__(self, history_size: int = 30, max_book_age_seconds: float = 3.0,
                  min_trades: int = 5, absorption_threshold: float = 0.60):
-        self.history_size=max(3,min(int(history_size),200))
+        if isinstance(history_size, bool) or not isinstance(history_size, int):
+            raise ValueError("history_size must be an integer.")
+        if isinstance(min_trades, bool) or not isinstance(min_trades, int):
+            raise ValueError("min_trades must be an integer.")
+        if isinstance(max_book_age_seconds, bool) or isinstance(absorption_threshold, bool):
+            raise ValueError("Detector configuration must be finite numeric values.")
+        self.history_size=max(3,min(history_size,200))
         max_age=float(max_book_age_seconds)
         threshold=float(absorption_threshold)
         if not math.isfinite(max_age) or not math.isfinite(threshold):
             raise ValueError("Detector configuration must be finite.")
         self.max_book_age_seconds=max(0.1,max_age)
-        self.min_trades=max(3,min(int(min_trades),500))
+        self.min_trades=max(3,min(min_trades,500))
         self.absorption_threshold=max(0.1,min(threshold,0.95))
         self._history: dict[str,deque[dict[str,Any]]]={}
 
@@ -113,10 +119,10 @@ class AbsorptionLiquidityDetector:
         bid5=sorted(bids,key=lambda x:x[0],reverse=True)[:5]; ask5=sorted(asks,key=lambda x:x[0])[:5]
         bid_depth=sum(q for p,q in bid5); ask_depth=sum(q for p,q in ask5)
         key=f"{exchange}:{symbol}"; history=self._history.setdefault(key,deque(maxlen=self.history_size))
-        # Use a strictly earlier timestamp as the baseline. Same-millisecond
-        # API samples are not temporal observations and must not create progress
-        # or liquidity-change signals.
-        prior=next((sample for sample in reversed(history) if sample["timestamp"] < now_ms),None)
+        # A baseline must be strictly earlier and within the requested lookback.
+        # Older observations cannot support current liquidity-change diagnostics.
+        prior=next((sample for sample in reversed(history)
+                    if 0 < now_ms-sample["timestamp"] <= lookback*1000),None)
         history.append({"timestamp":now_ms,"mid":mid,"bid5":bid_depth,"ask5":ask_depth,"buy_qty":buy_qty,"sell_qty":sell_qty})
         replenishment=None; depletion=None
         if prior:
