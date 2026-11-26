@@ -267,7 +267,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 {"exchange": "bybit", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2},
                 {"exchange": "delta", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2},
                 {"exchange": "binance", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 4.0},
-                {"exchange": "disabled", "symbol": "BTCUSDT", "connected": False, "last_message_age_seconds": 0.1},
+                {"exchange": "disabled", "symbol": "BTCUSDT", "enabled": False, "connected": True, "last_message_age_seconds": 0.1},
             ]},
             {"stale_after_seconds": 3.0, "books": {
                 "bybit:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
