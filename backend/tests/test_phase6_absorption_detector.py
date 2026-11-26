@@ -116,6 +116,64 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertIn("not an entry",result["diagnostics"][4].lower())
 
 
+
+    def test_rejects_boolean_and_fractional_integer_configuration(self):
+        for value in (True, False, 30.5, 5.5):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "integer"):
+                    AbsorptionLiquidityDetector(history_size=value)
+                with self.assertRaisesRegex(ValueError, "integer"):
+                    AbsorptionLiquidityDetector(min_trades=value)
+
+    def test_rejects_boolean_numeric_configuration(self):
+        with self.assertRaisesRegex(ValueError, "numeric"):
+            AbsorptionLiquidityDetector(max_book_age_seconds=True)
+        with self.assertRaisesRegex(ValueError, "numeric"):
+            AbsorptionLiquidityDetector(absorption_threshold=False)
+
+    def test_rejects_boolean_book_age_and_lookback(self):
+        detector=AbsorptionLiquidityDetector()
+        with self.assertRaisesRegex(ValueError, "age"):
+            detector.analyze(book(age_seconds=True),trades())
+        with self.assertRaisesRegex(ValueError, "Lookback"):
+            detector.analyze(book(),trades(),lookback_seconds=True)
+
+    def test_received_timestamp_is_authoritative_and_future_boundary_is_explicit(self):
+        now_ms=1_000_000
+        valid=[
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms+5000,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":None,"exchange_timestamp_ms":now_ms},
+        ]
+        invalid=[
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":0,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms-60000,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":"bad","exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms+5001,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms+1.5,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":True,"exchange_timestamp_ms":now_ms},
+        ]
+        with patch("app.services.absorption_detector.time.time",return_value=now_ms/1000.0):
+            result=AbsorptionLiquidityDetector().analyze(book(),valid+invalid,15)
+        self.assertEqual(result["trade_count"],3)
+        self.assertEqual(result["metrics"]["aggressive_buy_quantity"],3.0)
+
+    def test_rejects_boolean_trade_price_and_quantity(self):
+        now_ms=1_000_000
+        invalid=[
+            {"side":"buy","quantity":True,"price":100.05,"received_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":False,"received_timestamp_ms":now_ms},
+        ]
+        with patch("app.services.absorption_detector.time.time",return_value=now_ms/1000.0):
+            result=AbsorptionLiquidityDetector().analyze(book(),invalid,15)
+        self.assertEqual(result["trade_count"],0)
+
+    def test_rejects_boolean_book_level_values(self):
+        with self.assertRaisesRegex(ValueError,"valid levels"):
+            AbsorptionLiquidityDetector().analyze(
+                book(bids=[[True,10.0]],asks=[[100.1,10.0]]),trades(),15
+            )
+
     def test_rejects_negative_and_nonfinite_book_age(self):
         detector=AbsorptionLiquidityDetector()
         for age in (-0.01, float("nan"), float("inf"), float("-inf")):

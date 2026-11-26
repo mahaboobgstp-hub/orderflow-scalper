@@ -8,11 +8,20 @@ import math
 import time
 from collections import deque
 from typing import Any
+from numbers import Integral, Real
 
 
 class AbsorptionLiquidityDetector:
     def __init__(self, history_size: int = 30, max_book_age_seconds: float = 3.0,
                  min_trades: int = 5, absorption_threshold: float = 0.60):
+        if isinstance(history_size, bool) or not isinstance(history_size, Integral):
+            raise ValueError("history_size must be an integer.")
+        if isinstance(min_trades, bool) or not isinstance(min_trades, Integral):
+            raise ValueError("min_trades must be an integer.")
+        if isinstance(max_book_age_seconds, bool) or not isinstance(max_book_age_seconds, Real):
+            raise ValueError("max_book_age_seconds must be numeric.")
+        if isinstance(absorption_threshold, bool) or not isinstance(absorption_threshold, Real):
+            raise ValueError("absorption_threshold must be numeric.")
         self.history_size=max(3,min(int(history_size),200))
         max_age=float(max_book_age_seconds)
         threshold=float(absorption_threshold)
@@ -29,8 +38,9 @@ class AbsorptionLiquidityDetector:
         if not isinstance(raw,list): return out
         for row in raw:
             if not isinstance(row,(list,tuple)) or len(row)<2: continue
+            if isinstance(row[0], bool) or isinstance(row[1], bool): continue
             try: p,q=float(row[0]),float(row[1])
-            except (ValueError,TypeError): continue
+            except (ValueError,TypeError,OverflowError): continue
             if math.isfinite(p) and math.isfinite(q) and p>0 and q>0: out.append((p,q))
         return out
 
@@ -45,8 +55,10 @@ class AbsorptionLiquidityDetector:
         if not book.get("synchronized",False): raise ValueError("Order book is unsynchronized; absorption analysis refused.")
         if book.get("stale",True): raise ValueError("Order book is stale; analysis refused.")
         age=book.get("age_seconds")
+        if isinstance(age, bool) or not isinstance(age, Real):
+            raise ValueError("Order book age is invalid.")
         try: age_value=float(age)
-        except (TypeError,ValueError): raise ValueError("Order book age is invalid.")
+        except (TypeError,ValueError,OverflowError): raise ValueError("Order book age is invalid.")
         if not math.isfinite(age_value) or age_value<0 or age_value>self.max_book_age_seconds:
             raise ValueError("Order book exceeds maximum age or has invalid age.")
         if book.get("integrity_error"): raise ValueError(f"Book integrity error: {book['integrity_error']}")
@@ -55,15 +67,36 @@ class AbsorptionLiquidityDetector:
         best_bid=max(p for p,q in bids); best_ask=min(p for p,q in asks)
         if best_bid>=best_ask: raise ValueError("Crossed or locked book is invalid.")
         mid=(best_bid+best_ask)/2
+        if isinstance(lookback_seconds, bool) or not isinstance(lookback_seconds, Real):
+            raise ValueError("Lookback must be a finite number.")
         try: lookback=float(lookback_seconds)
-        except (TypeError,ValueError): raise ValueError("Lookback must be a finite number.")
+        except (TypeError,ValueError,OverflowError): raise ValueError("Lookback must be a finite number.")
         if not math.isfinite(lookback): raise ValueError("Lookback must be a finite number.")
         lookback=max(1.0,min(lookback,120.0))
         now_ms=int(time.time()*1000); cutoff=now_ms-lookback*1000
         normalized=[]
         for t in trades or []:
             if not isinstance(t,dict): continue
-            try: price=float(t.get("price",0)); qty=float(t.get("quantity",0)); ts=int(t.get("received_timestamp_ms") or t.get("exchange_timestamp_ms") or 0)
+            raw_price=t.get("price",0); raw_qty=t.get("quantity",0)
+            if isinstance(raw_price, bool) or isinstance(raw_qty, bool): continue
+            try: price=float(raw_price); qty=float(raw_qty)
+            except (TypeError,ValueError,OverflowError): continue
+            # An explicitly supplied receive timestamp is authoritative. In
+            # particular, zero/invalid values must not fall through to exchange time.
+            raw_ts=(t.get("received_timestamp_ms") if t.get("received_timestamp_ms") is not None
+                    else t.get("exchange_timestamp_ms",0))
+            if isinstance(raw_ts, bool): continue
+            try:
+                if isinstance(raw_ts, Integral):
+                    ts=int(raw_ts)
+                elif isinstance(raw_ts, Real):
+                    numeric_ts=float(raw_ts)
+                    if not math.isfinite(numeric_ts) or not numeric_ts.is_integer(): continue
+                    ts=int(numeric_ts)
+                elif isinstance(raw_ts, str) and raw_ts.strip().isdigit():
+                    ts=int(raw_ts.strip())
+                else:
+                    continue
             except (TypeError,ValueError,OverflowError): continue
             side=str(t.get("side","")).lower()
             if side not in ("buy","sell") or price<=0 or qty<=0 or not math.isfinite(price) or not math.isfinite(qty): continue
