@@ -86,7 +86,8 @@ class NineLayerDecisionEngine:
         momentum_metrics=tm if isinstance(tm,dict) else {}
         price_move=_finite(momentum_metrics.get("price_move_pct"))
         trade_count=_finite((tf or {}).get("trade_count")) if isinstance(tf,dict) else None
-        min_momentum_trades=max(3,min(500,int(self.config.get("momentum_min_trades",8))))
+        configured_min=_finite(self.config.get("momentum_min_trades",8))
+        min_momentum_trades=max(3,min(500,int(configured_min))) if configured_min is not None else 8
         scale=_finite(self.config.get("momentum_price_move_scale_pct"))
         scale=scale if scale is not None and scale>0 else 0.5
         momentum_available=price_move is not None and trade_count is not None and trade_count>=min_momentum_trades
