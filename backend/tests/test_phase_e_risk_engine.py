@@ -33,6 +33,6 @@ def test_phase_e_kill_switch_blocks_until_reset():
 
 def test_phase_e_book_and_aggregate_open_risk_block():
     e=RiskManagementEngine(); pos={"ETHUSDT":{"entry_price":100,"stop_loss_price":95,"quantity":2}}
-    r=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions=pos,symbol="BTCUSDT",config={"risk_per_trade_pct":0.5,"max_total_exposure_pct":0.6,"cooldown_seconds":0},synchronized_book=False,now_ms=DAY_MS)
+    r=e.evaluate_runtime_gate(account_equity=10000,closed_trades=[],orders=[],positions=pos,symbol="BTCUSDT",config={"risk_per_trade_pct":0.5,"max_total_exposure_pct":0.5,"cooldown_seconds":0},synchronized_book=False,now_ms=DAY_MS)
     assert r["open_stop_risk"]==10
     assert "SYNCHRONIZED_BOOK_UNAVAILABLE" in r["blockers"] and "TOTAL_OPEN_RISK_LIMIT_WOULD_BE_EXCEEDED" in r["blockers"]
