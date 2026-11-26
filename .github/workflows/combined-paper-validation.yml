@@ -1,0 +1,45 @@
+name: Combined Nine Layer and Controlled Paper Validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/services/nine_layer_decision_engine.py"
+      - "backend/app/services/controlled_paper_session.py"
+      - "backend/app/services/autonomous_paper_runtime.py"
+      - "backend/app/services/paper_trading.py"
+      - "backend/tests/test_combined_nine_layer_integration.py"
+      - "backend/tests/test_controlled_paper_session.py"
+      - ".github/workflows/combined-paper-validation.yml"
+  pull_request:
+    paths:
+      - "backend/app/services/nine_layer_decision_engine.py"
+      - "backend/app/services/controlled_paper_session.py"
+      - "backend/app/services/autonomous_paper_runtime.py"
+      - "backend/app/services/paper_trading.py"
+      - "backend/tests/test_combined_nine_layer_integration.py"
+      - "backend/tests/test_controlled_paper_session.py"
+      - ".github/workflows/combined-paper-validation.yml"
+jobs:
+  combined-paper-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile combined validation sources
+        run: python -m compileall -q backend/app/services backend/tests/test_combined_nine_layer_integration.py backend/tests/test_controlled_paper_session.py
+      - name: Run combined nine-layer integration tests
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -q tests/test_combined_nine_layer_integration.py
+      - name: Run controlled paper-session validation
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -q tests/test_controlled_paper_session.py tests/test_phase11_paper_trading.py
