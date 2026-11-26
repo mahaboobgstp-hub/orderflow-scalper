@@ -43,6 +43,9 @@ class PaperPersistenceWorker:
             if isinstance(wrapped, dict) and isinstance(wrapped.get("risk_kill_switch"), dict):
                 persisted_halt=wrapped["risk_kill_switch"]
                 self.risk_control_state={"active":bool(persisted_halt.get("active")),"reason":persisted_halt.get("reason")}
+            elif isinstance(wrapped,dict) and "paper_account" in wrapped:
+                # Legacy persisted paper state predates the explicit risk-halt flag.
+                self.risk_control_state={"active":True,"reason":"RISK_CONTROL_STATE_MISSING"}
             account = wrapped.get("paper_account", {}) if isinstance(wrapped, dict) else {}
             snapshot_valid = engine.restore_persistence_snapshot(account)
             restored = snapshot_valid
