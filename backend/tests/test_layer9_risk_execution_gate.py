@@ -20,7 +20,7 @@ def test_l9_pass_requires_explicit_permission_and_no_blockers(risk):
     assert layer["available"] is True
     assert layer["direction"] == "NEUTRAL"
     assert layer["score"] == 100
-    assert result["decision"] == "HOLD"  # no directional evidence
+    assert result["decision"] == "REJECT"  # L6 fail-closed gate; no directional evidence
 
 
 @pytest.mark.parametrize("risk", [
