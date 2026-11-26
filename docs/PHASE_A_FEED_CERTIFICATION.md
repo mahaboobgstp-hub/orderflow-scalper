@@ -30,6 +30,14 @@ The read-only order-book endpoint must also refuse to return data when the strea
 
 Feed Monitor labels connected time separately from synchronized time, shows freshness classification, attempts/successes, reconnect/recovery counts, REST snapshot count, sequence gaps, and last disconnect reason. Missing metrics from an older API payload use safe display fallbacks. The deterministic API contract test calls the consolidated observability route with stubs and asserts the Phase A fields and public-feed-only execution flag.
 
+## Feed summary metric definitions
+
+The consolidated observability summary separates recent message receipt from fully healthy order books:
+- `fresh_message_feed_count`: enabled/connected feed adapters whose latest message age is within the configured stale threshold. It does not imply book synchronization.
+- `healthy_feed_count`: fresh-message adapters whose matching `exchange:symbol` book is synchronized, fresh, and has no integrity error.
+- `synchronized_book_count`: books marked synchronized and fresh with no integrity error.
+Older UI/API consumers may fall back to the previous `healthy_feed_count` value for the connected-feed tile; new consumers should use `fresh_message_feed_count` for message freshness and `healthy_feed_count` only for full book health.
+
 ## Evidence required for certification
 
 CI validates deterministic synchronization, sequence and stale-state logic only. It does not count as live exchange evidence.
