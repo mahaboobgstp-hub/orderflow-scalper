@@ -105,7 +105,7 @@ class ImbalanceDetectorTests(unittest.TestCase):
 
     def test_boolean_levels_and_age_are_rejected_or_filtered(self):
         detector = OrderBookImbalanceDetector()
-        invalid_book = book(
+        invalid_book = sample_book(
             bids=[[True, 99.0], [100.0, True], [99.9, 1.0]],
             asks=[[100.1, 1.0], [100.2, 1.0]],
         )
@@ -114,9 +114,9 @@ class ImbalanceDetectorTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["raw_bid_quantity"], 1.0)
 
         with self.assertRaisesRegex(ValueError, "age"):
-            detector.analyze(book(age_seconds=True))
+            detector.analyze(sample_book(age_seconds=True))
         with self.assertRaisesRegex(ValueError, "level count"):
-            detector.analyze(book(), levels=True)
+            detector.analyze(sample_book(), levels=True)
 
     def test_invalid_levels_are_ignored_safely(self):
         detector = OrderBookImbalanceDetector()
