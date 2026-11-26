@@ -52,6 +52,15 @@ class BinanceDemoDepthSyncTests(unittest.TestCase):
         self.assertFalse(stream._event_bridges_snapshot(depth_event(102, 101)))
         self.assertFalse(stream._event_bridges_snapshot(depth_event(101, 100)))
 
+    def test_initial_bridge_gap_requires_snapshot_reconnect(self):
+        stream = stream_with_snapshot(100)
+
+        self.assertTrue(stream._snapshot_bridge_gap(depth_event(102, 103)))
+        self.assertFalse(stream._snapshot_bridge_gap(depth_event(99, 100)))
+        self.assertFalse(stream._snapshot_bridge_gap(depth_event(100, 101)))
+        self.assertFalse(stream._snapshot_bridge_gap(depth_event(101, 100)))
+        self.assertFalse(stream._snapshot_bridge_gap({"U": "bad", "u": 103}))
+
     def test_initial_bridge_ignores_stream_previous_id_and_applies_event(self):
         stream = stream_with_snapshot(100)
         event = depth_event(
