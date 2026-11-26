@@ -8,13 +8,13 @@ test("fresh feed accepts finite nonnegative age inside the cutoff", () => {
 });
 
 test("invalid message ages never appear fresh", () => {
-  for (const age of [null, -0.1, Number.NaN, Number.POSITIVE_INFINITY, "invalid", "", "   "]) {
+  for (const age of [null, true, false, -0.1, Number.NaN, Number.POSITIVE_INFINITY, "invalid", "", "   "]) {
     assert.equal(isFreshMessageFeed({ enabled: true, connected: true, last_message_age_seconds: age }, 3), false, `age ${String(age)}`);
   }
 });
 
 test("invalid or missing cutoff uses the backend three-second default", () => {
-  for (const cutoff of [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, "invalid", ""]) {
+  for (const cutoff of [undefined, null, true, false, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, "invalid", ""]) {
     assert.equal(isFreshMessageFeed({ connected: true, last_message_age_seconds: 2.5 }, cutoff), true, `cutoff ${String(cutoff)}`);
     assert.equal(isFreshMessageFeed({ connected: true, last_message_age_seconds: 3.1 }, cutoff), false, `cutoff ${String(cutoff)}`);
   }
