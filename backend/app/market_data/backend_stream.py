@@ -321,10 +321,9 @@ class BinanceOrderBookStream:
             raise ValueError("Snapshot must be an object.")
         bids = self._parse_snapshot_levels(snapshot.get("bids", []))
         asks = self._parse_snapshot_levels(snapshot.get("asks", []))
-        try:
-            update_id = int(snapshot["lastUpdateId"])
-        except (KeyError, TypeError, ValueError, OverflowError):
-            raise ValueError("Snapshot update ID is invalid.") from None
+        update_id = self._parse_update_id(snapshot.get("lastUpdateId"))
+        if update_id is None:
+            raise ValueError("Snapshot update ID is invalid.")
         if not self._book_integrity_valid(bids, asks):
             raise ValueError("Snapshot book is empty, invalid, crossed, or locked.")
         self.bids = bids
