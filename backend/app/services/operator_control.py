@@ -105,6 +105,10 @@ async def engine_command(request: EngineCommandRequest, x_control_token: str | N
         elif command == "RESUME":
             runtime.resume()
             state["engine_state"] = "RUNNING"
+        elif command == "EMERGENCY_HALT":
+            if getattr(runtime, "risk_engine", None): runtime.risk_engine.set_kill_switch(True, "OPERATOR_EMERGENCY_HALT")
+            await runtime.stop()
+            state["engine_state"] = "STOPPED"
         else:
             await runtime.stop()
             state["engine_state"] = "STOPPED"
@@ -165,6 +169,20 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
         runtime.apply_config(state["config"])
     _event("configuration_updated", request.config)
     return {"accepted": True, "config": state["config"], "persisted": False, "message": "Configuration applied to runtime process memory; no automatic trade execution is enabled."}
+
+@router.post("/risk/kill-switch/reset")
+def reset_risk_kill_switch(x_control_token: str | None = Header(default=None)):
+    _auth(x_control_token)
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="Runtime service is not connected.")
+    if runtime.status().get("state") != "STOPPED":
+        raise HTTPException(status_code=409, detail="Stop the paper runtime before resetting the emergency risk halt.")
+    engine=getattr(runtime,"risk_engine",None)
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Risk engine is not connected.")
+    result=engine.set_kill_switch(False)
+    _event("risk_kill_switch_reset", result)
+    return {"reset":True,"kill_switch":result,"engine_state":state["engine_state"]}
 
 @router.post("/watchlist/add")
 def watchlist_add(request: WatchlistRequest, x_control_token: str | None = Header(default=None)):
