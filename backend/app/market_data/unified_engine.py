@@ -1,5 +1,6 @@
 """Phase 3 exchange-neutral market-data normalization."""
 import time
+import math
 from dataclasses import dataclass, field
 
 @dataclass
@@ -26,85 +27,220 @@ class UnifiedMarketDataEngine:
         if key not in self.books: self.books[key]=Book(exchange.lower(),symbol.upper())
         return self.books[key]
     @staticmethod
-    def apply(side,levels):
-        if not isinstance(levels,list): return
+    def parse_levels(levels):
+        if not isinstance(levels, list):
+            return None
+        parsed = []
         for row in levels:
-            try: p,q=float(row[0]),float(row[1])
-            except (TypeError,ValueError,IndexError): continue
-            if p<=0 or q<0: continue
-            if q==0: side.pop(p,None)
-            else: side[p]=q
+            if not isinstance(row, (list, tuple)) or len(row) != 2:
+                return None
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
+                return None
+            try:
+                price, quantity = float(row[0]), float(row[1])
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if not math.isfinite(price) or not math.isfinite(quantity) or price <= 0 or quantity < 0:
+                return None
+            parsed.append((price, quantity))
+        return parsed
+
+    @staticmethod
+    def apply_parsed(side, levels):
+        for price, quantity in levels:
+            if quantity == 0:
+                side.pop(price, None)
+            else:
+                side[price] = quantity
+
+    @classmethod
+    def apply(cls, side, levels):
+        parsed = cls.parse_levels(levels)
+        if parsed is None:
+            return False
+        candidate = side.copy()
+        cls.apply_parsed(candidate, parsed)
+        side.clear()
+        side.update(candidate)
+        return True
+
     @staticmethod
     def as_int(x):
-        try: return int(x)
-        except (ValueError,TypeError): return None
-    def touch_message(self,ex,ts):
-        now=time.time()
-        self.last_seen[ex]=now
-        self.counts[ex]=self.counts.get(ex,0)+1
+        if isinstance(x, bool):
+            return None
+        if isinstance(x, int):
+            return x
+        if isinstance(x, float):
+            if not math.isfinite(x) or not x.is_integer():
+                return None
+            return int(x)
+        if isinstance(x, str):
+            value = x.strip()
+            if not value or not value.lstrip("-").isdigit():
+                return None
+            try:
+                return int(value)
+            except ValueError:
+                return None
+        return None
+
+    def invalidate_book(self, exchange, book, reason):
+        book.synchronized = False
+        book.stale = True
+        book.error = reason
+        self.errors[self.key(exchange, book.symbol)] = reason
+
+    def update_book(self, book, bid_levels, ask_levels, snapshot=False):
+        parsed_bids = self.parse_levels(bid_levels)
+        parsed_asks = self.parse_levels(ask_levels)
+        if parsed_bids is None or parsed_asks is None:
+            self.invalidate_book(book.exchange, book, "Malformed depth levels")
+            return False
+        if not snapshot and not book.synchronized:
+            self.invalidate_book(book.exchange, book, "Delta received before synchronized snapshot")
+            return False
+        if not snapshot and not parsed_bids and not parsed_asks:
+            self.invalidate_book(book.exchange, book, "Empty depth update")
+            return False
+
+        bids = {} if snapshot else book.bids.copy()
+        asks = {} if snapshot else book.asks.copy()
+        self.apply_parsed(bids, parsed_bids)
+        self.apply_parsed(asks, parsed_asks)
+        if not bids or not asks:
+            self.invalidate_book(book.exchange, book, "Depth update would empty a book side")
+            return False
+        if max(bids) >= min(asks):
+            self.invalidate_book(book.exchange, book, "Crossed or locked order book")
+            return False
+
+        book.bids, book.asks = bids, asks
+        if snapshot:
+            book.synchronized = True
+        book.error = None
+        book.stale = False
+        self.errors.pop(self.key(book.exchange, book.symbol), None)
+        return True
+
+    def touch_message(self, ex, ts):
+        now = time.time()
+        self.last_seen[ex] = now
+        self.counts[ex] = self.counts.get(ex, 0) + 1
         return now
-    def touch(self,ex,b,ts):
-        now=self.touch_message(ex,ts)
-        b.exchange_ts=ts; b.received_ts=int(now*1000); b.stale=False
-    def process(self,exchange,raw,default_symbol="BTCUSDT"):
-        ex=exchange.lower()
-        if not isinstance(raw,dict): return None
-        topic=raw.get("topic",""); data=raw.get("data",raw)
-        if isinstance(data,list) and topic.startswith("publicTrade"):
-            result=None
+
+    def touch(self, ex, b, ts):
+        now = self.touch_message(ex, ts)
+        b.exchange_ts = ts
+        b.received_ts = int(now * 1000)
+        b.stale = False
+
+    def process(self, exchange, raw, default_symbol="BTCUSDT"):
+        ex = exchange.lower()
+        if not isinstance(raw, dict):
+            return None
+        topic = raw.get("topic", "")
+        data = raw.get("data", raw)
+        if isinstance(data, list) and topic.startswith("publicTrade"):
+            result = None
             for item in data:
-                if isinstance(item,dict): result=self.process(ex,{"topic":topic,"data":item},default_symbol) or result
+                if isinstance(item, dict):
+                    result = self.process(ex, {"topic": topic, "data": item}, default_symbol) or result
             return result
-        if not isinstance(data,dict): return None
-        symbol=str(data.get("s") or data.get("symbol") or default_symbol).upper()
-        ts=self.as_int(raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts"))
-        b=self.book(ex,symbol)
+        if not isinstance(data, dict):
+            return None
+        symbol = str(data.get("s") or data.get("symbol") or default_symbol).upper()
+        ts = self.as_int(raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts"))
+        book = self.book(ex, symbol)
         try:
-            # Binance depth diffs lack the snapshot bridge here: mark unusable for strategies.
-            if ex=="binance" and ("b" in data or "a" in data) and ("U" in data or "u" in data):
-                u=self.as_int(data.get("u")); b.sequence=u if u is not None else b.sequence
-                self.apply(b.bids,data.get("b",[])); self.apply(b.asks,data.get("a",[]))
-                b.synchronized=False; b.error="Needs REST snapshot synchronization"
-                self.touch(ex,b,ts); return {"type":"book_delta","synchronized":False}
+            # Binance diffs without the REST snapshot bridge are never applied here.
+            if ex == "binance" and ("b" in data or "a" in data) and ("U" in data or "u" in data):
+                self.invalidate_book(ex, book, "Needs REST snapshot synchronization")
+                self.touch_message(ex, ts)
+                return {"type": "book_delta", "synchronized": False, "error": book.error}
+
             if topic.startswith("orderbook."):
-                typ=str(raw.get("type","")).lower()
-                if typ=="snapshot":
-                    b.bids.clear(); b.asks.clear(); self.apply(b.bids,data.get("b",[])); self.apply(b.asks,data.get("a",[]))
-                    b.synchronized=bool(b.bids and b.asks); b.error=None if b.synchronized else "Empty snapshot"
-                elif typ=="delta":
-                    self.apply(b.bids,data.get("b",[])); self.apply(b.asks,data.get("a",[]))
-                    b.synchronized=b.synchronized and b.error is None
-                b.sequence=self.as_int(data.get("u")) or b.sequence
-                self.touch(ex,b,ts); return {"type":"book_"+typ,"synchronized":b.synchronized}
-            if ex=="delta" and any(k in data for k in ("buy","sell","bids","asks")):
-                typ=str(raw.get("type",raw.get("channel",data.get("action","")))).lower()
-                snap=typ in ("snapshot","initial")
-                if snap: b.bids.clear(); b.asks.clear()
-                self.apply(b.bids,data.get("buy",data.get("bids",[]))); self.apply(b.asks,data.get("sell",data.get("asks",[])))
-                if snap: b.synchronized=bool(b.bids and b.asks); b.error=None if b.synchronized else "Empty snapshot"
-                self.touch(ex,b,ts); return {"type":"book_snapshot" if snap else "book_delta","synchronized":b.synchronized}
-            tape=[]
-            if ex=="binance" and data.get("e")=="aggTrade": tape=[data]
-            elif topic.startswith("publicTrade"): tape=data if isinstance(data,list) else [data]
-            elif ex=="delta" and "price" in data and ("size" in data or "quantity" in data): tape=[data]
-            for t in tape:
-                p=float(t.get("p",t.get("price",0))); q=float(t.get("q",t.get("v",t.get("size",t.get("quantity",0)))))
-                if p<=0 or q<=0: continue
-                maker=t.get("m"); side=("sell" if maker else "buy") if isinstance(maker,bool) else str(t.get("S",t.get("side",t.get("takerSide","")))).lower() or None
-                if side not in ("buy","sell"): side=None
-                trade=Trade(ex,symbol,p,q,side,self.as_int(t.get("T") or t.get("timestamp") or ts),int(time.time()*1000))
-                key=self.key(ex,symbol); self.trades.setdefault(key,[]).append(trade)
-                self.trades[key]=self.trades[key][-5000:]; self.touch_message(ex,ts)
-                return {"type":"trade","exchange":ex,"symbol":symbol,"price":p,"quantity":q,"side":side}
-        except (ValueError,TypeError,KeyError) as err:
-            b.error="Payload parse error: "+str(err); self.errors[self.key(ex,symbol)]=b.error
-            return {"type":"parse_error","error":b.error}
+                typ = str(raw.get("type", "")).lower()
+                sequence = self.as_int(data.get("u"))
+                if sequence is None or sequence < 0:
+                    self.invalidate_book(ex, book, "Invalid order-book sequence")
+                    self.touch_message(ex, ts)
+                    return {"type": "parse_error", "error": book.error}
+                if typ == "snapshot":
+                    valid = self.update_book(book, data.get("b", []), data.get("a", []), snapshot=True)
+                elif typ == "delta":
+                    if book.sequence is None or sequence <= book.sequence:
+                        self.invalidate_book(ex, book, "Non-progressing order-book sequence")
+                        valid = False
+                    else:
+                        valid = self.update_book(book, data.get("b", []), data.get("a", []), snapshot=False)
+                else:
+                    return None
+                if valid:
+                    book.sequence = sequence
+                    self.touch(ex, book, ts)
+                else:
+                    self.touch_message(ex, ts)
+                return {"type": "book_" + typ, "synchronized": book.synchronized, "error": book.error}
+
+            if ex == "delta" and any(k in data for k in ("buy", "sell", "bids", "asks")):
+                typ = str(raw.get("type", raw.get("channel", data.get("action", "")))).lower()
+                snapshot = typ in ("snapshot", "initial")
+                valid = self.update_book(
+                    book,
+                    data.get("buy", data.get("bids", [])),
+                    data.get("sell", data.get("asks", [])),
+                    snapshot=snapshot,
+                )
+                if valid:
+                    sequence = self.as_int(data.get("u"))
+                    if sequence is not None and sequence >= 0:
+                        book.sequence = sequence
+                    self.touch(ex, book, ts)
+                else:
+                    self.touch_message(ex, ts)
+                return {"type": "book_snapshot" if snapshot else "book_delta", "synchronized": book.synchronized, "error": book.error}
+
+            tape = []
+            if ex == "binance" and data.get("e") == "aggTrade":
+                tape = [data]
+            elif topic.startswith("publicTrade"):
+                tape = data if isinstance(data, list) else [data]
+            elif ex == "delta" and "price" in data and ("size" in data or "quantity" in data):
+                tape = [data]
+            for trade_data in tape:
+                price_raw = trade_data.get("p", trade_data.get("price", 0))
+                quantity_raw = trade_data.get("q", trade_data.get("v", trade_data.get("size", trade_data.get("quantity", 0))))
+                if isinstance(price_raw, bool) or isinstance(quantity_raw, bool):
+                    continue
+                price, quantity = float(price_raw), float(quantity_raw)
+                if not math.isfinite(price) or not math.isfinite(quantity) or price <= 0 or quantity <= 0:
+                    continue
+                maker = trade_data.get("m")
+                side = ("sell" if maker else "buy") if isinstance(maker, bool) else str(
+                    trade_data.get("S", trade_data.get("side", trade_data.get("takerSide", "")))
+                ).lower() or None
+                if side not in ("buy", "sell"):
+                    side = None
+                trade = Trade(
+                    ex, symbol, price, quantity, side,
+                    self.as_int(trade_data.get("T") or trade_data.get("timestamp") or ts),
+                    int(time.time() * 1000),
+                )
+                key = self.key(ex, symbol)
+                self.trades.setdefault(key, []).append(trade)
+                self.trades[key] = self.trades[key][-5000:]
+                self.touch_message(ex, ts)
+                return {"type": "trade", "exchange": ex, "symbol": symbol, "price": price, "quantity": quantity, "side": side}
+        except (ValueError, TypeError, KeyError, OverflowError) as err:
+            self.invalidate_book(ex, book, "Payload parse error: " + str(err))
+            self.touch_message(ex, ts)
+            return {"type": "parse_error", "error": book.error}
         return None
     def get_book(self,exchange,symbol):
         b=self.books.get(self.key(exchange,symbol))
         if b is None:return None
         age=None if b.received_ts is None else max(0,time.time()-b.received_ts/1000)
-        stale=age is None or age>self.stale_after_seconds; b.stale=stale
+        stale=not b.synchronized or b.error is not None or age is None or age>self.stale_after_seconds; b.stale=stale
         bids=sorted(b.bids.items(),reverse=True)[:self.max_levels]; asks=sorted(b.asks.items())[:self.max_levels]
         return {"exchange":b.exchange,"symbol":b.symbol,"bids":[[p,q] for p,q in bids],"asks":[[p,q] for p,q in asks],
           "best_bid":b.best_bid(),"best_ask":b.best_ask(),"spread":b.best_ask()-b.best_bid() if b.best_bid() is not None and b.best_ask() is not None else None,
@@ -123,7 +259,7 @@ class UnifiedMarketDataEngine:
             bids=sorted(b.bids.items(),reverse=True)[:10]
             asks=sorted(b.asks.items())[:10]
             bid_depth=sum(q for _,q in bids); ask_depth=sum(q for _,q in asks)
-            books[key]={"synchronized":b.synchronized,"stale":age is None or age>self.stale_after_seconds,
+            books[key]={"synchronized":b.synchronized,"stale":not b.synchronized or b.error is not None or age is None or age>self.stale_after_seconds,
               "integrity_error":b.error,"sequence":b.sequence,"age_seconds":round(age,3) if age is not None else None,
               "best_bid":b.best_bid(),"best_ask":b.best_ask(),
               "spread":b.best_ask()-b.best_bid() if b.best_ask() is not None and b.best_bid() is not None else None,
