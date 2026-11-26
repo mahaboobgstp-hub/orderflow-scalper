@@ -16,16 +16,20 @@ def trades(side="buy",qty=1.0,count=8,price=100.05):
 class Phase6DetectorTests(unittest.TestCase):
     def test_high_aggressive_buy_with_limited_progress_is_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("buy"),15)
-        result=detector.analyze(book(),trades("buy"),15)
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        self._analyze_at(detector,book(),tape,t0)
+        result=self._analyze_at(detector,book(),tape,t0+1000)
         self.assertEqual(result["classification"],"POSSIBLE_BUY_ABSORPTION")
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],8.0)
 
     def test_sell_side_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("sell"),15)
-        result=detector.analyze(book(),trades("sell"),15)
+        t0=1_000_000
+        tape=self._fixed_tape("sell",100.05,t0,count=8)
+        self._analyze_at(detector,book(),tape,t0)
+        result=self._analyze_at(detector,book(),tape,t0+1000)
         self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
         self.assertTrue(result["metrics"]["sell_absorption_candidate"])
 
@@ -60,9 +64,11 @@ class Phase6DetectorTests(unittest.TestCase):
 
     def test_liquidity_changes_need_two_samples(self):
         detector=AbsorptionLiquidityDetector()
-        first=detector.analyze(book(),trades())
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        first=self._analyze_at(detector,book(),tape,t0)
         self.assertIsNone(first["liquidity_observation"]["replenishment"])
-        second=detector.analyze(book(bids=[[100.0,14.0],[99.9,8.0]]),trades())
+        second=self._analyze_at(detector,book(bids=[[100.0,14.0],[99.9,8.0]]),tape,t0+1000)
         self.assertTrue(second["liquidity_observation"]["replenishment"]["bid_replenished"])
 
     def test_trade_flow_summary_and_diagnostics(self):
