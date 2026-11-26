@@ -412,7 +412,7 @@ async def paper_submit_order(request:PaperOrderRequest):
     if side not in ("long","short") or (side=="long" and request.stop_loss_price>=request.price) or (side=="short" and request.stop_loss_price<=request.price):
         raise HTTPException(status_code=422,detail="Stop-loss must be on the protective side of the entry price.")
     config=operator_control_state["config"]
-    actual_risk=abs(request.price-request.stop_loss_price)*request.quantity
+    actual_risk=abs(request.price-request.stop_loss_price)*request.quantity+request.quantity*(request.price+request.stop_loss_price)*paper_engine.fee_rate
     notional=request.price*request.quantity
     account=paper_engine.account()
     gate=risk_engine.evaluate_runtime_gate(account_equity=account["equity"],closed_trades=paper_engine.closed_trades,
