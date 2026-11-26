@@ -62,7 +62,10 @@ class TradeFlowMomentumDetector:
             if raw_ts is None: raw_ts=tr.get("exchange_timestamp_ms")
             ts=self._finite(raw_ts)
             side=str(tr.get("side","")).lower()
-            if p is not None and q is not None and ts is not None and p>0 and q>0 and side in ("buy","sell") and cutoff<=ts<=now+5000:
+            # Guard aggregate sums/notional against floating-point overflow. These
+            # ceilings are far beyond plausible exchange trade values.
+            safe_numeric=p is not None and q is not None and p<=1e150 and q<=1e150 and math.isfinite(p*q)
+            if safe_numeric and ts is not None and p>0 and q>0 and side in ("buy","sell") and cutoff<=ts<=now+5000:
                 try:
                     ts_int=int(ts)
                 except (ValueError,TypeError,OverflowError):
