@@ -83,3 +83,31 @@ async def test_phase_e_manual_entry_rejects_portfolio_exposure_over_cap():
         else: app.state.risk_management_engine=old_risk
         if old_paper is None: delattr(app.state,"paper_trading_engine")
         else: app.state.paper_trading_engine=old_paper
+
+@pytest.mark.anyio
+async def test_phase_e_emergency_halt_keeps_runtime_running_for_position_management(monkeypatch):
+    from app.services import operator_control
+    old_runtime=operator_control.runtime
+    old_engine_state=operator_control.state["engine_state"]
+    old_events=list(operator_control.state["events"])
+    old_updated=operator_control.state["updated_at"]
+    risk=RiskManagementEngine()
+    class RuntimeStub:
+        def __init__(self):
+            self.risk_engine=risk; self.stop_called=False
+        def status(self): return {"state":"RUNNING"}
+        async def stop(self): self.stop_called=True
+    stub=RuntimeStub()
+    operator_control.set_runtime(stub)
+    monkeypatch.setenv("CONTROL_API_TOKEN","test-control-token")
+    try:
+        response=await operator_control.engine_command(operator_control.EngineCommandRequest(command="EMERGENCY_HALT"),"test-control-token")
+        assert response["applied"] is True
+        assert response["engine_state"]=="RUNNING"
+        assert risk.kill_switch_status()["active"] is True
+        assert stub.stop_called is False
+    finally:
+        operator_control.set_runtime(old_runtime)
+        operator_control.state["engine_state"]=old_engine_state
+        operator_control.state["events"]=old_events
+        operator_control.state["updated_at"]=old_updated
