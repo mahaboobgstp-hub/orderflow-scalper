@@ -55,12 +55,13 @@ class RiskManagementEngine:
             if not same_day(t.get("closed_at_ms")): break
             if (self._finite(t.get("net_pnl")) or 0)<0: streak+=1
             else: break
-        open_risk=0.0
+        open_risk=0.0; missing_stop_count=0
         for p in positions.values():
             entry=self._finite(p.get("entry_price")); stop=self._finite(p.get("stop_loss_price")); qty=self._finite(p.get("quantity"))
             if entry is not None and stop is not None and qty is not None and qty>0: open_risk+=abs(entry-stop)*qty
+            else: missing_stop_count+=1
         proposed=eq*float(cfg.get("risk_per_trade_pct",0.5))/100
-        open_limit=eq*float(cfg.get("max_total_exposure_pct",25.0))/100
+        open_limit=eq*float(cfg.get("max_total_open_risk_pct",3.0))/100
         max_positions=int(cfg.get("max_open_positions",3)); cooldown=max(0,int(cfg.get("cooldown_seconds",0)))
         last_entry=max((int(o.get("created_at_ms",0) or 0) for o in filled),default=0)
         remaining=max(0,cooldown-(now-last_entry)/1000) if last_entry else 0
@@ -71,10 +72,11 @@ class RiskManagementEngine:
         if trade_count>=trade_limit: blockers.append("MAX_TRADES_PER_DAY_REACHED")
         if streak>=loss_limit: blockers.append("CONSECUTIVE_LOSS_LIMIT_REACHED")
         if len(positions)>=max_positions: blockers.append("MAX_OPEN_POSITIONS_REACHED")
+        if missing_stop_count: blockers.append("OPEN_POSITION_WITHOUT_VALID_STOP_LOSS")
         if str(symbol).upper() in positions: blockers.append("DUPLICATE_SYMBOL_POSITION")
         if open_risk+proposed>open_limit: blockers.append("TOTAL_OPEN_RISK_LIMIT_WOULD_BE_EXCEEDED")
         if remaining>0: blockers.append("COOLDOWN_ACTIVE")
-        return {"allowed":not blockers,"blockers":blockers,"equity":eq,"daily_net_pnl":round(daily_net,8),"daily_realized_loss":round(daily_loss,8),"daily_loss_limit":round(daily_limit,8),"daily_trade_count":trade_count,"daily_trade_limit":trade_limit,"open_positions":len(positions),"max_open_positions":max_positions,"open_stop_risk":round(open_risk,8),"proposed_trade_risk":round(proposed,8),"open_risk_limit":round(open_limit,8),"consecutive_losses":streak,"consecutive_loss_limit":loss_limit,"cooldown_seconds":cooldown,"cooldown_remaining_seconds":round(remaining,3),"kill_switch":self.kill_switch_status(),"mode":"PAPER_ONLY","execution_enabled":False}
+        return {"allowed":not blockers,"blockers":blockers,"equity":eq,"daily_net_pnl":round(daily_net,8),"daily_realized_loss":round(daily_loss,8),"daily_loss_limit":round(daily_limit,8),"daily_trade_count":trade_count,"daily_trade_limit":trade_limit,"open_positions":len(positions),"max_open_positions":max_positions,"open_stop_risk":round(open_risk,8),"open_positions_missing_stop":missing_stop_count,"proposed_trade_risk":round(proposed,8),"open_risk_limit":round(open_limit,8),"consecutive_losses":streak,"consecutive_loss_limit":loss_limit,"cooldown_seconds":cooldown,"cooldown_remaining_seconds":round(remaining,3),"kill_switch":self.kill_switch_status(),"mode":"PAPER_ONLY","execution_enabled":False}
     def calculate(self, request: dict[str,Any]) -> dict[str,Any]:
         equity=self._finite(request.get("account_equity")); entry=self._finite(request.get("entry_price")); stop=self._finite(request.get("stop_loss_price"))
         risk_pct=self._finite(request.get("risk_per_trade_pct")) or self.defaults["risk_per_trade_pct"]
