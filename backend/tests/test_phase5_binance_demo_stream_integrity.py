@@ -98,6 +98,12 @@ class BinanceDemoBookIntegrityTests(unittest.TestCase):
                 self.assertEqual(stream.asks, before_asks)
                 self.assertEqual(stream.last_update_id, before_id)
 
+    def test_constructor_rejects_boolean_max_book_age(self):
+        for value in (True, False):
+            with self.subTest(max_book_age_seconds=value):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    BinanceOrderBookStream(max_book_age_seconds=value)
+
     def test_snapshot_integer_string_update_id_is_supported(self):
         stream = BinanceOrderBookStream("BTCUSDT")
         stream._load_snapshot({**valid_snapshot(), "lastUpdateId": "100"})
