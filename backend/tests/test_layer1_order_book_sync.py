@@ -19,13 +19,16 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         return event
 
     def test_event_covered_by_snapshot_is_not_bridge(self):
-        self.assertFalse(self.stream._event_bridges_snapshot(self.event(98, 100)))
+        self.assertFalse(self.stream._event_bridges_snapshot(self.event(98, 99)))
 
     def test_bridge_event_with_next_update_id_is_accepted(self):
         self.assertTrue(self.stream._event_bridges_snapshot(self.event(100, 101)))
 
-    def test_bridge_event_exact_next_id_is_accepted(self):
-        self.assertTrue(self.stream._event_bridges_snapshot(self.event(101, 101)))
+    def test_event_starting_after_snapshot_id_is_rejected(self):
+        self.assertFalse(self.stream._event_bridges_snapshot(self.event(101, 101)))
+
+    def test_snapshot_id_boundary_is_valid_bridge(self):
+        self.assertTrue(self.stream._event_bridges_snapshot(self.event(100, 100)))
 
     def test_event_starting_after_required_next_id_is_rejected(self):
         self.assertFalse(self.stream._event_bridges_snapshot(self.event(102, 103)))
@@ -38,9 +41,9 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertFalse(self.stream._event_bridges_snapshot(self.event(1, 2)))
 
     def test_apply_first_bridging_event_updates_book_and_sequence(self):
-        e = self.event(100, 101, bids=[["100.0", "0"], ["99.5", "7"]], asks=[["101.0", "6"]])
+        e = self.event(100, 101, bids=[["100.0", "0"], ["99.5", "7"]], asks=[["101.0", "6"]], previous=99)
         self.assertTrue(self.stream._event_bridges_snapshot(e))
-        self.assertTrue(self.stream._apply_event(e))
+        self.assertTrue(self.stream._apply_snapshot_bridge(e))
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertNotIn(100.0, self.stream.bids)
         self.assertEqual(self.stream.bids[99.5], 7.0)
