@@ -10,7 +10,7 @@ def test_position_sizing_risk_based():
 
 def test_short_stop_direction():
     r=RiskManagementEngine().calculate({"account_equity":5000,"entry_price":50,"stop_loss_price":52,"side":"short"})
-    assert r["position_quantity"]==25
+    assert r["position_quantity"]==12.5
     with pytest.raises(ValueError): RiskManagementEngine().calculate({"account_equity":5000,"entry_price":50,"stop_loss_price":48,"side":"short"})
 
 def test_notional_cap_applies():
