@@ -35,7 +35,7 @@ class RiskManagementEngine:
         return {"active":self._kill_switch_active,"reason":self._kill_switch_reason}
     def kill_switch_status(self) -> dict[str,Any]:
         return {"active":bool(getattr(self,"_kill_switch_active",False)),"reason":getattr(self,"_kill_switch_reason",None)}
-    def evaluate_runtime_gate(self, *, account_equity: float, closed_trades: list[dict[str,Any]], orders: list[dict[str,Any]], positions: dict[str,dict[str,Any]], symbol: str, config: dict[str,Any] | None = None, synchronized_book: bool = True, proposed_trade_risk_cash: float | None = None, proposed_notional: float | None = None, proposed_leverage: float | None = None, risk_limit_basis_equity: float | None = None, now_ms: int | None = None) -> dict[str,Any]:
+    def evaluate_runtime_gate(self, *, account_equity: float, closed_trades: list[dict[str,Any]], orders: list[dict[str,Any]], positions: dict[str,dict[str,Any]], symbol: str, config: dict[str,Any] | None = None, synchronized_book: bool = True, proposed_trade_risk_cash: float | None = None, proposed_notional: float | None = None, proposed_leverage: float | None = None, risk_limit_basis_equity: float | None = None, fee_rate: float = 0.0, now_ms: int | None = None) -> dict[str,Any]:
         """Central fail-closed risk gate for paper-runtime entries. Never executes orders."""
         cfg=dict(config or {}); eq=self._finite(account_equity)
         if eq is None or eq<=0: raise ValueError("account_equity must be positive.")
@@ -58,10 +58,12 @@ class RiskManagementEngine:
             if (self._finite(t.get("net_pnl")) or 0)<0: streak+=1
             else: break
         open_risk=0.0; missing_stop_count=0
+        fee_rate_value=self._finite(fee_rate)
+        if fee_rate_value is None or not 0<=fee_rate_value<=0.05: raise ValueError("fee_rate must be between 0 and 0.05.")
         for p in positions.values():
             entry=self._finite(p.get("entry_price")); stop=self._finite(p.get("stop_loss_price")); qty=self._finite(p.get("quantity")); side=str(p.get("side","")).lower()
             valid_stop=entry is not None and stop is not None and qty is not None and qty>0 and ((side=="long" and stop<entry) or (side=="short" and stop>entry))
-            if valid_stop: open_risk+=abs(entry-stop)*qty
+            if valid_stop: open_risk+=abs(entry-stop)*qty+stop*qty*fee_rate_value
             else: missing_stop_count+=1
         per_trade_limit=eq*float(cfg.get("risk_per_trade_pct",0.5))/100
         proposed=self._finite(proposed_trade_risk_cash) if proposed_trade_risk_cash is not None else per_trade_limit
@@ -93,7 +95,7 @@ class RiskManagementEngine:
         if str(symbol).upper() in positions: blockers.append("DUPLICATE_SYMBOL_POSITION")
         if open_risk+proposed>open_limit: blockers.append("TOTAL_OPEN_RISK_LIMIT_WOULD_BE_EXCEEDED")
         if remaining>0: blockers.append("COOLDOWN_ACTIVE")
-        return {"allowed":not blockers,"blockers":blockers,"equity":eq,"risk_limit_basis_equity":round(basis,8),"daily_net_pnl":round(daily_net,8),"daily_realized_loss":round(daily_loss,8),"daily_loss_limit":round(daily_limit,8),"daily_trade_count":trade_count,"daily_trade_limit":trade_limit,"open_positions":len(positions),"max_open_positions":max_positions,"open_stop_risk":round(open_risk,8),"open_positions_missing_stop":missing_stop_count,"proposed_trade_risk":round(proposed,8),"per_trade_risk_limit":round(per_trade_limit,8),"open_notional":round(open_notional,8),"proposed_notional":round(proposed_notional_value,8),"total_exposure_limit":round(exposure_limit,8),"single_position_notional_limit":round(position_limit,8),"proposed_leverage":leverage_value,"leverage_limit":leverage_limit,"open_risk_limit":round(open_limit,8),"consecutive_losses":streak,"consecutive_loss_limit":loss_limit,"cooldown_seconds":cooldown,"cooldown_remaining_seconds":round(remaining,3),"kill_switch":self.kill_switch_status(),"mode":"PAPER_ONLY","execution_enabled":False}
+        return {"allowed":not blockers,"blockers":blockers,"equity":eq,"risk_limit_basis_equity":round(basis,8),"daily_net_pnl":round(daily_net,8),"daily_realized_loss":round(daily_loss,8),"daily_loss_limit":round(daily_limit,8),"daily_trade_count":trade_count,"daily_trade_limit":trade_limit,"open_positions":len(positions),"max_open_positions":max_positions,"open_stop_risk":round(open_risk,8),"risk_gate_fee_rate":fee_rate_value,"open_positions_missing_stop":missing_stop_count,"proposed_trade_risk":round(proposed,8),"per_trade_risk_limit":round(per_trade_limit,8),"open_notional":round(open_notional,8),"proposed_notional":round(proposed_notional_value,8),"total_exposure_limit":round(exposure_limit,8),"single_position_notional_limit":round(position_limit,8),"proposed_leverage":leverage_value,"leverage_limit":leverage_limit,"open_risk_limit":round(open_limit,8),"consecutive_losses":streak,"consecutive_loss_limit":loss_limit,"cooldown_seconds":cooldown,"cooldown_remaining_seconds":round(remaining,3),"kill_switch":self.kill_switch_status(),"mode":"PAPER_ONLY","execution_enabled":False}
     def calculate(self, request: dict[str,Any]) -> dict[str,Any]:
         equity=self._finite(request.get("account_equity")); entry=self._finite(request.get("entry_price")); stop=self._finite(request.get("stop_loss_price"))
         risk_pct=self._finite(request.get("risk_per_trade_pct")) or self.defaults["risk_per_trade_pct"]
