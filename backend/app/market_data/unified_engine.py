@@ -18,6 +18,8 @@ class Book:
 
 class UnifiedMarketDataEngine:
     def __init__(self, stale_after_seconds=3.0, max_levels=200):
+        if isinstance(max_levels, bool) or not isinstance(max_levels, int) or max_levels < 1:
+            raise ValueError("max_levels must be a positive integer")
         self.stale_after_seconds=stale_after_seconds; self.max_levels=max_levels
         self.books={}; self.trades={}; self.counts={}; self.last_seen={}; self.errors={}
     @staticmethod
@@ -90,6 +92,12 @@ class UnifiedMarketDataEngine:
         book.error = reason
         self.errors[self.key(exchange, book.symbol)] = reason
 
+    def trim_side(self, side, *, bids):
+        """Keep only the nearest configured price levels (best bids/asks)."""
+        if len(side) <= self.max_levels:
+            return side
+        return dict(sorted(side.items(), reverse=bids)[:self.max_levels])
+
     def update_book(self, book, bid_levels, ask_levels, snapshot=False):
         parsed_bids = self.parse_levels(bid_levels)
         parsed_asks = self.parse_levels(ask_levels)
@@ -114,6 +122,9 @@ class UnifiedMarketDataEngine:
             self.invalidate_book(book.exchange, book, "Crossed or locked order book")
             return False
 
+        # Bound retained depth per side while preserving the best price levels.
+        bids = self.trim_side(bids, bids=True)
+        asks = self.trim_side(asks, bids=False)
         book.bids, book.asks = bids, asks
         if snapshot:
             book.synchronized = True
