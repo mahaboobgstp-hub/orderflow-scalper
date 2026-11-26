@@ -86,8 +86,12 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
     def test_invalid_numeric_update_is_not_silently_applied(self):
         e = self.event(101, 102, bids=[["not-a-price", "2"]])
         self.stream.last_update_id = 101
-        with self.assertRaises((ValueError, TypeError)):
-            self.stream._apply_event(e)
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event(e))
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, 101)
 
     def test_stop_marks_stream_unsynchronized(self):
         self.assertFalse(self.stream.synchronized)
