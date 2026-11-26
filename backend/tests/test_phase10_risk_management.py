@@ -4,7 +4,7 @@ from app.services.risk_management import RiskManagementEngine
 def test_position_sizing_risk_based():
     r=RiskManagementEngine().calculate({"account_equity":10000,"entry_price":100,"stop_loss_price":98,"side":"long","leverage":3})
     assert r["risk_budget"]==50
-    assert r["position_quantity"]==12.5
+    assert r["position_quantity"]==25
     assert r["estimated_loss_at_stop"]==50
     assert r["estimated_initial_margin"]==pytest.approx(833.333333)
 
