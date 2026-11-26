@@ -261,5 +261,23 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
         self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
 
+    def test_feed_health_summary_excludes_stale_messages_and_integrity_errors(self):
+        result = main._feed_health_counts(
+            {"exchanges": [
+                {"exchange": "bybit", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2},
+                {"exchange": "delta", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2},
+                {"exchange": "binance", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 4.0},
+                {"exchange": "disabled", "symbol": "BTCUSDT", "connected": False, "last_message_age_seconds": 0.1},
+            ]},
+            {"stale_after_seconds": 3.0, "books": {
+                "bybit:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+                "delta:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": "sequence mismatch"},
+                "binance:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+                "disabled:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+            }},
+        )
+        self.assertEqual(result["fresh_message_feed_count"], 2)
+        self.assertEqual(result["healthy_feed_count"], 1)
+
 if __name__ == "__main__":
     unittest.main()
