@@ -28,6 +28,15 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["reconnect_count"], 0)
         self.assertEqual(status["recovery_count"], 0)
 
+    def test_primary_stale_cutoff_normalizes_invalid_values(self):
+        for invalid in (None, "", "invalid", float("nan"), float("inf"), float("-inf"), 0, -1, True, False):
+            with self.subTest(value=invalid):
+                stream = BinanceOrderBookStream(stale_after_seconds=invalid)
+                self.assertEqual(stream.stale_after_seconds, 3.0)
+
+        self.assertEqual(BinanceOrderBookStream(stale_after_seconds=5).stale_after_seconds, 5.0)
+        self.assertEqual(BinanceOrderBookStream(stale_after_seconds=0.05).stale_after_seconds, 0.1)
+
     def test_status_distinguishes_connected_and_synchronized_uptime(self):
         with patch("app.market_data.backend_stream.time.time", return_value=100.0):
             self.stream.connected = True
