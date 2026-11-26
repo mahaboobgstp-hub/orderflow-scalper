@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
+  { key: "marketdata", label: "Feed Monitor", icon: "⌁" },
   { key: "testcenter", label: "Test Center", icon: "▣" },
   { key: "activity", label: "Live Activity", icon: "◷" },
   { key: "positions", label: "Positions & Trades", icon: "▤" },
@@ -39,6 +40,7 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem("ofs_token") || "");
   const [connected, setConnected] = useState(false);
   const [health, setHealth] = useState(null);
+  const [marketObs, setMarketObs] = useState(null);
   const [diagnostics, setDiagnostics] = useState(null);
   const [exchanges, setExchanges] = useState(null);
   const [paper, setPaper] = useState(null);
@@ -71,11 +73,11 @@ export default function App() {
 
   async function refreshAll() {
     if (!base) { setConnected(false); return; }
-    const [h,d,x,p,controlStatus,controlLog,tradeHistory,monitorLog,validation,orders,decision,persist,risk] = await Promise.allSettled([
+    const [h,d,x,p,controlStatus,controlLog,tradeHistory,monitorLog,validation,orders,decision,persist,risk,feed] = await Promise.allSettled([
       api("/health"), api("/api/monitoring/diagnostics"), api("/api/exchanges/status"),
       api("/api/paper/account"), api("/api/control/status"), api("/api/control/events"),
       api("/api/paper/history?limit=50"), api("/api/monitoring/events?limit=100"),
-      api("/api/paper/validation/status"), api("/api/paper/orders"), api("/api/decision-engine/status"), api("/api/paper/persistence/status"), api("/api/risk/status")
+      api("/api/paper/validation/status"), api("/api/paper/orders"), api("/api/decision-engine/status"), api("/api/paper/persistence/status"), api("/api/risk/status"), api("/api/market-data/observability")
     ]);
     if (h.status === "fulfilled") { setHealth(h.value); setConnected(true); } else { setHealth(null); setConnected(false); }
     setDiagnostics(d.status==="fulfilled" ? d.value : null);
@@ -91,6 +93,7 @@ export default function App() {
     setDecisionStatus(decision.status==="fulfilled" ? decision.value : null);
     setPersistenceStatus(persist.status==="fulfilled" ? persist.value : null);
     setRiskStatus(risk.status==="fulfilled" ? risk.value : null);
+    setMarketObs(feed.status==="fulfilled" ? feed.value : null);
   }
 
   async function refreshScanner() {
@@ -203,6 +206,49 @@ export default function App() {
       <div className="panel"><h2>Session Event Timeline</h2>{sessionEvents.length===0?<div className="empty-state">No controlled-session events reported yet.</div>:sessionEvents.slice().reverse().map((e,i)=><div className="event-row full" key={i}><span className="event-time">{e.at?fmtDate(e.at):"--"}</span><b>{e.event||"Session event"}</b><small>{JSON.stringify(e.data||{})}</small></div>)}</div>
     </>;
   }
+  function renderMarketData() {
+    const payload=marketObs||{};
+    const summary=payload.summary||{};
+    const unified=payload.unified_market_data||{};
+    const adapterList=payload.exchange_connections?.exchanges||[];
+    const books=unified.books||{};
+    const healthy=(x)=>x.connected && x.last_message_age_seconds!=null && x.last_message_age_seconds<= (unified.stale_after_seconds||3);
+    return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
+      <div className="stats-grid">
+        {stat("Connected Feeds",summary.healthy_feed_count??0,"Fresh messages within stale threshold")}
+        {stat("Synchronized Books",summary.synchronized_book_count??0,"Fresh synchronized books")}
+        {stat("Unified Books",summary.unified_book_count??0,"Book entries currently tracked")}
+        {stat("Feed Errors",summary.feed_errors??0,"Adapters reporting errors")}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Safety & Runtime Boundary</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
+        <div className="list-row"><b>Market data mode</b><span>{payload.mode||"Unknown"}</span></div>
+        <div className="list-row"><b>Real exchange execution</b><span className="negative">Disabled</span></div>
+        <div className="list-row"><b>Primary Binance demo book</b><span>{payload.primary_binance_demo_stream?.synchronized?"SYNCHRONIZED":payload.primary_binance_demo_stream?.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
+        <div className="list-row"><b>Binance demo last update ID</b><span>{value(payload.primary_binance_demo_stream?.last_update_id)}</span></div>
+        <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
+        <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Exchange Feed Connections</h2></div>
+        {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=><div className="event-row full" key={x.exchange}>
+          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+(healthy(x)?"paper":"")}>{x.connected?"CONNECTED":"DISCONNECTED"}</span>
+          <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??0}</small>
+          <small>Error: {x.last_error||"None"}</small>
+        </div>)}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Unified Order Books</h2></div>
+        {Object.keys(books).length===0?<div className="empty-state">No normalized books received yet. This is a live status, not simulated sample data.</div>:Object.entries(books).map(([key,b])=><div className="decision-card" key={key}>
+          <div className="decision-head"><b>{key}</b><span className={"status-chip "+(b.synchronized&&!b.stale?"paper":"")}>{b.synchronized&&!b.stale?"SYNCED & FRESH":b.stale?"STALE":"UNSYNCHRONIZED"}</span></div>
+          <div className="decision-metrics"><span>Sequence <b>{value(b.sequence)}</b></span><span>Age <b>{b.age_seconds==null?"--":b.age_seconds+"s"}</b></span><span>Spread <b>{b.spread==null?"--":b.spread}</b></span><span>Top-10 Imbalance <b>{b.imbalance_top10==null?"--":(b.imbalance_top10*100).toFixed(1)+"%"}</b></span></div>
+          <div className="decision-metrics"><span>Best Bid <b>{value(b.best_bid)}</b></span><span>Best Ask <b>{value(b.best_ask)}</b></span><span>Bid Depth <b>{b.bid_depth_top10??"--"}</b></span><span>Ask Depth <b>{b.ask_depth_top10??"--"}</b></span></div>
+          <div className="decision-outcome">Integrity: {b.integrity_error||"No error reported"}</div>
+        </div>)}
+      </div>
+      <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(unified.exchanges||{}).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
+        <p className="subtle">This page refreshes with the existing polling cadence. Counts and timestamps are taken from backend diagnostics.</p>
+      </div>
+    </>;
+  }
+
   function renderDashboard() {
     return <>
       {header("Dashboard","A concise live view of the trading system")}
@@ -294,6 +340,6 @@ export default function App() {
     </>;
   }
 
-  const pages={dashboard:renderDashboard,testcenter:renderTestCenter,activity:renderActivity,positions:renderPositions,watchlist:renderWatchlist,controls:renderControls};
+  const pages={dashboard:renderDashboard,marketdata:renderMarketData,testcenter:renderTestCenter,activity:renderActivity,positions:renderPositions,watchlist:renderWatchlist,controls:renderControls};
   return <div className="app-root"><aside className="desktop-nav"><div className="brand-mark">OF</div><div className="brand-text">ORDERFLOW<span>SCALPER</span></div><nav>{NAV.map(n=><button key={n.key} className={page===n.key?"selected":""} onClick={()=>setPage(n.key)}><span className="nav-symbol">{n.icon}</span>{n.label}</button>)}</nav><div className="nav-foot"><span className={connected?"dot green":"dot red"}/>{connected?"API reachable":"API offline"}<small>Remote operator console</small></div></aside><main className="main"><div className="mobile-top"><div className="brand-mark small-mark">OF</div><div className="brand-text">ORDERFLOW<span>SCALPER</span></div><button className="refresh" onClick={refreshAll}>↻</button></div><div className="page-content">{pages[page]()}</div><footer className="footnote">OrderFlow Scalper · Remote Operator Console · Paper trading only</footer></main><nav className="mobile-nav">{NAV.map(n=><button key={n.key} className={page===n.key?"selected":""} onClick={()=>setPage(n.key)}><span>{n.icon}</span><small>{n.label.split(" ")[0]}</small></button>)}</nav>{notice&&<div className="toast" onClick={()=>setNotice("")}>{notice}<span>×</span></div>}</div>;
 }
