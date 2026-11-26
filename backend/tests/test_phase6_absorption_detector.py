@@ -134,5 +134,34 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
 
+
+    def test_interpretation_maps_aggressive_buy_absorption_to_bearish_caution(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("buy"),15)
+        result=detector.analyze(book(),trades("buy"),15)
+        self.assertEqual(result["interpretation"]["passive_side"],"SELLERS")
+        self.assertEqual(result["interpretation"]["directional_bias"],"BEARISH_CAUTION")
+
+    def test_interpretation_maps_aggressive_sell_absorption_to_bullish_caution(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("sell"),15)
+        result=detector.analyze(book(),trades("sell"),15)
+        self.assertEqual(result["interpretation"]["passive_side"],"BUYERS")
+        self.assertEqual(result["interpretation"]["directional_bias"],"BULLISH_CAUTION")
+
+    def test_trade_notional_metrics_are_reported(self):
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",qty=2,count=5,price=100.05),15)
+        metrics=result["metrics"]
+        self.assertEqual(metrics["aggressive_buy_notional"],1000.5)
+        self.assertEqual(metrics["aggressive_sell_notional"],0.0)
+        self.assertEqual(metrics["total_aggressive_notional"],1000.5)
+
+    def test_quality_does_not_count_stale_temporal_baseline(self):
+        detector=AbsorptionLiquidityDetector()
+        detector.analyze(book(),trades("buy"),15)
+        detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=20000
+        result=detector.analyze(book(),trades("buy"),15)
+        self.assertEqual(result["quality"]["score"],75.0)
+
 if __name__=="__main__":
     unittest.main()
