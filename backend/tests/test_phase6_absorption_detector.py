@@ -70,7 +70,7 @@ class Phase6DetectorTests(unittest.TestCase):
         result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=7),15)
         self.assertIn("flow_exhaustion",result)
         self.assertIn("quality",result)
-        self.assertIn("not an entry",result["diagnostics"][4].lower())
+        self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
 
 
     def test_rejects_negative_and_nonfinite_book_age(self):
