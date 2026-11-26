@@ -99,6 +99,8 @@ class RiskManagementEngine:
         risk_pct=self._finite(request.get("risk_per_trade_pct")) or self.defaults["risk_per_trade_pct"]
         leverage=self._finite(request.get("leverage")) or 1.0
         max_notional_pct=self._finite(request.get("max_position_notional_pct")) or self.defaults["max_position_notional_pct"]
+        fee_rate=self._finite(request.get("fee_rate")) if request.get("fee_rate") is not None else 0.0
+        if fee_rate is None or not 0<=fee_rate<=0.05: raise ValueError("fee_rate must be between 0 and 0.05.")
         if equity is None or equity<=0: raise ValueError("account_equity must be greater than zero.")
         if entry is None or entry<=0: raise ValueError("entry_price must be greater than zero.")
         if stop is None or stop<=0 or stop==entry: raise ValueError("stop_loss_price must be positive and different from entry.")
@@ -110,13 +112,14 @@ class RiskManagementEngine:
         if not 1<=leverage<=self.defaults["max_leverage"]: raise ValueError(f"leverage must be between 1 and {self.defaults['max_leverage']}.")
         if not 1<=max_notional_pct<=100: raise ValueError("max_position_notional_pct must be between 1 and 100.")
         risk_cash=equity*risk_pct/100; stop_distance=abs(entry-stop); stop_distance_pct=stop_distance/entry*100
-        raw_qty=risk_cash/stop_distance
+        risk_per_unit=stop_distance+(entry+stop)*fee_rate
+        raw_qty=risk_cash/risk_per_unit
         cap_notional=equity*max_notional_pct/100
         cap_qty=cap_notional/entry
         quantity=min(raw_qty,cap_qty)
-        notional=quantity*entry; margin=notional/leverage; estimated_loss=quantity*stop_distance
+        notional=quantity*entry; margin=notional/leverage; estimated_fees=quantity*(entry+stop)*fee_rate; estimated_loss=quantity*stop_distance+estimated_fees
         cap_limited=quantity<raw_qty
-        return {"engine":"phase10_risk_management","mode":"calculation_only","side":side,"symbol":str(request.get("symbol","UNKNOWN")).upper(),"account_equity":round(equity,8),"risk_per_trade_pct":risk_pct,"risk_budget":round(risk_cash,8),"entry_price":entry,"stop_loss_price":stop,"stop_distance":round(stop_distance,8),"stop_distance_pct":round(stop_distance_pct,6),"leverage":leverage,"position_quantity":round(quantity,12),"position_notional":round(notional,8),"estimated_initial_margin":round(margin,8),"estimated_loss_at_stop":round(estimated_loss,8),"estimated_loss_pct_of_equity":round(estimated_loss/equity*100,6),"notional_cap":round(cap_notional,8),"risk_cap_limited_quantity":round(raw_qty,12),"notional_cap_quantity":round(cap_qty,12),"position_limited_by_notional_cap":cap_limited,"assumptions":["Linear USDT-margined contract approximation; quantity is base-asset units.","Fees, funding, slippage, liquidation price, contract multipliers and exchange lot-size filters are not included.","Stop-loss is not guaranteed to fill at its trigger price.","Calculator does not submit orders."]}
+        return {"engine":"phase10_risk_management","mode":"calculation_only","side":side,"symbol":str(request.get("symbol","UNKNOWN")).upper(),"account_equity":round(equity,8),"risk_per_trade_pct":risk_pct,"risk_budget":round(risk_cash,8),"entry_price":entry,"stop_loss_price":stop,"stop_distance":round(stop_distance,8),"stop_distance_pct":round(stop_distance_pct,6),"leverage":leverage,"position_quantity":round(quantity,12),"position_notional":round(notional,8),"estimated_initial_margin":round(margin,8),"fee_rate":fee_rate,"estimated_fees_at_stop":round(estimated_fees,8),"estimated_loss_at_stop":round(estimated_loss,8),"estimated_loss_pct_of_equity":round(estimated_loss/equity*100,6),"notional_cap":round(cap_notional,8),"risk_cap_limited_quantity":round(raw_qty,12),"notional_cap_quantity":round(cap_qty,12),"position_limited_by_notional_cap":cap_limited,"assumptions":["Linear USDT-margined contract approximation; quantity is base-asset units.","Fees, funding, slippage, liquidation price, contract multipliers and exchange lot-size filters are not included.","Stop-loss is not guaranteed to fill at its trigger price.","Calculator does not submit orders."]}
 
     def evaluate_portfolio(self, account_equity: float, daily_realized_loss: float = 0.0, open_risk: float = 0.0, open_positions: int = 0, consecutive_losses: int = 0, risk_per_trade_pct: float | None = None) -> dict[str,Any]:
         eq=self._finite(account_equity)
