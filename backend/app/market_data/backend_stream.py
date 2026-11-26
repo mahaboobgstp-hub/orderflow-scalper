@@ -281,6 +281,8 @@ class BinanceOrderBookStream:
         for row in raw:
             if not isinstance(row, (list, tuple)) or len(row) < 2:
                 raise ValueError("Snapshot contains a malformed level.")
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
+                raise ValueError("Snapshot contains boolean level data.")
             try:
                 price, quantity = float(row[0]), float(row[1])
             except (TypeError, ValueError, OverflowError):
@@ -296,6 +298,8 @@ class BinanceOrderBookStream:
             return False
         for row in raw:
             if not isinstance(row, (list, tuple)) or len(row) < 2:
+                return False
+            if isinstance(row[0], bool) or isinstance(row[1], bool):
                 return False
             try:
                 price, quantity = float(row[0]), float(row[1])
