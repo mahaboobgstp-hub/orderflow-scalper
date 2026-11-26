@@ -225,6 +225,11 @@ export default function App() {
         <div className="list-row"><b>Real exchange execution</b><span className="negative">Disabled</span></div>
         <div className="list-row"><b>Primary Binance demo book</b><span>{payload.primary_binance_demo_stream?.synchronized?"SYNCHRONIZED":payload.primary_binance_demo_stream?.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
         <div className="list-row"><b>Binance demo last update ID</b><span>{value(payload.primary_binance_demo_stream?.last_update_id)}</span></div>
+        <div className="list-row"><b>Primary stream freshness</b><span>{payload.primary_binance_demo_stream?.last_event_age_seconds==null?"--":payload.primary_binance_demo_stream.last_event_age_seconds+"s ago"}</span></div>
+        <div className="list-row"><b>Stream synchronized for</b><span>{payload.primary_binance_demo_stream?.connected_duration_seconds==null?"--":payload.primary_binance_demo_stream.connected_duration_seconds+"s connected"}</span></div>
+        <div className="list-row"><b>Snapshot recoveries</b><span>{payload.primary_binance_demo_stream?.snapshot_count??0}</span></div>
+        <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{payload.primary_binance_demo_stream?.sequence_gap_count??0}</span></div>
+        <div className="list-row"><b>Depth events received</b><span>{payload.primary_binance_demo_stream?.messages_received??0}</span></div>
         <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
         <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
       </div>
