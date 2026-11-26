@@ -71,20 +71,27 @@ def test_flat_price_series_classifies_as_range():
 
 
 def test_volatile_range_classifies_range_expansion():
-    rows=flat_series(120,width_pct=0.2)
-    # Alternating closes create recent return volatility without directional drift.
+    rows=[]
+    for i in range(120):
+        close=100*(1+(0.0005 if i%2 else -0.0005))
+        rows.append(candle(100,close*1.001,close*0.999,close))
+    # Recent segment has higher return volatility and candle ranges than baseline.
     for i in range(80,120):
-        close=100*(1+(0.01 if i%2 else -0.01))
-        rows[i]=candle(100,close*1.02,close*0.98,close)
+        close=100*(1+(0.02 if i%2 else -0.02))
+        rows[i]=candle(100,close*1.04,close*0.96,close)
     result=regime_engine().analyze({"candles":rows})
     assert result["classification"]["volatility_state"]=="EXPANSION"
 
 
 def test_low_volatility_range_compression():
     rows=[]
+    # Baseline volatility is higher, followed by a quiet recent segment.
     for i in range(120):
+        close=100*(1+(0.002 if i%2 else -0.002))
+        rows.append(candle(100,close*1.004,close*0.996,close))
+    for i in range(80,120):
         close=100*(1+(0.00005 if i%2 else -0.00005))
-        rows.append(candle(100,close*1.0001,close*0.9999,close))
+        rows[i]=candle(100,close*1.0001,close*0.9999,close)
     result=regime_engine().analyze({"candles":rows})
     assert result["classification"]["volatility_state"]=="COMPRESSION"
 
