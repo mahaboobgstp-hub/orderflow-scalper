@@ -53,6 +53,7 @@ export default function App() {
   const [control, setControl] = useState(null);
   const [events, setEvents] = useState([]);
   const [scanner, setScanner] = useState(null);
+  const [phaseCScanner, setPhaseCScanner] = useState(null);
   const [configDraft, setConfigDraft] = useState({});
   const [symbolInput, setSymbolInput] = useState("");
   const [notice, setNotice] = useState("");
@@ -102,14 +103,22 @@ export default function App() {
     catch { setScanner(null); }
   }
 
+  async function refreshPhaseCScanner() {
+    if (!base) return;
+    try { setPhaseCScanner(await api("/api/scanner/opportunities?limit=12&min_score=0&min_volume_usdt=5000000&max_spread_pct=0.12&include_filtered=false")); }
+    catch { setPhaseCScanner(null); }
+  }
+
   useEffect(() => {
     localStorage.setItem("ofs_api", apiBase);
     localStorage.setItem("ofs_token", token);
     refreshAll();
     refreshScanner();
+    refreshPhaseCScanner();
     const timer = setInterval(refreshAll, 10000);
     const scanTimer = setInterval(refreshScanner, 45000);
-    return () => { clearInterval(timer); clearInterval(scanTimer); };
+    const phaseCTimer = setInterval(refreshPhaseCScanner, 45000);
+    return () => { clearInterval(timer); clearInterval(scanTimer); clearInterval(phaseCTimer); };
   }, [apiBase, token]);
 
   async function command(cmd) {
@@ -291,6 +300,7 @@ export default function App() {
         </div>
       </div>
       <div className="panel"><div className="panel-title"><h2>Scanner Candidates</h2><button className="link-button" onClick={refreshScanner}>Refresh scanner</button></div><div className="subtle">Public Binance scanner · ranking only, not trading signals</div>{opportunities.length===0?<div className="empty-state">No candidates returned or scanner unavailable.</div>:opportunities.slice(0,8).map((coin,i)=><div className="list-row" key={coin.symbol||i}><div><b>{coin.symbol}</b><small>{coin.activity_acceleration_label||"Activity"} · {value(coin.price_change_24h_pct)}% 24h change</small></div><div className="align-right"><b>{value(coin.suitability_score)}</b><small>Suitability score</small></div></div>)}</div>
+      <div className="panel"><div className="panel-title"><h2>Phase C · Ranked Opportunities</h2><button className="link-button" onClick={refreshPhaseCScanner}>Refresh ranking</button></div><div className="subtle">Read-only heuristic score · public market scan · not a trade signal. Ranking excludes scanner-filtered markets by default.</div>{!phaseCScanner?<div className="empty-state">Phase C scan unavailable. API endpoint may not yet be deployed.</div>:phaseCScanner.markets?.length===0?<div className="empty-state">No ranked candidates meet the selected quality filters.</div>:phaseCScanner.markets.slice(0,8).map((coin,i)=><div className="list-row" key={coin.symbol||i}><div><b>#{coin.phase_c_rank} · {coin.symbol}</b><small>Score breakdown: Vol {coin.phase_c_score_components?.volume??"--"} · Spread {coin.phase_c_score_components?.spread??"--"} · Range {coin.phase_c_score_components?.range??"--"} · Activity {coin.phase_c_score_components?.trade_activity??"--"} · Momentum {coin.phase_c_score_components?.momentum_proxy??"--"}</small><small>{(coin.phase_c_quality_flags||[]).join(" · ")||"No quality flags"}</small></div><div className="align-right"><b>{coin.phase_c_score}</b><small>Phase C score</small></div></div>)}</div>
       <div className="panel"><div className="panel-title"><h2>Recent Engine Events</h2><button className="link-button" onClick={()=>setPage("activity")}>View activity</button></div>{displayEvents.length===0?<div className="empty-state">No operator events yet.</div>:displayEvents.slice(0,8).map((e,i)=><div className="event-row" key={i}><span className="event-time">{timeText(e.timestamp)}</span><b>{labelEvent(e)}</b><small>{JSON.stringify(e.details||{})}</small></div>)}</div>
     </>;
   }
