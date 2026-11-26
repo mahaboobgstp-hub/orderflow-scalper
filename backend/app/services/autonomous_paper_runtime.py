@@ -22,7 +22,7 @@ class AutonomousPaperRuntime:
             "mode":"PAPER_ONLY","automatic_exchange_order_execution":False,"automatic_paper_execution":True,"scan_count":self._scan_count,
             "last_scan_time":self._last_scan_time,"last_error":self._last_error,
             "last_scan_summary":self._last_scan,"watchlist_count":len(self.watchlist),
-            "decision_engine":"nine_layer_decision_engine" if self.decision_engine else "NOT_CONFIGURED",
+            "decision_engine":"nine_layer_decision_engine" if self.decision_engine else "NOT_CONFIGURED","risk_engine":"risk_management_engine" if self.risk_engine else "NOT_CONFIGURED",
             "decision_count":len(self._decisions),"recent_decisions":self._decisions[-10:],"controlled_validation_session":self.validation_session.status() if self.validation_session else None,
             "risk_kill_switch":self.risk_engine.kill_switch_status() if self.risk_engine else {"active":False,"reason":None},"guardrails":["No exchange orders","Paper simulator only","Critical unavailable layers block entry","Duplicate symbol entries refused","Centralized risk gate blocks unsafe entries"]}
 
@@ -57,7 +57,7 @@ class AutonomousPaperRuntime:
 
     def _evaluate_symbol(self, market, broader_context):
         symbol=str(market.get("symbol","")).upper()
-        if not symbol or not self.market_data or not self.decision_engine: return None
+        if not symbol or not self.market_data or not self.decision_engine or not self.risk_engine: return None
         exchange_order=[x for x in ("binance","bybit","delta") if self.config.get("exchange_enabled",{}).get(x,True)]
         book=None; trades=[]; exchange=None
         for ex in exchange_order:
