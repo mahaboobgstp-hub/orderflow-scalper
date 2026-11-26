@@ -204,3 +204,10 @@ async def test_phase_e_risk_status_reports_live_paper_metrics():
         if old_paper is None: delattr(app.state,"paper_trading_engine")
         else: app.state.paper_trading_engine=old_paper
         operator_control.state["config"].clear(); operator_control.state["config"].update(old_config)
+
+@pytest.mark.anyio
+async def test_phase_e_live_risk_telemetry_requires_control_token(monkeypatch):
+    monkeypatch.setenv("CONTROL_API_TOKEN","test-control-token")
+    with pytest.raises(HTTPException) as exc:
+        await risk_engine_status()
+    assert exc.value.status_code==401
