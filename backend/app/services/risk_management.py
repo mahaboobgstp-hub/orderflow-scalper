@@ -27,7 +27,7 @@ class RiskManagementEngine:
         except (TypeError,ValueError): return None
 
     def status(self):
-        return {"phase":10,"engine":"risk_management_position_sizing","mode":"calculation_only","order_execution":False,"default_limits":self.defaults.copy(),"notes":["Risk settings are conservative starter defaults, not personalized financial advice.","Risk calculation assumes stop-loss is executed at the specified stop price; gaps/slippage may increase realized loss."]}
+        return {"phase":10,"engine":"risk_management_position_sizing","mode":"calculation_only","order_execution":False,"kill_switch":self.kill_switch_status(),"default_limits":self.defaults.copy(),"notes":["Risk settings are conservative starter defaults, not personalized financial advice.","Risk calculation assumes stop-loss is executed at the specified stop price; gaps/slippage may increase realized loss."]}
 
     def set_kill_switch(self, active: bool = True, reason: str = "OPERATOR_EMERGENCY_HALT") -> dict[str,Any]:
         self._kill_switch_active=bool(active)
