@@ -115,6 +115,21 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["trade_count"],2)
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],2.0)
 
+    def test_same_millisecond_samples_do_not_create_temporal_baseline(self):
+        detector=AbsorptionLiquidityDetector()
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        first=self._analyze_at(detector,self._book_at_mid(100.05),tape,t0)
+        same_ms=self._analyze_at(detector,self._book_at_mid(100.05),tape,t0)
+        self.assertFalse(same_ms["liquidity_observation"]["previous_sample_available"])
+        self.assertIsNone(same_ms["liquidity_observation"]["replenishment"])
+        self.assertEqual(same_ms["metrics"]["buy_price_progress_pct"],0.0)
+        self.assertEqual(same_ms["metrics"]["buy_absorption_score"],0.0)
+        self.assertFalse(same_ms["metrics"]["buy_absorption_candidate"])
+        later=self._analyze_at(detector,self._book_at_mid(100.05),tape,t0+1)
+        self.assertTrue(later["liquidity_observation"]["previous_sample_available"])
+        self.assertTrue(later["metrics"]["buy_absorption_candidate"])
+
     def test_absorption_requires_baseline_within_lookback(self):
         detector=AbsorptionLiquidityDetector()
         detector.analyze(book(),trades("buy"),lookback_seconds=1)
