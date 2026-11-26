@@ -88,11 +88,12 @@ class ControlledPaperSession:
         self.state="STOPPED"; self.pause_reason=str(reason)[:200]; self._record("SESSION_STOPPED",{"reason":self.pause_reason})
         return self.status()
 
-    def entry_gate(self, side:str, synchronized_book:bool, current_equity:float|None=None) -> tuple[bool,list[str]]:
+    def entry_gate(self, side:str, synchronized_book:bool, current_equity:float|None=None, open_positions:int=0) -> tuple[bool,list[str]]:
         blockers=[]
         if self.state!="ACTIVE": blockers.append("VALIDATION_SESSION_NOT_ACTIVE")
         self._check_time_limit()
-        if self.state!="ACTIVE": blockers.append("SESSION_TIME_LIMIT")
+        if self.state!="ACTIVE" and self.pause_reason=="SESSION_TIME_LIMIT_REACHED": blockers.append("SESSION_TIME_LIMIT_REACHED")
+        if open_positions>=self.config_values["max_open_positions"]: blockers.append("SESSION_MAX_OPEN_POSITIONS_REACHED")
         if self.trades_started>=self.config_values["max_trades"]: blockers.append("SESSION_TRADE_LIMIT_REACHED")
         if side.lower() in ("long","buy") and not self.config_values["allow_long"]: blockers.append("LONG_DISABLED_FOR_SESSION")
         if side.lower() in ("short","sell") and not self.config_values["allow_short"]: blockers.append("SHORT_DISABLED_FOR_SESSION")
