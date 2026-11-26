@@ -89,6 +89,35 @@ class Phase6DetectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "age"):
             AbsorptionLiquidityDetector().analyze(book(age_seconds="not-a-number"),trades())
 
+    def test_rejects_boolean_and_fractional_integer_configuration(self):
+        for value in (True, 3.5):
+            with self.subTest(history_size=value):
+                with self.assertRaisesRegex(ValueError, "history_size"):
+                    AbsorptionLiquidityDetector(history_size=value)
+            with self.subTest(min_trades=value):
+                with self.assertRaisesRegex(ValueError, "min_trades"):
+                    AbsorptionLiquidityDetector(min_trades=value)
+        with self.assertRaisesRegex(ValueError, "finite numeric"):
+            AbsorptionLiquidityDetector(max_book_age_seconds=True)
+        with self.assertRaisesRegex(ValueError, "finite numeric"):
+            AbsorptionLiquidityDetector(absorption_threshold=False)
+
+    def test_stale_prior_sample_does_not_report_liquidity_changes(self):
+        detector=AbsorptionLiquidityDetector()
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        self._analyze_at(detector,book(),tape,t0)
+        detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=20_000
+        t1=t0+1_000
+        current_tape=self._fixed_tape("buy",100.05,t1,count=8)
+        with patch("app.services.absorption_detector.time.time",return_value=t1/1000.0):
+            result=detector.analyze(book(),current_tape,lookback_seconds=1)
+        observation=result["liquidity_observation"]
+        self.assertFalse(observation["previous_sample_available"])
+        self.assertIsNone(observation["replenishment"])
+        self.assertIsNone(observation["depletion"])
+        self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
+
     def test_rejects_nonfinite_detector_configuration(self):
         for value in (float("nan"),float("inf"),float("-inf")):
             with self.subTest(value=value):
