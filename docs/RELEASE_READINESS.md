@@ -13,7 +13,7 @@ The Android branch still contains a **placeholder research dashboard** with hard
 | PR | Head / base | Status | CI evidence |
 |---|---|---|---|
 | #1 Layer 1 snapshot bridge | `fix/layer1-binance-snapshot-bridge` → `main` | Open, non-draft; separate feed fix | Focused sync checks passed; backend checks failed on this head |
-| #8 Transparency/feed/runtime bundle | `feature/observability-trader-transparency` → `main` | Open, non-draft; 53 commits | Previous head had 5 green checks; **latest feed freshness hardening checks are pending** |
+| #8 Transparency/feed/runtime bundle | `feature/observability-trader-transparency` → `main` | Open, non-draft; 53 commits | Previous head had 5 green checks; **feed freshness hardening passed all five checks on code commit `85b3941f330989b43fcda4db3c820d97de3fee16`**; the later release-checklist document commit is docs-only and may trigger a fresh CI run |
 | #9 Central Risk Engine | `feature/phase-e-risk-engine` → `main` | Open, draft; 75 commits | 5 checks green (backend, Layer 9, combined paper, frontend build, infrastructure) |
 | #10 Absorption/liquidity hardening | `feature/phase-f-absorption-liquidity` → #9 branch | Open, draft; 8 commits | 2 checks green (backend and focused Layer 2) |
 | #7 pytest CI fix | `fix/infra-pytest-dependency-20261126` → `main` | Open, draft | Backend infrastructure check green |
