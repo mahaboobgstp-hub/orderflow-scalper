@@ -1,6 +1,7 @@
 """Phase 10 risk controls and position-sizing calculator. No order execution."""
 from __future__ import annotations
 import math
+from datetime import datetime, timezone
 from typing import Any
 
 class RiskManagementEngine:
@@ -15,6 +16,8 @@ class RiskManagementEngine:
             "max_consecutive_losses":3,
         }
         if defaults: self.defaults.update(defaults)
+        self._kill_switch_active=False
+        self._kill_switch_reason=None
 
     @staticmethod
     def _finite(v):
@@ -26,6 +29,52 @@ class RiskManagementEngine:
     def status(self):
         return {"phase":10,"engine":"risk_management_position_sizing","mode":"calculation_only","order_execution":False,"default_limits":self.defaults.copy(),"notes":["Risk settings are conservative starter defaults, not personalized financial advice.","Risk calculation assumes stop-loss is executed at the specified stop price; gaps/slippage may increase realized loss."]}
 
+    def set_kill_switch(self, active: bool = True, reason: str = "OPERATOR_EMERGENCY_HALT") -> dict[str,Any]:
+        self._kill_switch_active=bool(active)
+        self._kill_switch_reason=str(reason)[:120] if active else None
+        return {"active":self._kill_switch_active,"reason":self._kill_switch_reason}
+    def kill_switch_status(self) -> dict[str,Any]:
+        return {"active":bool(getattr(self,"_kill_switch_active",False)),"reason":getattr(self,"_kill_switch_reason",None)}
+    def evaluate_runtime_gate(self, *, account_equity: float, closed_trades: list[dict[str,Any]], orders: list[dict[str,Any]], positions: dict[str,dict[str,Any]], symbol: str, config: dict[str,Any] | None = None, synchronized_book: bool = True, now_ms: int | None = None) -> dict[str,Any]:
+        """Central fail-closed risk gate for paper-runtime entries. Never executes orders."""
+        cfg=dict(config or {}); eq=self._finite(account_equity)
+        if eq is None or eq<=0: raise ValueError("account_equity must be positive.")
+        now=int(now_ms if now_ms is not None else __import__('time').time()*1000)
+        day=datetime.fromtimestamp(now/1000,timezone.utc).date()
+        def same_day(ts):
+            try: return datetime.fromtimestamp(int(ts or 0)/1000,timezone.utc).date()==day
+            except (ValueError,TypeError,OverflowError): return False
+        todays=[t for t in closed_trades if same_day(t.get("closed_at_ms"))]
+        daily_net=sum(self._finite(t.get("net_pnl")) or 0.0 for t in todays); daily_loss=max(0.0,-daily_net)
+        daily_limit=eq*float(cfg.get("max_daily_loss_pct",2.0))/100
+        filled=[o for o in orders if str(o.get("status","")) in ("FILLED_SIMULATED","FILLED","OPEN")]
+        todays_orders=[o for o in filled if same_day(o.get("created_at_ms"))]
+        trade_count=len(todays_orders); trade_limit=int(cfg.get("max_trades_per_day",20))
+        loss_limit=int(cfg.get("max_consecutive_losses",3)); streak=0
+        for t in reversed(closed_trades):
+            if not same_day(t.get("closed_at_ms")): break
+            if (self._finite(t.get("net_pnl")) or 0)<0: streak+=1
+            else: break
+        open_risk=0.0
+        for p in positions.values():
+            entry=self._finite(p.get("entry_price")); stop=self._finite(p.get("stop_loss_price")); qty=self._finite(p.get("quantity"))
+            if entry is not None and stop is not None and qty is not None and qty>0: open_risk+=abs(entry-stop)*qty
+        proposed=eq*float(cfg.get("risk_per_trade_pct",0.5))/100
+        open_limit=eq*float(cfg.get("max_total_exposure_pct",25.0))/100
+        max_positions=int(cfg.get("max_open_positions",3)); cooldown=max(0,int(cfg.get("cooldown_seconds",0)))
+        last_entry=max((int(o.get("created_at_ms",0) or 0) for o in filled),default=0)
+        remaining=max(0,cooldown-(now-last_entry)/1000) if last_entry else 0
+        blockers=[]
+        if self.kill_switch_status()["active"]: blockers.append("RISK_KILL_SWITCH_ACTIVE")
+        if not synchronized_book: blockers.append("SYNCHRONIZED_BOOK_UNAVAILABLE")
+        if daily_loss>=daily_limit: blockers.append("DAILY_LOSS_LIMIT_REACHED")
+        if trade_count>=trade_limit: blockers.append("MAX_TRADES_PER_DAY_REACHED")
+        if streak>=loss_limit: blockers.append("CONSECUTIVE_LOSS_LIMIT_REACHED")
+        if len(positions)>=max_positions: blockers.append("MAX_OPEN_POSITIONS_REACHED")
+        if str(symbol).upper() in positions: blockers.append("DUPLICATE_SYMBOL_POSITION")
+        if open_risk+proposed>open_limit: blockers.append("TOTAL_OPEN_RISK_LIMIT_WOULD_BE_EXCEEDED")
+        if remaining>0: blockers.append("COOLDOWN_ACTIVE")
+        return {"allowed":not blockers,"blockers":blockers,"equity":eq,"daily_net_pnl":round(daily_net,8),"daily_realized_loss":round(daily_loss,8),"daily_loss_limit":round(daily_limit,8),"daily_trade_count":trade_count,"daily_trade_limit":trade_limit,"open_positions":len(positions),"max_open_positions":max_positions,"open_stop_risk":round(open_risk,8),"proposed_trade_risk":round(proposed,8),"open_risk_limit":round(open_limit,8),"consecutive_losses":streak,"consecutive_loss_limit":loss_limit,"cooldown_seconds":cooldown,"cooldown_remaining_seconds":round(remaining,3),"kill_switch":self.kill_switch_status(),"mode":"PAPER_ONLY","execution_enabled":False}
     def calculate(self, request: dict[str,Any]) -> dict[str,Any]:
         equity=self._finite(request.get("account_equity")); entry=self._finite(request.get("entry_price")); stop=self._finite(request.get("stop_loss_price"))
         risk_pct=self._finite(request.get("risk_per_trade_pct")) or self.defaults["risk_per_trade_pct"]
