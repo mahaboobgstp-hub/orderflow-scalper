@@ -96,8 +96,36 @@ class BinanceStreamReconnectTests(unittest.IsolatedAsyncioTestCase):
 
 
 
-    async def test_closed_websocket_reconnects_after_synchronization(self):
+    async def test_initial_snapshot_bridge_gap_reconnects_with_fresh_snapshot(self):
         stream = BinanceOrderBookStream("BTCUSDT")
+        original_sleep = asyncio.sleep
+
+        async def fast_sleep(_seconds):
+            await original_sleep(0)
+
+        first = FakeWebsocket([
+            depth_event(102, 103, pu=101, bids=[["100.0", "9.0"]]),
+        ])
+        second = FakeWebsocket(
+            [depth_event(200, 201, pu=199, bids=[["100.0", "4.0"]])],
+            stop_event=stream._stop_event,
+        )
+        connections = [FakeConnection(first), FakeConnection(second)]
+        snapshot_fetch = AsyncMock(side_effect=[snapshot(100), snapshot(200)])
+        with patch("app.market_data.backend_stream.websockets.connect", side_effect=connections) as mock_connect, \
+             patch.object(stream, "_fetch_snapshot", new=snapshot_fetch), \
+             patch("app.market_data.backend_stream.asyncio.sleep", new=fast_sleep):
+            await stream._run_forever()
+
+        self.assertEqual(mock_connect.call_count, 2)
+        self.assertEqual(snapshot_fetch.await_count, 2)
+        # The initial forward gap forces a new snapshot. The second connection
+        # bridges snapshot 200 and applies update 201 before shutdown.
+        self.assertEqual(stream.last_update_id, 201)
+        self.assertEqual(stream.bids[100.0], 4.0)
+        self.assertIsNone(stream.last_error)
+
+    async def test_closed_websocket_reconnects_after_synchronization(selfself = stream = BinanceOrderBookStream("BTCUSDT")
         original_sleep = asyncio.sleep
 
         async def fast_sleep(_seconds):
