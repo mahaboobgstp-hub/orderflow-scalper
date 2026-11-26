@@ -9,7 +9,7 @@
 - Net aggressive delta and absolute flow imbalance.
 - Trade-side VWAP and spatial offset from the current midpoint.
 - Side-normalized temporal midpoint progress from successive detector samples.
-- Possible buy/sell absorption candidates: minimum sample count, aggressor-side volume share, and limited favorable temporal progress.
+- Possible buy/sell absorption candidates: minimum sample count, aggressor-side volume share, and limited absolute temporal midpoint displacement (stalling).
 - Flow weakening/stability heuristic based on volume in the recent versus earlier portion of the captured trade list.
 - Top-five displayed bid/ask liquidity observation.
 - Sample-to-sample top-five depth changes, labeled replenishment/depletion observations.
@@ -25,14 +25,14 @@ The endpoint uses the Phase 3 normalized book and trade history. Supported excha
 ## Direction and score interpretation
 
 - Buy temporal progress is positive when the midpoint moves upward from the prior sample; sell temporal progress is positive when the midpoint moves downward. Negative values are preserved as adverse movement.
-- Only favorable (positive, side-aligned) progress reduces the absorption score. Flat or adverse movement represents no favorable progress; it does not establish absorption.
+- The stall score decreases with the magnitude of side-normalized temporal midpoint displacement in either direction. Adverse movement is not automatically treated as absorption; flat movement maximizes the heuristic but does not prove passive liquidity.
 - Spatial VWAP offsets are side-normalized: buy offset is positive when the current mid is above buy VWAP; sell offset is positive when sell VWAP is above the current mid.
-- The current score is a heuristic with a 0.10% favorable-progress scale and a minimum trade-count check. A high score is not a probability and is not a standalone trade instruction.
+- The current score is a heuristic with a 0.10% absolute-displacement scale and a minimum trade-count check. It penalizes favorable and adverse movement symmetrically. A high score is not a probability and is not a standalone trade instruction.
 
 ## Classification
 
-- `POSSIBLE_BUY_ABSORPTION`: aggressive buys dominate the captured tape while there is limited favorable upward midpoint progress. This may indicate passive sell liquidity absorbing buys.
-- `POSSIBLE_SELL_ABSORPTION`: aggressive sells dominate the tape while there is limited favorable downward midpoint progress. This may indicate passive buy liquidity absorbing sells.
+- `POSSIBLE_BUY_ABSORPTION`: aggressive buys dominate the captured tape while the midpoint remains relatively stationary (small displacement in either direction). This may indicate passive sell liquidity absorbing buys.
+- `POSSIBLE_SELL_ABSORPTION`: aggressive sells dominate the captured tape while the midpoint remains relatively stationary (small displacement in either direction). This may indicate passive buy liquidity absorbing sells.
 - `MIXED_ABSORPTION`: both sides meet the candidate threshold.
 - `NO_CLEAR_ABSORPTION`: no candidate meets the threshold/sample criteria.
 
@@ -46,7 +46,7 @@ These are research hypotheses, not reversal/entry signals.
 - VWAP versus midpoint is spatial execution context, not true temporal price displacement from an interval start to end. It can be distorted by trade clustering, sampling, and side classification.
 - Temporal midpoint movement is sampled on detector requests; request cadence can miss fast movement or produce incomparable intervals. It is not a continuous trade-time trajectory.
 - Absorption scoring has no empirically calibrated absolute-volume/notional floor. Very small tape volumes may still qualify if the minimum trade count and volume-share tests pass.
-- The 0.10% favorable-progress scale and minimum-trade threshold are provisional and need market-based calibration across symbols, liquidity regimes, and noise.
+- The 0.10% absolute-displacement scale and minimum-trade threshold are provisional and need market-based calibration across symbols, liquidity regimes, and noise.
 - Liquidity changes are sampled on API requests. They are not linked to individual consumed orders, and aggregate depth increases alone do not prove replenishment.
 - Flow weakening uses the timestamp-sorted captured trades but remains a heuristic; true rolling-time buckets are a future improvement.
 - Quality score is evidence coverage only; no profitability prediction.
@@ -54,4 +54,4 @@ These are research hypotheses, not reversal/entry signals.
 
 ## Tests
 
-Deterministic tests cover buy/sell candidates, favorable/adverse progress, threshold boundaries, spatial VWAP signs, minimum trade count, invalid inputs, timestamp/lookback filtering, book rejection, sample-to-sample depth changes, and API output. Full backend and live exchange validation are still required for certification.
+Deterministic tests cover buy/sell candidates, favorable/adverse progress, both-direction threshold boundaries, stall-score behavior for adverse and flat movement, spatial VWAP signs, minimum trade count, invalid inputs, timestamp/lookback filtering, book rejection, sample-to-sample depth changes, and API output. Full backend and live exchange validation are still required for certification.
