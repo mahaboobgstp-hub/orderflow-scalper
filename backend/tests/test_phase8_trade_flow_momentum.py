@@ -114,3 +114,16 @@ def test_score_is_bounded_and_matches_delta_ratio():
     result=TradeFlowMomentumDetector().analyze(book(),tape(["buy"]*20),15)
     assert -100 <= result["flow_strength_score"] <= 100
     assert result["flow_strength_score"] == pytest.approx(100)
+
+
+def test_extreme_finite_trade_values_do_not_emit_nonfinite_metrics():
+    now=int(time.time()*1000)
+    rows=[{"side":"buy" if i%2==0 else "sell","price":1e308,"quantity":1e308,
+           "received_timestamp_ms":now-i*100} for i in range(8)]
+    result=TradeFlowMomentumDetector().analyze(book(),rows,15)
+    for key in ("buy_quantity","sell_quantity","total_quantity","net_delta","delta_ratio",
+                 "buy_vwap","sell_vwap","price_move_pct","last_bucket_volume_change_pct"):
+        value=result["metrics"].get(key)
+        if value is not None:
+            assert value == value and abs(value) != float("inf")
+    assert result["flow_strength_score"] == result["flow_strength_score"]
