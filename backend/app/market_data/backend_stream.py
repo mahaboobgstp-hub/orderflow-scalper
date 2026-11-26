@@ -464,9 +464,17 @@ class BinanceOrderBookStream:
     ) -> dict[str, Any] | None:
 
         async with self._lock:
+            age_seconds = (
+                max(0.0, time.time() - self.last_book_update_at)
+                if self.last_book_update_at is not None
+                else None
+            )
             if (
-                not self.synchronized
+                not self.connected
+                or not self.synchronized
                 or self.last_update_id is None
+                or age_seconds is None
+                or age_seconds > self.stale_after_seconds
             ):
                 return None
 
@@ -483,6 +491,8 @@ class BinanceOrderBookStream:
 
             return {
                 "last_update_id": self.last_update_id,
+                "age_seconds": round(age_seconds, 3),
+                "stale": False,
                 "bids": [
                     [price, quantity]
                     for price, quantity in sorted_bids
