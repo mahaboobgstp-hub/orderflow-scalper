@@ -364,7 +364,7 @@ async def risk_engine_status(x_control_token: str | None = Header(default=None))
     account=paper.account()
     live_gate=engine.evaluate_runtime_gate(account_equity=account.get("equity",0),closed_trades=paper.closed_trades,
         orders=paper.orders,positions=paper.positions,symbol="RISK_MONITOR",config=config,synchronized_book=True,
-        proposed_trade_risk_cash=0,proposed_notional=0,proposed_leverage=1)
+        proposed_trade_risk_cash=0,proposed_notional=0,proposed_leverage=1,risk_limit_basis_equity=account.get("initial_equity",account.get("equity",0)))
     return {**engine.status(),"mode":"PAPER_ONLY","live_portfolio_gate":live_gate,
         "account":account,"execution_enabled":False}
 @app.post("/api/risk/position-size")
@@ -414,9 +414,10 @@ async def paper_submit_order(request:PaperOrderRequest):
     config=operator_control_state["config"]
     actual_risk=abs(request.price-request.stop_loss_price)*request.quantity
     notional=request.price*request.quantity
-    gate=risk_engine.evaluate_runtime_gate(account_equity=paper_engine.account()["equity"],closed_trades=paper_engine.closed_trades,
+    account=paper_engine.account()
+    gate=risk_engine.evaluate_runtime_gate(account_equity=account["equity"],closed_trades=paper_engine.closed_trades,
         orders=paper_engine.orders,positions=paper_engine.positions,symbol=request.symbol.upper(),config=config,
-        synchronized_book=True,proposed_trade_risk_cash=actual_risk,proposed_notional=notional,proposed_leverage=request.leverage)
+        synchronized_book=True,proposed_trade_risk_cash=actual_risk,proposed_notional=notional,proposed_leverage=request.leverage,risk_limit_basis_equity=account.get("initial_equity",account.get("equity",0)))
     if not gate["allowed"]:
         raise HTTPException(status_code=409,detail={"message":"Phase E risk gate rejected paper entry.","blockers":gate["blockers"],"risk":gate})
     try: return paper_engine.submit(request.model_dump())
