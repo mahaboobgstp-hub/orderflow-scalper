@@ -122,11 +122,12 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(self.stream.last_update_id, 100)
         self.assertFalse(self.stream.synchronized)
 
-    def test_snapshot_bridge_requires_snapshot_plus_one_in_range(self):
+    def test_snapshot_bridge_requires_futures_snapshot_id_overlap(self):
         self.stream.last_update_id = 100
+        self.assertTrue(self.stream._event_bridges_snapshot({"U": 100, "u": 100}))
         self.assertTrue(self.stream._event_bridges_snapshot({"U": 100, "u": 101}))
-        self.assertTrue(self.stream._event_bridges_snapshot({"U": 101, "u": 102}))
-        self.assertFalse(self.stream._event_bridges_snapshot({"U": 98, "u": 100}))
+        self.assertFalse(self.stream._event_bridges_snapshot({"U": 101, "u": 102}))
+        self.assertFalse(self.stream._event_bridges_snapshot({"U": 98, "u": 99}))
         self.assertFalse(self.stream._event_bridges_snapshot({"U": 102, "u": 103}))
 
     def test_sequence_gap_is_rejected_by_book_update(self):
