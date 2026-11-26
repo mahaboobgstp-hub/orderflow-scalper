@@ -15,7 +15,7 @@ class AutonomousPaperRuntime:
         self.config=dict(config); self.watchlist=list(watchlist); self.broader_symbol=broader_symbol
         self._task=None; self._running=False; self._paused=False
         self._last_scan=None; self._last_error=None; self._scan_count=0; self._started_at=None; self._last_scan_time=None
-        self._decisions=[]; self._last_decisions_by_symbol={}; self._logged_signatures={}; self._session_closed_trade_cursor=0
+        self._decisions=[]; self._last_decisions_by_symbol={}; self._logged_signatures={}; self._decision_record_ids={}; self._signal_record_ids={}; self._session_closed_trade_cursor=0
 
     def status(self):
         return {"connected":True,"state":"RUNNING" if self._running and not self._paused else "PAUSED" if self._running else "STOPPED",
@@ -142,21 +142,53 @@ class AutonomousPaperRuntime:
         return result
 
     async def _persist_decision(self, result):
-        if not self.repository: return
         symbol=result.get("symbol","")
         signature=(result.get("decision"),result.get("side"),result.get("paper_execution",{}).get("status"))
-        if self._logged_signatures.get(symbol)==signature: return
-        self._logged_signatures[symbol]=signature
+        if not self.repository:
+            result["decision_persistence"]={"status":"NOT_CONFIGURED","record_id":None}
+            result["signal_persistence"]={"status":"NOT_CONFIGURED","record_id":None}
+            return
+        if self._logged_signatures.get(symbol)==signature:
+            decision_id=self._decision_record_ids.get(symbol)
+            signal_id=self._signal_record_ids.get(symbol)
+            result["decision_persistence"]={"status":"UNCHANGED" if decision_id else "UNCONFIRMED","record_id":decision_id}
+            result["signal_persistence"]={"status":"UNCHANGED" if signal_id else "UNCONFIRMED","record_id":signal_id} if result.get("decision") in ("BUY","SELL") else {"status":"NOT_APPLICABLE","record_id":None}
+            return
         try:
             rows=await self.repository.decision(symbol,result.get("decision","HOLD"),score=result.get("score"),
                 layers=result.get("layers",{}),rationale={"reasons":result.get("reasons",[]),"paper_execution":result.get("paper_execution",{})},
                 market_context={"exchange":result.get("exchange"),"price":result.get("price"),"mode":"PAPER_ONLY"})
-            decision_id=rows[0].get("id") if isinstance(rows,list) and rows else None
+            decision_id=rows[0].get("id") if isinstance(rows,list) and rows and isinstance(rows[0],dict) else rows.get("id") if isinstance(rows,dict) else None
+            self._logged_signatures[symbol]=signature
+            if decision_id:
+                self._decision_record_ids[symbol]=decision_id
+            else:
+                self._decision_record_ids.pop(symbol,None)
+            result["decision_persistence"]={"status":"PERSISTED" if decision_id else "UNCONFIRMED","record_id":decision_id}
             if result.get("decision") in ("BUY","SELL"):
-                await self.repository.signal(symbol,result["side"],"NINE_LAYER_CONSENSUS",
-                    confidence=result.get("consensus_ratio"),status="paper_executed" if result.get("paper_execution",{}).get("status")=="SIMULATED_OPEN" else "candidate",
-                    data={"score":result.get("score"),"layer_results":result.get("layers"),"paper_only":True},decision_log_id=decision_id)
+                try:
+                    signal_rows=await self.repository.signal(symbol,result["side"],"NINE_LAYER_CONSENSUS",
+                        confidence=result.get("consensus_ratio"),status="paper_executed" if result.get("paper_execution",{}).get("status")=="SIMULATED_OPEN" else "candidate",
+                        data={"score":result.get("score"),"layer_results":result.get("layers"),"paper_only":True},decision_log_id=decision_id)
+                    signal_id=signal_rows[0].get("id") if isinstance(signal_rows,list) and signal_rows and isinstance(signal_rows[0],dict) else signal_rows.get("id") if isinstance(signal_rows,dict) else None
+                    if signal_id:
+                        self._signal_record_ids[symbol]=signal_id
+                    else:
+                        self._signal_record_ids.pop(symbol,None)
+                    result["signal_persistence"]={"status":"PERSISTED" if signal_id else "UNCONFIRMED","record_id":signal_id}
+                except Exception as signal_exc:
+                    self._signal_record_ids.pop(symbol,None)
+                    result["signal_persistence"]={"status":"ERROR","record_id":None,"error":type(signal_exc).__name__}
+                    self._last_error=f"Signal persistence: {type(signal_exc).__name__}"
+            else:
+                self._signal_record_ids.pop(symbol,None)
+                result["signal_persistence"]={"status":"NOT_APPLICABLE","record_id":None}
         except Exception as exc:
+            self._logged_signatures.pop(symbol,None)
+            self._decision_record_ids.pop(symbol,None)
+            self._signal_record_ids.pop(symbol,None)
+            result["decision_persistence"]={"status":"ERROR","record_id":None,"error":type(exc).__name__}
+            result["signal_persistence"]={"status":"NOT_REPORTED","record_id":None}
             self._last_error=f"Decision persistence: {type(exc).__name__}"
 
     async def _loop(self):
