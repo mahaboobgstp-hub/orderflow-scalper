@@ -299,6 +299,23 @@ export default function App() {
     const decisions=[...(runtime.recent_decisions||[])].reverse();
     const filtered=activityFilter==="ALL" ? decisions : decisions.filter(d=>String(d.decision||"").toUpperCase()===activityFilter);
     const decisionLayers=(d)=>Object.entries(d.layers||{});
+    const layerInfo={
+      order_book_imbalance:["Order Book Imbalance","Bid vs ask depth pressure"],
+      absorption:["Absorption","Aggressive flow versus price response"],
+      liquidity_breakout:["Liquidity Breakout","Break or reclaim of liquidity zones"],
+      aggressive_order_flow:["Aggressive Order Flow","Market-buy and market-sell activity"],
+      momentum:["Momentum","Directional price and activity acceleration"],
+      spread_liquidity:["Spread & Liquidity","Execution friction and available depth"],
+      volatility_regime:["Volatility Regime","Volatility conditions and risk context"],
+      broader_market_context:["Broader Market Context","BTC / market-wide directional context"],
+      risk_execution:["Risk & Execution Gate","Risk limits and entry permission"],
+    };
+    const layerSummary=(d)=>{
+      const ls=decisionLayers(d).map((entry)=>entry[1]);
+      return {available:ls.filter((l)=>l.available).length,unavailable:ls.filter((l)=>!l.available).length,
+        buy:ls.filter((l)=>l.available&&l.direction==="BUY").length,sell:ls.filter((l)=>l.available&&l.direction==="SELL").length,
+        neutral:ls.filter((l)=>l.available&&l.direction==="NEUTRAL").length,block:ls.filter((l)=>l.direction==="BLOCK").length};
+    };
     const decisionTime=runtime.last_scan_time ? timeText(runtime.last_scan_time) : "Last scan time unavailable";
     return <>
       {header("Live Activity","Live nine-layer decisions, paper execution outcomes and backend events")}
@@ -317,7 +334,7 @@ export default function App() {
         {!connected ? <div className="empty-state">Connect to the backend to load decision traces.</div> : filtered.length===0 ? <div className="empty-state">No decisions for this filter yet. The engine may be stopped, scanning may be unavailable, or the current scan produced no records.</div> : filtered.map((d,i)=><div className="decision-card" key={d.symbol+"-"+i}>
           <div className="decision-head"><div><b>{d.symbol||"Unknown symbol"}</b><small>{timeText(d.evaluated_at||runtime.last_scan_time)} · Exchange {d.exchange||"--"} · Paper only</small></div><span className={"status-chip "+(["BUY","SELL"].includes(String(d.decision).toUpperCase())?"paper":"")}>{String(d.decision||"UNKNOWN").toUpperCase()}</span></div>
           <div className="decision-metrics"><span>Score <b>{value(d.score)}</b></span><span>Consensus <b>{d.consensus_ratio==null?"--":(Number(d.consensus_ratio)*100).toFixed(1)+"%"}</b></span><span>Directional layers <b>{d.directional_layers_available??"--"}/{d.minimum_layers_required??"--"} min</b></span><span>Entry eligible <b>{d.entry_eligible?"YES":"NO"}</b></span></div>
-          <div className="layer-grid">{decisionLayers(d).map(([key,l])=><div className="layer-card" key={key}><b>{key.replaceAll("_"," ")}</b><span className="status-chip">{l.direction||"N/A"}</span><small>Score {l.score??"--"} · Confidence {l.confidence??"--"} · {l.available?"Available":"Unavailable"}</small><p>{(l.reasons||[]).join(" · ")||"No explanation supplied"}</p></div>)}</div>
+          <div className="layer-summary"><span>Available <b>{layerSummary(d).available}/9</b></span><span>Unavailable <b>{layerSummary(d).unavailable}</b></span><span>BUY <b>{layerSummary(d).buy}</b></span><span>SELL <b>{layerSummary(d).sell}</b></span><span>Neutral <b>{layerSummary(d).neutral}</b></span><span>Blocks <b>{layerSummary(d).block}</b></span></div><div className="layer-grid">{decisionLayers(d).map(([key,l])=><div className="layer-card" key={key}><b>{layerInfo[key]?.[0]||key.replaceAll("_"," ")}</b><small className="layer-purpose">{layerInfo[key]?.[1]||"Decision evidence"}</small><span className={"status-chip "+(l.direction==="BUY"?"paper":l.direction==="SELL"?"negative":"")}>{l.direction||"N/A"}</span><small>Score <strong>{l.score??"--"}</strong> · Confidence <strong>{l.confidence??"--"}</strong> · {l.available?"Available":"Unavailable"}</small>{l.score!=null&&<div className="layer-score-track"><div className={"layer-score-fill "+(Number(l.score)>=0?"buy":"sell")} style={{width:(Math.min(100,Math.abs(Number(l.score))))+"%"}}/></div>}<p>{(l.reasons||[]).join(" · ")||"No explanation supplied"}</p>{l.data&&Object.keys(l.data).length>0&&<details><summary>Layer data</summary><pre className="diagnostic">{JSON.stringify(l.data,null,2)}</pre></details>}</div>)}</div>
           <div className="decision-outcome"><b>Paper execution:</b> {d.paper_execution?.status||"Not reported"}{d.paper_execution?.reason? " — "+d.paper_execution.reason:""}{d.paper_execution?.session_blockers?.length? " · Blockers: "+d.paper_execution.session_blockers.join(", "):""}</div>
           <details><summary>Full decision data</summary><pre className="diagnostic">{JSON.stringify(d,null,2)}</pre></details>
         </div>)}
