@@ -113,7 +113,10 @@ class AbsorptionLiquidityDetector:
         bid5=sorted(bids,key=lambda x:x[0],reverse=True)[:5]; ask5=sorted(asks,key=lambda x:x[0])[:5]
         bid_depth=sum(q for p,q in bid5); ask_depth=sum(q for p,q in ask5)
         key=f"{exchange}:{symbol}"; history=self._history.setdefault(key,deque(maxlen=self.history_size))
-        prior=history[-1] if history else None
+        # Use a strictly earlier timestamp as the baseline. Same-millisecond
+        # API samples are not temporal observations and must not create progress
+        # or liquidity-change signals.
+        prior=next((sample for sample in reversed(history) if sample["timestamp"] < now_ms),None)
         history.append({"timestamp":now_ms,"mid":mid,"bid5":bid_depth,"ask5":ask_depth,"buy_qty":buy_qty,"sell_qty":sell_qty})
         replenishment=None; depletion=None
         if prior:
@@ -127,7 +130,7 @@ class AbsorptionLiquidityDetector:
         buy_progress_pct=0.0; sell_progress_pct=0.0
         prior_sample_age_ms=(now_ms-prior["timestamp"]) if prior else None
         # Temporal progress requires a recent prior midpoint sample.
-        has_recent_baseline=prior is not None and 0 <= prior_sample_age_ms <= lookback*1000
+        has_recent_baseline=prior is not None and 0 < prior_sample_age_ms <= lookback*1000
         if has_recent_baseline and prior["mid"]>0:
             # Signed directional progress: positive is favorable to the
             # aggressor side, negative is adverse movement.
