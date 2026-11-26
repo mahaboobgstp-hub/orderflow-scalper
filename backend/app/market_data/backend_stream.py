@@ -45,6 +45,8 @@ class BinanceOrderBookStream:
         self.last_error: str | None = None
         self.connected_at: float | None = None
         self.last_event_at: float | None = None
+        # Timestamp only when a depth update advances the book sequence.
+        self.last_book_update_at: float | None = None
         self.last_sync_at: float | None = None
         self.last_disconnect_at: float | None = None
         self.messages_received = 0
