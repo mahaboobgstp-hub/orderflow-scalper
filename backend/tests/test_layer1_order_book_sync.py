@@ -22,6 +22,33 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
             event["pu"] = previous
         return event
 
+    def test_rejects_boolean_and_fractional_live_sequence_ids(self):
+        self.stream.last_update_id = 101
+        malformed_events = [
+            self.event(True, 103, previous=101),
+            self.event(102, 103.5, previous=101),
+            self.event(102, 103, previous=101.5),
+            self.event(102, -1, previous=101),
+        ]
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        for event in malformed_events:
+            with self.subTest(event=event):
+                self.assertFalse(self.stream._apply_event(event))
+                self.assertEqual(self.stream.last_update_id, 101)
+                self.assertEqual(self.stream.bids, before_bids)
+                self.assertEqual(self.stream.asks, before_asks)
+
+    def test_snapshot_update_id_rejects_boolean_fractional_and_negative(self):
+        valid_snapshot = {
+            "bids": [["100.0", "2.0"]],
+            "asks": [["101.0", "4.0"]],
+        }
+        for invalid_id in (True, 100.5, -1):
+            with self.subTest(invalid_id=invalid_id):
+                with self.assertRaisesRegex(ValueError, "lastUpdateId"):
+                    self.stream._load_snapshot({**valid_snapshot, "lastUpdateId": invalid_id})
+
     def test_event_covered_by_snapshot_is_not_bridge(self):
         self.assertFalse(self.stream._event_bridges_snapshot(self.event(98, 99)))
 
@@ -82,16 +109,16 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertEqual(self.stream.asks[101.0], 4.0)
 
-    def test_overlapping_event_without_previous_id_is_applied(self):
-        e = self.event(101, 102, asks=[["101.0", "0"], ["100.5", "3"]])
+    def test_live_event_missing_pu_is_rejected_even_if_u_is_contiguous(self):
+        e = self.event(102, 103, asks=[["101.0", "0"], ["100.5", "3"]])
         self.stream.last_update_id = 101
-        self.assertTrue(self.stream._apply_event(e))
-        self.assertEqual(self.stream.last_update_id, 102)
-        self.assertNotIn(101.0, self.stream.asks)
-        self.assertEqual(self.stream.asks[100.5], 3.0)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event(e))
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.asks, before_asks)
 
     def test_invalid_numeric_update_is_not_silently_applied(self):
-        e = self.event(101, 102, bids=[["not-a-price", "2"]])
+        e = self.event(101, 102, bids=[["not-a-price", "2"]], previous=101)
         self.stream.last_update_id = 101
         with self.assertRaises((ValueError, TypeError)):
             self.stream._apply_event(e)
@@ -115,7 +142,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.stream.connected = True
         self.stream.synchronized = True
         self.stream.last_book_update_at = None
-        event = self.event(101, 101, bids=[["99.5", "1.0"]])
+        event = self.event(101, 101, bids=[["99.5", "1.0"]], previous=100)
         self.assertTrue(self.stream._apply_event(event))
         book = asyncio.run(self.stream.get_order_book())
         self.assertIsNotNone(book)
