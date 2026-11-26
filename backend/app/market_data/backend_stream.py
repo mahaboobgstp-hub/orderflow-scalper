@@ -358,6 +358,34 @@ class BinanceOrderBookStream:
                 parsed[price] = quantity
         return parsed
 
+    @staticmethod
+    def _parse_depth_updates(updates: Any, side_name: str) -> list[tuple[float, float]]:
+        """Validate an entire live depth side before any book mutation."""
+        if not isinstance(updates, list):
+            raise ValueError(f"Binance depth {side_name} updates must be a list")
+        parsed: list[tuple[float, float]] = []
+        for row in updates:
+            if not isinstance(row, (list, tuple)) or len(row) != 2:
+                raise ValueError(f"Binance depth {side_name} contains a malformed level")
+            try:
+                price, quantity = float(row[0]), float(row[1])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Binance depth {side_name} contains nonnumeric levels") from exc
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError(f"Binance depth {side_name} contains an invalid price")
+            if not math.isfinite(quantity) or quantity < 0:
+                raise ValueError(f"Binance depth {side_name} contains an invalid quantity")
+            parsed.append((price, quantity))
+        return parsed
+
+    @staticmethod
+    def _apply_parsed_depth_updates(book: dict[float, float], updates: list[tuple[float, float]]) -> None:
+        for price, quantity in updates:
+            if quantity == 0:
+                book.pop(price, None)
+            else:
+                book[price] = quantity
+
     def _load_snapshot(self, snapshot: dict[str, Any]):
         if not isinstance(snapshot, dict):
             raise ValueError("Binance REST snapshot must be an object")
@@ -370,6 +398,8 @@ class BinanceOrderBookStream:
         asks = self._parse_snapshot_side(snapshot.get("asks", []), "asks")
         if not bids or not asks:
             raise ValueError("Binance snapshot must contain nonempty bid and ask sides")
+        if max(bids) >= min(asks):
+            raise ValueError("Binance snapshot has a crossed or locked top of book")
 
         self.bids = bids
         self.asks = asks
@@ -439,16 +469,21 @@ class BinanceOrderBookStream:
             elif first_update_id > self.last_update_id + 1:
                 return False
 
-        self._update_levels(
-            self.bids,
-            event.get("b", []),
-        )
+        # Validate both sides and apply to copies so malformed or crossed depth
+        # events cannot partially mutate the live book.
+        bid_updates = self._parse_depth_updates(event.get("b", []), "bids")
+        ask_updates = self._parse_depth_updates(event.get("a", []), "asks")
+        next_bids = dict(self.bids)
+        next_asks = dict(self.asks)
+        self._apply_parsed_depth_updates(next_bids, bid_updates)
+        self._apply_parsed_depth_updates(next_asks, ask_updates)
+        if not next_bids or not next_asks:
+            raise ValueError("Binance depth update would empty one side of the book")
+        if max(next_bids) >= min(next_asks):
+            raise ValueError("Binance depth update would cross or lock the book")
 
-        self._update_levels(
-            self.asks,
-            event.get("a", []),
-        )
-
+        self.bids = next_bids
+        self.asks = next_asks
         self.last_update_id = final_update_id
         # A progressing, accepted depth event—not mere message receipt—refreshes
         # the book's usable-data freshness clock.

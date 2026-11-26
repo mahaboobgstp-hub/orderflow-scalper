@@ -53,3 +53,7 @@ The Binance depth WebSocket collector must always signal its queue consumer when
 ## REST snapshot integrity gate
 
 The Binance REST depth snapshot is validated before replacing the in-memory book. Both sides must be lists of finite positive prices and finite nonnegative quantities; zero quantities are discarded. The snapshot update ID must be a nonnegative integer, and both bid and ask sides must be nonempty. Validation is atomic: if either side or the update ID is invalid, the previous book state is retained and the snapshot is rejected so the reconnect/recovery loop can retry. Deterministic tests cover malformed levels, non-finite values, negative prices/quantities, empty sides, invalid IDs, and preservation of the existing book.
+
+## Live depth-event atomic integrity gate
+
+Incoming depth diffs validate both bid and ask update arrays before changing the in-memory order book. Each level must be exactly a two-value row with a finite positive price and finite nonnegative quantity. The event is applied to copies of both sides, and only committed if both sides remain nonempty and the best bid is strictly below the best ask. Malformed, empty-side, crossed, or locked results are rejected without partial book mutation; the stream must reconnect and resynchronize rather than expose an integrity-compromised book. This check is separate from update-ID continuity: invalid book content is not counted as a sequence gap.
