@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock
 from app.services.paper_persistence import PaperPersistenceWorker
 
 class FakeDB:
-    update = AsyncMock(return_value=None)
+    def __init__(self):
+        self.update=AsyncMock(return_value=None)
 
 class FakeRepo:
     def __init__(self):

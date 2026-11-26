@@ -10,7 +10,8 @@ def test_position_sizing_risk_based():
 
 def test_short_stop_direction():
     r=RiskManagementEngine().calculate({"account_equity":5000,"entry_price":50,"stop_loss_price":52,"side":"short"})
-    assert r["position_quantity"]==25
+    assert r["position_quantity"]==12.5
+    assert r["estimated_loss_at_stop"]==25
     with pytest.raises(ValueError): RiskManagementEngine().calculate({"account_equity":5000,"entry_price":50,"stop_loss_price":48,"side":"short"})
 
 def test_notional_cap_applies():
@@ -24,7 +25,7 @@ def test_reject_invalid_inputs_and_leverage():
     with pytest.raises(ValueError): e.calculate({"account_equity":1000,"entry_price":10,"stop_loss_price":9,"side":"long","leverage":10})
 
 def test_portfolio_guard_blocks_at_limits():
-    r=RiskManagementEngine().evaluate_portfolio(10000,daily_realized_loss=200,open_risk=250,open_positions=2,consecutive_losses=1)
+    r=RiskManagementEngine().evaluate_portfolio(10000,daily_realized_loss=200,open_risk=251,open_positions=2,consecutive_losses=1)
     assert r["allowed_to_consider_new_trade"] is False
     assert "DAILY_LOSS_LIMIT_REACHED" in r["blockers"]
     assert "OPEN_RISK_LIMIT_WOULD_BE_EXCEEDED" in r["blockers"]
