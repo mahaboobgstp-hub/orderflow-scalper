@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
+  { key: "marketdata", label: "Feed Monitor", icon: "⌁" },
   { key: "testcenter", label: "Test Center", icon: "▣" },
   { key: "activity", label: "Live Activity", icon: "◷" },
   { key: "positions", label: "Positions & Trades", icon: "▤" },
@@ -39,6 +40,7 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem("ofs_token") || "");
   const [connected, setConnected] = useState(false);
   const [health, setHealth] = useState(null);
+  const [marketObs, setMarketObs] = useState(null);
   const [diagnostics, setDiagnostics] = useState(null);
   const [exchanges, setExchanges] = useState(null);
   const [paper, setPaper] = useState(null);
@@ -51,10 +53,12 @@ export default function App() {
   const [control, setControl] = useState(null);
   const [events, setEvents] = useState([]);
   const [scanner, setScanner] = useState(null);
+  const [phaseCScanner, setPhaseCScanner] = useState(null);
   const [configDraft, setConfigDraft] = useState({});
   const [symbolInput, setSymbolInput] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [activityFilter, setActivityFilter] = useState("ALL");
   const base = apiBase.trim().replace(/\/$/, "");
 
   async function api(path, options = {}) {
@@ -70,11 +74,11 @@ export default function App() {
 
   async function refreshAll() {
     if (!base) { setConnected(false); return; }
-    const [h,d,x,p,controlStatus,controlLog,tradeHistory,monitorLog,validation,orders,decision,persist,risk] = await Promise.allSettled([
+    const [h,d,x,p,controlStatus,controlLog,tradeHistory,monitorLog,validation,orders,decision,persist,risk,feed] = await Promise.allSettled([
       api("/health"), api("/api/monitoring/diagnostics"), api("/api/exchanges/status"),
       api("/api/paper/account"), api("/api/control/status"), api("/api/control/events"),
       api("/api/paper/history?limit=50"), api("/api/monitoring/events?limit=100"),
-      api("/api/paper/validation/status"), api("/api/paper/orders"), api("/api/decision-engine/status"), api("/api/paper/persistence/status"), api("/api/risk/status")
+      api("/api/paper/validation/status"), api("/api/paper/orders"), api("/api/decision-engine/status"), api("/api/paper/persistence/status"), api("/api/risk/status"), api("/api/market-data/observability")
     ]);
     if (h.status === "fulfilled") { setHealth(h.value); setConnected(true); } else { setHealth(null); setConnected(false); }
     setDiagnostics(d.status==="fulfilled" ? d.value : null);
@@ -90,6 +94,7 @@ export default function App() {
     setDecisionStatus(decision.status==="fulfilled" ? decision.value : null);
     setPersistenceStatus(persist.status==="fulfilled" ? persist.value : null);
     setRiskStatus(risk.status==="fulfilled" ? risk.value : null);
+    setMarketObs(feed.status==="fulfilled" ? feed.value : null);
   }
 
   async function refreshScanner() {
@@ -98,14 +103,22 @@ export default function App() {
     catch { setScanner(null); }
   }
 
+  async function refreshPhaseCScanner() {
+    if (!base) return;
+    try { setPhaseCScanner(await api("/api/scanner/opportunities?limit=12&min_score=0&min_volume_usdt=5000000&max_spread_pct=0.12&include_filtered=false")); }
+    catch { setPhaseCScanner(null); }
+  }
+
   useEffect(() => {
     localStorage.setItem("ofs_api", apiBase);
     localStorage.setItem("ofs_token", token);
     refreshAll();
     refreshScanner();
+    refreshPhaseCScanner();
     const timer = setInterval(refreshAll, 10000);
     const scanTimer = setInterval(refreshScanner, 45000);
-    return () => { clearInterval(timer); clearInterval(scanTimer); };
+    const phaseCTimer = setInterval(refreshPhaseCScanner, 45000);
+    return () => { clearInterval(timer); clearInterval(scanTimer); clearInterval(phaseCTimer); };
   }, [apiBase, token]);
 
   async function command(cmd) {
@@ -202,6 +215,61 @@ export default function App() {
       <div className="panel"><h2>Session Event Timeline</h2>{sessionEvents.length===0?<div className="empty-state">No controlled-session events reported yet.</div>:sessionEvents.slice().reverse().map((e,i)=><div className="event-row full" key={i}><span className="event-time">{e.at?fmtDate(e.at):"--"}</span><b>{e.event||"Session event"}</b><small>{JSON.stringify(e.data||{})}</small></div>)}</div>
     </>;
   }
+  function renderMarketData() {
+    const payload=marketObs||{};
+    const summary=payload.summary||{};
+    const unified=payload.unified_market_data||{};
+    const adapterList=payload.exchange_connections?.exchanges||[];
+    const books=unified.books||{};
+    const primary=payload.primary_binance_demo_stream||{};
+    const primaryStale=primary.stale??(primary.last_event_age_seconds==null||primary.last_event_age_seconds>(primary.stale_after_seconds??3));
+    const healthy=(x)=>x.connected && x.last_message_age_seconds!=null && x.last_message_age_seconds<= (unified.stale_after_seconds||3);
+    return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
+      <div className="stats-grid">
+        {stat("Connected Feeds",summary.healthy_feed_count??0,"Fresh messages within stale threshold")}
+        {stat("Synchronized Books",summary.synchronized_book_count??0,"Fresh synchronized books")}
+        {stat("Unified Books",summary.unified_book_count??0,"Book entries currently tracked")}
+        {stat("Feed Errors",summary.feed_errors??0,"Adapters reporting errors")}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Safety & Runtime Boundary</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
+        <div className="list-row"><b>Market data mode</b><span>{payload.mode||"Unknown"}</span></div>
+        <div className="list-row"><b>Real exchange execution</b><span className="negative">Disabled</span></div>
+        <div className="list-row"><b>Primary Binance demo book</b><span>{primary.synchronized&&!primaryStale?"SYNCHRONIZED & FRESH":primary.synchronized&&primaryStale?"SYNCHRONIZED / STALE":primary.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
+        <div className="list-row"><b>Binance demo last update ID</b><span>{value(payload.primary_binance_demo_stream?.last_update_id)}</span></div>
+        <div className="list-row"><b>Primary stream freshness</b><span className={"status-chip "+(primaryStale?"bad":"good")}>{primaryStale?"STALE":"FRESH"} · {primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s age"}</span></div>
+        <div className="list-row"><b>Connected for</b><span>{primary.connected_duration_seconds==null?"--":primary.connected_duration_seconds+"s"}</span></div>
+        <div className="list-row"><b>Synchronized for</b><span>{primary.synchronized_duration_seconds==null?"--":primary.synchronized_duration_seconds+"s"}</span></div>
+        <div className="list-row"><b>Connection attempts / successes</b><span>{primary.connection_attempt_count??0} / {primary.successful_connection_count??0}</span></div>
+        <div className="list-row"><b>Reconnects / recoveries</b><span>{primary.reconnect_count??0} / {primary.recovery_count??0}</span></div>
+        <div className="list-row"><b>Last recovery</b><span>{primary.last_recovery_age_seconds==null?"Never":primary.last_recovery_age_seconds+"s ago"}</span></div>
+        <div className="list-row"><b>REST snapshots loaded</b><span>{primary.snapshot_count??0}</span></div>
+        <div className="list-row"><b>Last disconnect reason</b><span>{primary.last_disconnect_reason||"None recorded"}</span></div>
+        <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{payload.primary_binance_demo_stream?.sequence_gap_count??0}</span></div>
+        <div className="list-row"><b>Depth events received</b><span>{payload.primary_binance_demo_stream?.messages_received??0}</span></div>
+        <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
+        <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Exchange Feed Connections</h2></div>
+        {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=><div className="event-row full" key={x.exchange}>
+          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+(healthy(x)?"paper":"")}>{x.connected?"CONNECTED":"DISCONNECTED"}</span>
+          <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??0}</small>
+          <small>Error: {x.last_error||"None"}</small>
+        </div>)}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Unified Order Books</h2></div>
+        {Object.keys(books).length===0?<div className="empty-state">No normalized books received yet. This is a live status, not simulated sample data.</div>:Object.entries(books).map(([key,b])=><div className="decision-card" key={key}>
+          <div className="decision-head"><b>{key}</b><span className={"status-chip "+(b.synchronized&&!b.stale?"paper":"")}>{b.synchronized&&!b.stale?"SYNCED & FRESH":b.stale?"STALE":"UNSYNCHRONIZED"}</span></div>
+          <div className="decision-metrics"><span>Sequence <b>{value(b.sequence)}</b></span><span>Age <b>{b.age_seconds==null?"--":b.age_seconds+"s"}</b></span><span>Spread <b>{b.spread==null?"--":b.spread}</b></span><span>Top-10 Imbalance <b>{b.imbalance_top10==null?"--":(b.imbalance_top10*100).toFixed(1)+"%"}</b></span></div>
+          <div className="decision-metrics"><span>Best Bid <b>{value(b.best_bid)}</b></span><span>Best Ask <b>{value(b.best_ask)}</b></span><span>Bid Depth <b>{b.bid_depth_top10??"--"}</b></span><span>Ask Depth <b>{b.ask_depth_top10??"--"}</b></span></div>
+          <div className="decision-outcome">Integrity: {b.integrity_error||"No error reported"}</div>
+        </div>)}
+      </div>
+      <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(unified.exchanges||{}).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
+        <p className="subtle">This page refreshes with the existing polling cadence. Counts and timestamps are taken from backend diagnostics.</p>
+      </div>
+    </>;
+  }
+
   function renderDashboard() {
     return <>
       {header("Dashboard","A concise live view of the trading system")}
@@ -239,11 +307,59 @@ export default function App() {
         </div>
       </div>
       <div className="panel"><div className="panel-title"><h2>Scanner Candidates</h2><button className="link-button" onClick={refreshScanner}>Refresh scanner</button></div><div className="subtle">Public Binance scanner · ranking only, not trading signals</div>{opportunities.length===0?<div className="empty-state">No candidates returned or scanner unavailable.</div>:opportunities.slice(0,8).map((coin,i)=><div className="list-row" key={coin.symbol||i}><div><b>{coin.symbol}</b><small>{coin.activity_acceleration_label||"Activity"} · {value(coin.price_change_24h_pct)}% 24h change</small></div><div className="align-right"><b>{value(coin.suitability_score)}</b><small>Suitability score</small></div></div>)}</div>
+      <div className="panel"><div className="panel-title"><h2>Phase C · Ranked Opportunities</h2><button className="link-button" onClick={refreshPhaseCScanner}>Refresh ranking</button></div><div className="subtle">Read-only heuristic score · public market scan · not a trade signal. Ranking excludes scanner-filtered markets by default.</div>{!phaseCScanner?<div className="empty-state">Phase C scan unavailable. API endpoint may not yet be deployed.</div>:phaseCScanner.markets?.length===0?<div className="empty-state">No ranked candidates meet the selected quality filters.</div>:phaseCScanner.markets.slice(0,8).map((coin,i)=><div className="list-row" key={coin.symbol||i}><div><b>#{coin.phase_c_rank} · {coin.symbol}</b><small>Score breakdown: Vol {coin.phase_c_score_components?.volume??"--"} · Spread {coin.phase_c_score_components?.spread??"--"} · Range {coin.phase_c_score_components?.range??"--"} · Activity {coin.phase_c_score_components?.trade_activity??"--"} · Momentum {coin.phase_c_score_components?.momentum_proxy??"--"}</small><small>{(coin.phase_c_quality_flags||[]).join(" · ")||"No quality flags"}</small></div><div className="align-right"><b>{coin.phase_c_score}</b><small>Phase C score</small></div></div>)}</div>
       <div className="panel"><div className="panel-title"><h2>Recent Engine Events</h2><button className="link-button" onClick={()=>setPage("activity")}>View activity</button></div>{displayEvents.length===0?<div className="empty-state">No operator events yet.</div>:displayEvents.slice(0,8).map((e,i)=><div className="event-row" key={i}><span className="event-time">{timeText(e.timestamp)}</span><b>{labelEvent(e)}</b><small>{JSON.stringify(e.details||{})}</small></div>)}</div>
     </>;
   }
   function renderActivity() {
-    return <>{header("Live Activity","Chronological backend/operator event feed")}<div className="panel"><div className="panel-title"><h2>Recent Events</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>{displayEvents.length===0?<div className="empty-state">No events received. Activity will appear when backend control actions generate events. This is not yet a full strategy decision log.</div>:displayEvents.map((e,i)=><div className="event-row full" key={i}><span className="event-time">{timeText(e.timestamp)}</span><b>{labelEvent(e)}</b><small>{JSON.stringify(e.details||{})}</small></div>)}</div><div className="notice">Important: this feed currently shows operator-control events. The autonomous decision engine is not integrated and therefore does not yet emit complete strategy decision traces.</div></>;
+    const runtime=decisionStatus?.runtime || {};
+    const decisions=[...(runtime.recent_decisions||[])].reverse();
+    const filtered=activityFilter==="ALL" ? decisions : decisions.filter(d=>String(d.decision||"").toUpperCase()===activityFilter);
+    const layerInfo={
+      order_book_imbalance:["Order Book Imbalance","Bid vs ask depth pressure"],
+      absorption:["Absorption","Aggressive flow versus price response"],
+      liquidity_breakout:["Liquidity Breakout","Break or reclaim of liquidity zones"],
+      aggressive_order_flow:["Aggressive Order Flow","Market-buy and market-sell activity"],
+      momentum:["Momentum","Directional price and activity acceleration"],
+      spread_liquidity:["Spread & Liquidity","Execution friction and available depth"],
+      volatility_regime:["Volatility Regime","Volatility conditions and risk context"],
+      broader_market_context:["Broader Market Context","BTC / market-wide directional context"],
+      risk_execution:["Risk & Execution Gate","Risk limits and entry permission"],
+    };
+    const decisionLayers=(d)=>Object.keys(layerInfo).map((key)=>[key,(d.layers||{})[key]||{direction:"N/A",score:null,confidence:null,available:false,reasons:[],data:{},_missing:true}]);
+    const layerSummary=(d)=>{
+      const ls=decisionLayers(d).map((entry)=>entry[1]);
+      return {available:ls.filter((l)=>l.available).length,unavailable:ls.filter((l)=>!l.available&&!l._missing).length,
+        missing:ls.filter((l)=>l._missing).length,
+        buy:ls.filter((l)=>l.available&&l.direction==="BUY").length,sell:ls.filter((l)=>l.available&&l.direction==="SELL").length,
+        neutral:ls.filter((l)=>l.available&&l.direction==="NEUTRAL").length,block:ls.filter((l)=>l.direction==="BLOCK").length};
+    };
+    const decisionTime=runtime.last_scan_time ? timeText(runtime.last_scan_time) : "Last scan time unavailable";
+    return <>
+      {header("Live Activity","Live nine-layer decisions, paper execution outcomes and backend events")}
+      <div className="stats-grid">
+        {stat("Runtime State",runtime.state||"Unavailable","Autonomous paper runtime")}
+        {stat("Decision Count",runtime.decision_count??"--","Runtime decision records")}
+        {stat("Last Scan",decisionTime,"Latest scan timestamp")}
+        {stat("Mode",runtime.mode||"PAPER_ONLY","Exchange orders disabled")}
+      </div>
+      <div className="panel">
+        <div className="panel-title"><h2>Recent Nine-Layer Decisions</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
+        <div className="control-buttons">
+          <label>Filter decisions <select value={activityFilter} onChange={e=>setActivityFilter(e.target.value)}><option value="ALL">All</option><option value="BUY">BUY</option><option value="SELL">SELL</option><option value="HOLD">HOLD</option><option value="REJECT">REJECT</option></select></label>
+          <span className="subtle">Auto-refreshes with backend polling · displayed decisions are real backend responses, not sample data.</span>
+        </div>
+        {!connected ? <div className="empty-state">Connect to the backend to load decision traces.</div> : filtered.length===0 ? <div className="empty-state">No decisions for this filter yet. The engine may be stopped, scanning may be unavailable, or the current scan produced no records.</div> : filtered.map((d,i)=><div className="decision-card" key={d.symbol+"-"+i}>
+          <div className="decision-head"><div><b>{d.symbol||"Unknown symbol"}</b><small>{timeText(d.evaluated_at||runtime.last_scan_time)} · Exchange {d.exchange||"--"} · Paper only</small></div><span className={"status-chip "+(["BUY","SELL"].includes(String(d.decision).toUpperCase())?"paper":"")}>{String(d.decision||"UNKNOWN").toUpperCase()}</span></div>
+          <div className="decision-metrics"><span>Score <b>{value(d.score)}</b></span><span>Consensus <b>{d.consensus_ratio==null?"--":(Number(d.consensus_ratio)*100).toFixed(1)+"%"}</b></span><span>Directional layers <b>{d.directional_layers_available??"--"}/{d.minimum_layers_required??"--"} min</b></span><span>Decision eligible <b>{typeof d.entry_eligible==="boolean"?(d.entry_eligible?"YES":"NO"):"UNKNOWN"}</b></span><span>Session gate <b>{d.controlled_session_gate?.allowed===true?"PASS":d.controlled_session_gate?.allowed===false?"BLOCKED":"NOT REPORTED"}</b></span></div>
+          <div className="layer-summary"><span>Available <b>{layerSummary(d).available}/9</b></span><span>Unavailable <b>{layerSummary(d).unavailable}</b></span><span>Missing <b>{layerSummary(d).missing}</b></span><span>BUY <b>{layerSummary(d).buy}</b></span><span>SELL <b>{layerSummary(d).sell}</b></span><span>Neutral <b>{layerSummary(d).neutral}</b></span><span>Blocks <b>{layerSummary(d).block}</b></span></div><div className="layer-grid">{decisionLayers(d).map(([key,l])=><div className="layer-card" key={key}><b>{layerInfo[key]?.[0]||key.replaceAll("_"," ")}</b><small className="layer-purpose">{layerInfo[key]?.[1]||"Decision evidence"}</small><span className={"status-chip "+(l.direction==="BUY"?"paper":l.direction==="SELL"?"negative":"")}>{l._missing?"MISSING":l.direction||"N/A"}</span><small>Score <strong>{l.score??"--"}</strong> · Confidence <strong>{l.confidence??"--"}</strong> · {l._missing?"Missing output":l.available?"Available":"Unavailable"}</small>{l.score!=null&&<div className="layer-score-track"><div className={"layer-score-fill "+(Number(l.score)>=0?"buy":"sell")} style={{width:(Math.min(100,Math.abs(Number(l.score))))+"%"}}/></div>}<p>{l._missing?"Layer output missing from backend decision record":(l.reasons||[]).join(" · ")||"No explanation supplied"}</p>{l.data&&Object.keys(l.data).length>0&&<details><summary>Layer data</summary><pre className="diagnostic">{JSON.stringify(l.data,null,2)}</pre></details>}</div>)}</div>
+          <div className="decision-outcome"><b>Controlled session gate:</b> {d.controlled_session_gate?.allowed===true?"PASS":d.controlled_session_gate?.allowed===false?"BLOCKED":"NOT REPORTED"}{d.controlled_session_gate?.session_state?" · Session: "+d.controlled_session_gate.session_state:""}{Array.isArray(d.controlled_session_gate?.blockers)&&d.controlled_session_gate.blockers.length?" · Blockers: "+d.controlled_session_gate.blockers.join(", "):""}</div><div className="decision-outcome"><b>Backend records:</b> Decision {d.decision_persistence?.status||"NOT REPORTED"}{d.decision_persistence?.record_id?" · ID "+d.decision_persistence.record_id:""} · Signal {d.signal_persistence?.status||"NOT REPORTED"}{d.signal_persistence?.record_id?" · ID "+d.signal_persistence.record_id:""}</div><div className="decision-outcome"><b>Paper execution:</b> {d.paper_execution?.status||"Not reported"}{d.paper_execution?.reason? " — "+d.paper_execution.reason:""}{d.paper_execution?.session_blockers?.length? " · Blockers: "+d.paper_execution.session_blockers.join(", "):""}</div>
+          <details><summary>Full decision data</summary><pre className="diagnostic">{JSON.stringify(d,null,2)}</pre></details>
+        </div>)}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Backend / Operator Events</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>{displayEvents.length===0?<div className="empty-state">No events recorded.</div>:displayEvents.map((e,i)=><div className="event-row full" key={i}><span className="event-time">{timeText(e.timestamp)}</span><b>{labelEvent(e)}</b><small>{JSON.stringify(e.details||{})}</small></div>)}</div>
+      <div className="notice">Decision records are sourced from the runtime's recent in-memory decision list. They are not yet a durable, searchable decision-history archive; the timestamp shown is the latest scan timestamp shared by this batch.</div>
+    </>;
   }
   function renderPositions() {
     return <>{header("Positions & Trades","Simulated positions, management parameters and trade history")}<div className="panel"><div className="panel-title"><h2>Open Paper Positions</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>{openPositions.length===0?<div className="empty-state">No open paper positions.</div>:openPositions.map(p=><div className="position-card" key={p.position_id||p.symbol}><div className="position-head"><b>{p.symbol}</b><span className={"side-pill "+p.side}>{String(p.side).toUpperCase()}</span></div><div className="position-grid"><span>Entry<b>{value(p.entry_price)}</b></span><span>Mark<b>{value(p.mark_price)}</b></span><span>Quantity<b>{value(p.quantity)}</b></span><span>Leverage<b>{value(p.leverage)}x</b></span><span>SL<b>{value(p.stop_loss_price)}</b></span><span>TP<b>{value(p.take_profit_price)}</b></span><span>Trailing SL<b>{value(p.tsl_price)}</b></span><span>Trailing TP<b>{value(p.ttp_price)}</b></span></div><div className="list-row"><b>Unrealized P&L</b><b className={Number(p.unrealized_pnl)>=0?"positive":"negative"}>{money(p.unrealized_pnl)}</b></div></div>)}</div><div className="panel"><h2>Closed Trade History</h2>{closed.length===0?<div className="empty-state">No closed trades recorded.</div>:closed.slice().reverse().map((t,i)=><div className="list-row" key={t.trade_id||i}><div><b>{t.symbol} · {String(t.side).toUpperCase()}</b><small>{t.close_reason} · {timeText(t.closed_at_ms)}</small></div><div className="align-right"><b className={Number(t.net_pnl)>=0?"positive":"negative"}>{money(t.net_pnl)}</b><small>Exit {value(t.exit_price)}</small></div></div>)}</div></>;
@@ -264,6 +380,6 @@ export default function App() {
     </>;
   }
 
-  const pages={dashboard:renderDashboard,testcenter:renderTestCenter,activity:renderActivity,positions:renderPositions,watchlist:renderWatchlist,controls:renderControls};
+  const pages={dashboard:renderDashboard,marketdata:renderMarketData,testcenter:renderTestCenter,activity:renderActivity,positions:renderPositions,watchlist:renderWatchlist,controls:renderControls};
   return <div className="app-root"><aside className="desktop-nav"><div className="brand-mark">OF</div><div className="brand-text">ORDERFLOW<span>SCALPER</span></div><nav>{NAV.map(n=><button key={n.key} className={page===n.key?"selected":""} onClick={()=>setPage(n.key)}><span className="nav-symbol">{n.icon}</span>{n.label}</button>)}</nav><div className="nav-foot"><span className={connected?"dot green":"dot red"}/>{connected?"API reachable":"API offline"}<small>Remote operator console</small></div></aside><main className="main"><div className="mobile-top"><div className="brand-mark small-mark">OF</div><div className="brand-text">ORDERFLOW<span>SCALPER</span></div><button className="refresh" onClick={refreshAll}>↻</button></div><div className="page-content">{pages[page]()}</div><footer className="footnote">OrderFlow Scalper · Remote Operator Console · Paper trading only</footer></main><nav className="mobile-nav">{NAV.map(n=><button key={n.key} className={page===n.key?"selected":""} onClick={()=>setPage(n.key)}><span>{n.icon}</span><small>{n.label.split(" ")[0]}</small></button>)}</nav>{notice&&<div className="toast" onClick={()=>setNotice("")}>{notice}<span>×</span></div>}</div>;
 }

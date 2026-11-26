@@ -1,3 +1,4 @@
+import asyncio
 from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
 from app.services.controlled_paper_session import ControlledPaperSession
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
@@ -65,3 +66,59 @@ def test_session_position_cap_blocks_runtime_paper_execution():
     assert result["paper_execution"]["status"]=="NOT_EXECUTED"
     assert "SESSION_MAX_OPEN_POSITIONS_REACHED" in result["controlled_session_gate"]["blockers"]
     assert runtime.paper_engine.account()["open_position_count"]==1
+
+class TraceRepository:
+    def __init__(self, fail_first_decision=False):
+        self.decision_calls = 0
+        self.signal_calls = 0
+        self.fail_first_decision = fail_first_decision
+
+    async def decision(self, symbol, decision, **kwargs):
+        self.decision_calls += 1
+        if self.fail_first_decision and self.decision_calls == 1:
+            raise RuntimeError("temporary insert failure")
+        return [{"id": f"decision-{self.decision_calls}"}]
+
+    async def signal(self, symbol, side, signal_type, **kwargs):
+        self.signal_calls += 1
+        return [{"id": f"signal-{self.signal_calls}"}]
+
+
+def trace_runtime(repository):
+    return AutonomousPaperRuntime(scanner=None, paper_engine=PaperTradingEngine(10000),
+        config={}, watchlist=[], repository=repository)
+
+
+def trace_decision():
+    return {"symbol":"BTCUSDT","decision":"BUY","side":"BUY","score":82,
+        "consensus_ratio":0.9,"layers":{},"paper_execution":{"status":"SIMULATED_OPEN"}}
+
+
+def test_runtime_trace_exposes_persistence_record_ids_and_deduplicates():
+    repository = TraceRepository()
+    runtime = trace_runtime(repository)
+    first = trace_decision()
+    asyncio.run(runtime._persist_decision(first))
+    assert first["decision_persistence"] == {"status":"PERSISTED","record_id":"decision-1"}
+    assert first["signal_persistence"] == {"status":"PERSISTED","record_id":"signal-1"}
+
+    second = trace_decision()
+    asyncio.run(runtime._persist_decision(second))
+    assert second["decision_persistence"] == {"status":"UNCHANGED","record_id":"decision-1"}
+    assert second["signal_persistence"] == {"status":"UNCHANGED","record_id":"signal-1"}
+    assert repository.decision_calls == 1
+    assert repository.signal_calls == 1
+
+
+def test_runtime_retries_failed_decision_persistence_without_falsely_caching():
+    repository = TraceRepository(fail_first_decision=True)
+    runtime = trace_runtime(repository)
+    first = trace_decision()
+    asyncio.run(runtime._persist_decision(first))
+    assert first["decision_persistence"]["status"] == "ERROR"
+    assert first["decision_persistence"]["record_id"] is None
+
+    second = trace_decision()
+    asyncio.run(runtime._persist_decision(second))
+    assert second["decision_persistence"] == {"status":"PERSISTED","record_id":"decision-2"}
+    assert repository.decision_calls == 2

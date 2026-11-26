@@ -1,5 +1,5 @@
 import pytest
-from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
+from app.services.nine_layer_decision_engine import NineLayerDecisionEngine, LAYER_NAMES
 
 @pytest.fixture
 def engine():
@@ -98,3 +98,23 @@ def test_missing_risk_permission_fails_closed(engine):
 def test_invalid_weight_overrides_are_ignored(engine):
     e=NineLayerDecisionEngine({"layer_weights":{"momentum":999,"order_book_imbalance":0}})
     assert e.weights["momentum"]==12 and e.weights["order_book_imbalance"]==0
+
+
+def test_nine_layer_trace_schema_is_complete_and_bounded(engine):
+    result = engine.evaluate("BTCUSDT", strong_buy_inputs(), allow_risk())
+    assert set(result["layers"]) == set(LAYER_NAMES)
+    required_fields = {"layer", "score", "direction", "confidence", "available", "reasons", "data"}
+    for name in LAYER_NAMES:
+        record = result["layers"][name]
+        assert set(record) == required_fields
+        assert record["layer"] == name
+        assert record["direction"] in ("BUY", "SELL", "NEUTRAL", "BLOCK")
+        assert isinstance(record["available"], bool)
+        assert isinstance(record["reasons"], list)
+        # Layer evidence is intentionally heterogeneous: structured objects or zone lists.
+        assert isinstance(record["data"], (dict, list))
+        assert type(record["confidence"]) in (int, float)
+        assert 0 <= record["confidence"] <= 100
+        if record["score"] is not None:
+            assert type(record["score"]) in (int, float)
+            assert -100 <= record["score"] <= 100

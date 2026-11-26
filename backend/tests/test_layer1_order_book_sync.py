@@ -1,3 +1,5 @@
+import asyncio
+import time
 import unittest
 
 from app.market_data.backend_stream import BinanceOrderBookStream
@@ -19,13 +21,16 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         return event
 
     def test_event_covered_by_snapshot_is_not_bridge(self):
-        self.assertFalse(self.stream._event_bridges_snapshot(self.event(98, 100)))
+        self.assertFalse(self.stream._event_bridges_snapshot(self.event(98, 99)))
 
     def test_bridge_event_with_next_update_id_is_accepted(self):
         self.assertTrue(self.stream._event_bridges_snapshot(self.event(100, 101)))
 
-    def test_bridge_event_exact_next_id_is_accepted(self):
-        self.assertTrue(self.stream._event_bridges_snapshot(self.event(101, 101)))
+    def test_event_starting_after_snapshot_id_is_rejected(self):
+        self.assertFalse(self.stream._event_bridges_snapshot(self.event(101, 101)))
+
+    def test_snapshot_id_boundary_is_valid_bridge(self):
+        self.assertTrue(self.stream._event_bridges_snapshot(self.event(100, 100)))
 
     def test_event_starting_after_required_next_id_is_rejected(self):
         self.assertFalse(self.stream._event_bridges_snapshot(self.event(102, 103)))
@@ -38,9 +43,9 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertFalse(self.stream._event_bridges_snapshot(self.event(1, 2)))
 
     def test_apply_first_bridging_event_updates_book_and_sequence(self):
-        e = self.event(100, 101, bids=[["100.0", "0"], ["99.5", "7"]], asks=[["101.0", "6"]])
+        e = self.event(100, 101, bids=[["100.0", "0"], ["99.5", "7"]], asks=[["101.0", "6"]], previous=99)
         self.assertTrue(self.stream._event_bridges_snapshot(e))
-        self.assertTrue(self.stream._apply_event(e))
+        self.assertTrue(self.stream._apply_snapshot_bridge(e))
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertNotIn(100.0, self.stream.bids)
         self.assertEqual(self.stream.bids[99.5], 7.0)
@@ -88,6 +93,33 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.stream.last_update_id = 101
         with self.assertRaises((ValueError, TypeError)):
             self.stream._apply_event(e)
+
+    def test_stale_book_is_not_returned(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = time.time() - 10
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_duplicate_event_does_not_refresh_stale_book(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        old_progress = time.time() - 10
+        self.stream.last_book_update_at = old_progress
+        self.assertTrue(self.stream._apply_event(self.event(90, 100)))
+        self.assertEqual(self.stream.last_book_update_at, old_progress)
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_progressing_event_refreshes_book_and_returns_age(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = None
+        event = self.event(101, 101, bids=[["99.5", "1.0"]])
+        self.assertTrue(self.stream._apply_event(event))
+        book = asyncio.run(self.stream.get_order_book())
+        self.assertIsNotNone(book)
+        self.assertFalse(book["stale"])
+        self.assertLessEqual(book["age_seconds"], 3.0)
+        self.assertEqual(book["last_update_id"], 101)
 
     def test_stop_marks_stream_unsynchronized(self):
         self.assertFalse(self.stream.synchronized)

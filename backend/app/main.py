@@ -13,6 +13,7 @@ from app.market_data.backend_stream import BinanceOrderBookStream
 from app.market_data.unified_engine import UnifiedMarketDataEngine
 from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BybitPublicAdapter, DeltaPublicAdapter
 from app.services.coin_scanner import CoinMarketScanner
+from app.services.opportunity_ranker import OpportunityRanker
 from app.services.imbalance_detector import OrderBookImbalanceDetector
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 from app.services.liquidity_zone_detector import LiquidityZoneDetector
@@ -26,6 +27,7 @@ from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
 from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
 from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
+from app.services.trade_management import TradeManagementEngine, TradeManagementConfig
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 from app.services.controlled_paper_session import ControlledPaperSession
 import logging
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
     stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
     app.state.coin_scanner=CoinMarketScanner()
+    app.state.opportunity_ranker=OpportunityRanker()
     app.state.imbalance_detector=OrderBookImbalanceDetector()
     app.state.absorption_detector=AbsorptionLiquidityDetector()
     app.state.liquidity_zone_detector=LiquidityZoneDetector()
@@ -51,6 +54,7 @@ async def lifespan(app: FastAPI):
     app.state.market_regime_context_engine=MarketRegimeContextEngine()
     app.state.risk_management_engine=RiskManagementEngine()
     app.state.paper_trading_engine=PaperTradingEngine()
+    app.state.trade_management_engine=TradeManagementEngine()
     persistence_worker=PaperPersistenceWorker(repository)
     app.state.paper_persistence_worker=persistence_worker
     recovered=await persistence_worker.restore_state(app.state.paper_trading_engine)
@@ -149,6 +153,12 @@ class PaperOrderRequest(BaseModel):
     ttp_enabled:bool=False
     ttp_activation_pct:float|None=Field(default=None,gt=0,lt=100)
     ttp_trail_pct:float|None=Field(default=None,gt=0,lt=100)
+class PhaseDManagementEvaluationRequest(BaseModel):
+    position: dict[str, Any]
+    market: dict[str, Any]
+    config: dict[str, Any] = Field(default_factory=dict)
+    now_seconds: float | None = None
+
 class PaperManagementRequest(BaseModel):
     stop_loss_price:float|None=None
     take_profit_price:float|None=None
@@ -212,6 +222,22 @@ async def get_order_book():
     book=await app.state.market_stream.get_order_book()
     if book is None: raise HTTPException(status_code=503,detail="Order book is not synchronized yet.")
     return {"symbol":"BTCUSDT","order_book":book}
+@app.get("/api/market-data/observability")
+async def market_data_observability():
+    """Read-only consolidated feed diagnostics for the monitoring UI."""
+    unified=app.state.unified_market_data.get_status()
+    primary=await app.state.market_stream.get_status()
+    exchanges=await app.state.exchange_manager.status()
+    return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
+        "live_execution_enabled":False,"primary_binance_demo_stream":primary,
+        "unified_market_data":unified,"exchange_connections":exchanges,
+        "summary":{"exchange_adapter_count":len(exchanges.get("exchanges",[])),
+          "unified_book_count":len(unified.get("books",{})),
+          "synchronized_book_count":sum(1 for b in unified.get("books",{}).values() if b.get("synchronized") and not b.get("stale")),
+          "healthy_feed_count":sum(1 for e in exchanges.get("exchanges",[]) if e.get("connected") and e.get("last_message_age_seconds") is not None and e.get("last_message_age_seconds")<=unified.get("stale_after_seconds",3)),
+          "feed_errors":sum(1 for e in exchanges.get("exchanges",[]) if e.get("last_error")),
+          "safety":"PUBLIC_FEEDS_ONLY; REAL_EXCHANGE_ORDERS_DISABLED"}}
+
 @app.get("/api/market-data/unified/status")
 async def unified_status(): return app.state.unified_market_data.get_status()
 @app.get("/api/market-data/unified/book/{exchange}/{symbol}")
@@ -322,6 +348,40 @@ async def scan_coins(limit:int=Query(default=20,ge=1,le=100),include_rejected:bo
         return await app.state.coin_scanner.scan(limit=limit,include_rejected=include_rejected)
     except Exception as exc:
         raise HTTPException(status_code=502,detail=f"Coin scan failed: {exc}")
+
+@app.get("/api/scanner/opportunities")
+async def scan_opportunities(
+    limit:int=Query(default=20,ge=1,le=100),
+    min_score:float=Query(default=0,ge=0,le=100),
+    min_volume_usdt:float=Query(default=0,ge=0),
+    max_spread_pct:float=Query(default=100,ge=0),
+    include_filtered:bool=False,
+):
+    """Read-only Phase C scan with transparent ranking and quality filters."""
+    try:
+        raw=await app.state.coin_scanner.scan(limit=100,include_rejected=True)
+        ranked=app.state.opportunity_ranker.rank(raw.get("markets",[]))
+        markets=ranked.get("markets",[])
+        filtered=[]
+        for row in markets:
+            if row.get("phase_c_score",0)<min_score: continue
+            if row.get("quote_volume_24h",0)<min_volume_usdt: continue
+            if row.get("spread_pct",0)>max_spread_pct: continue
+            if not include_filtered and row.get("phase_c_review_status")!="REVIEW_CANDIDATE": continue
+            filtered.append(row)
+        filtered=filtered[:limit]
+        return {
+            **ranked,
+            "markets":filtered,
+            "filters":{"limit":limit,"min_score":min_score,"min_volume_usdt":min_volume_usdt,
+                "max_spread_pct":max_spread_pct,"include_filtered":include_filtered},
+            "source_scan":{"scanned_at_ms":raw.get("scanned_at_ms"),
+                "total_symbols_scanned":raw.get("total_symbols_scanned"),
+                "candidate_count":raw.get("candidate_count")},
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail=f"Opportunity scan failed: {exc}")
+
 @app.get("/api/demo/account")
 async def demo_account():
     try: return await BinanceDemoClient().get_account()
@@ -421,8 +481,7 @@ app.include_router(operator_control_router)
 async def infrastructure_status():
     database_status = await database.status(refresh=True)
     diagnostics = app.state.monitoring_service.diagnostics(app)
-    return {
-        "service": "orderflow-scalper-api",
+    return {        "service": "orderflow-scalper-api",
         "status": "ready" if diagnostics["status"] == "ok" and database_status.get("connected") else "degraded",
         "core_components_ready": diagnostics["status"] == "ok",
         "database_required_for_testing": True,
@@ -453,3 +512,18 @@ async def readiness():
 async def binance_connectivity_diagnostics():
     """Backend-origin Binance connectivity checks; read-only, never places orders."""
     return await run_binance_diagnostics()
+
+# Phase D — deterministic trade-management evaluation (advisory; paper-only)
+@app.get("/api/trade-management/status")
+async def trade_management_status():
+    return app.state.trade_management_engine.describe()
+
+@app.post("/api/trade-management/evaluate")
+async def trade_management_evaluate(request: PhaseDManagementEvaluationRequest):
+    try:
+        config = TradeManagementConfig(**request.config)
+        engine = TradeManagementEngine(config)
+        result = engine.evaluate(request.position, request.market, request.now_seconds)
+        return {**result.__dict__, "management_notes": list(result.management_notes), "mode": "PAPER_ONLY", "execution_performed": False}
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))

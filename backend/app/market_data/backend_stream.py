@@ -10,6 +10,7 @@ Market data only:
 import asyncio
 import json
 import logging
+import time
 from collections import deque
 from typing import Any
 
@@ -28,10 +29,12 @@ class BinanceOrderBookStream:
         self,
         symbol: str = "BTCUSDT",
         snapshot_limit: int = 1000,
+        stale_after_seconds: float = 3.0,
     ):
         self.symbol = symbol.upper()
         self.stream_symbol = symbol.lower()
         self.snapshot_limit = snapshot_limit
+        self.stale_after_seconds = max(0.1, float(stale_after_seconds))
 
         self.bids: dict[float, float] = {}
         self.asks: dict[float, float] = {}
@@ -40,6 +43,23 @@ class BinanceOrderBookStream:
         self.connected = False
         self.synchronized = False
         self.last_error: str | None = None
+        self.connected_at: float | None = None
+        self.last_event_at: float | None = None
+        # Timestamp only when a depth update advances the book sequence.
+        self.last_book_update_at: float | None = None
+        self.last_sync_at: float | None = None
+        self.last_disconnect_at: float | None = None
+        self.messages_received = 0
+        self.snapshot_count = 0
+        self.sequence_gap_count = 0
+        self.connection_attempt_count = 0
+        self.successful_connection_count = 0
+        self.reconnect_count = 0
+        self.recovery_count = 0
+        self.last_reconnect_at: float | None = None
+        self.last_recovery_at: float | None = None
+        self.synchronized_since: float | None = None
+        self.last_disconnect_reason: str | None = None
 
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
@@ -76,8 +96,51 @@ class BinanceOrderBookStream:
 
             self._task = None
 
+        self._record_disconnect("stop_requested")
+
+    def _record_connection_attempt(self):
+        self.connection_attempt_count += 1
+
+    def _record_connection_success(self, now: float | None = None):
+        now = time.time() if now is None else now
+        self.connected = True
+        self.connected_at = now
+        self.successful_connection_count += 1
+        if self.successful_connection_count > 1:
+            self.reconnect_count += 1
+            self.last_reconnect_at = now
+        self.synchronized = False
+        self.synchronized_since = None
+        self.last_event_at = None
+        self.last_book_update_at = None
+        self.last_error = None
+
+    def _record_disconnect(self, reason: str):
+        now = time.time()
         self.connected = False
         self.synchronized = False
+        self.synchronized_since = None
+        self.last_disconnect_at = now
+        self.last_disconnect_reason = reason
+
+    def _record_synchronized(self, now: float | None = None):
+        now = time.time() if now is None else now
+        self.synchronized = True
+        self.last_sync_at = now
+        self.synchronized_since = now
+        if self.successful_connection_count > 1:
+            self.recovery_count += 1
+            self.last_recovery_at = now
+
+    def _apply_snapshot_bridge(self, event: dict[str, Any]) -> bool:
+        """Apply the first event bridging the REST snapshot before marking the book synced."""
+        if not self._event_bridges_snapshot(event):
+            return False
+        # The first buffered event is validated by U/u snapshot overlap, not pu.
+        if not self._apply_event(event, validate_previous_sequence=False):
+            return False
+        self._record_synchronized()
+        return True
 
     # --------------------------------------------------
     # Connection and synchronization
@@ -93,13 +156,12 @@ class BinanceOrderBookStream:
 
             except Exception as exc:
                 self.last_error = str(exc)
+                self._record_disconnect(self.last_error)
+                logger.exception("Binance order-book connection failed")
 
-                logger.exception(
-                    "Binance order-book connection failed"
-                )
-
-            self.connected = False
-            self.synchronized = False
+            else:
+                if not self._stop_event.is_set():
+                    self._record_disconnect(self.last_error or "WebSocket session ended")
 
             if not self._stop_event.is_set():
                 await asyncio.sleep(3)
@@ -115,6 +177,7 @@ class BinanceOrderBookStream:
             f"{self.stream_symbol}@depth@100ms"
         )
 
+        self._record_connection_attempt()
         async with websockets.connect(
             stream_url,
             ping_interval=20,
@@ -123,9 +186,7 @@ class BinanceOrderBookStream:
             max_size=2**20,
         ) as websocket:
 
-            self.connected = True
-            self.synchronized = False
-            self.last_error = None
+            self._record_connection_success()
 
             logger.info(
                 "Connected to Binance stream: %s",
@@ -138,6 +199,8 @@ class BinanceOrderBookStream:
             async def collect_events():
                 async for message in websocket:
                     event = json.loads(message)
+                    self.messages_received += 1
+                    self.last_event_at = time.time()
                     await event_queue.put(event)
 
             collector_task = asyncio.create_task(
@@ -156,9 +219,13 @@ class BinanceOrderBookStream:
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
-                            self._apply_event(event)
-
-                        self.synchronized = True
+                            if not self._apply_snapshot_bridge(event):
+                                self.sequence_gap_count += 1
+                                self.last_error = (
+                                    "Snapshot bridge event failed continuity validation; "
+                                    "reconnecting for a fresh snapshot"
+                                )
+                                return
 
                 logger.info(
                     "Order book synchronized: %s update_id=%s",
@@ -174,6 +241,10 @@ class BinanceOrderBookStream:
                         if not self._apply_event(event):
                             # A sequence gap occurred.
                             # Reconnect and obtain a fresh snapshot.
+                            self.sequence_gap_count += 1
+                            self.synchronized = False
+                            self.synchronized_since = None
+                            self.last_error = "Order-book sequence gap; reconnecting for snapshot recovery"
                             logger.warning(
                                 "Order-book sequence gap detected"
                             )
@@ -234,6 +305,8 @@ class BinanceOrderBookStream:
         )
 
         self.synchronized = False
+        self.snapshot_count += 1
+        self.last_error = None
 
     def _event_bridges_snapshot(
         self,
@@ -254,22 +327,18 @@ class BinanceOrderBookStream:
         first_update_id = int(event["U"])
         final_update_id = int(event["u"])
 
-        # Ignore events already covered by the snapshot.
-        if final_update_id < self.last_update_id:
-            return False
-
-        # Binance futures depth synchronization requires the first accepted
-        # event to bridge snapshot_id + 1. Events entirely covered by the
-        # snapshot (u <= snapshot_id) must be discarded, not treated as sync.
-        next_update_id = self.last_update_id + 1
+        # USD-M Futures differs from Spot: the first accepted event must
+        # overlap the REST snapshot's update ID itself (U <= lastUpdateId <= u).
         return (
-            first_update_id <= next_update_id
+            first_update_id <= self.last_update_id
             <= final_update_id
         )
 
     def _apply_event(
         self,
         event: dict[str, Any],
+        *,
+        validate_previous_sequence: bool = True,
     ) -> bool:
         """
         Apply a depth event.
@@ -287,16 +356,17 @@ class BinanceOrderBookStream:
         if final_update_id <= self.last_update_id:
             return True
 
-        # For subsequent events, pu should match the
-        # previous event's final update ID.
-        previous_final_id = event.get("pu")
+        # Snapshot-bridge events are validated by U/u overlap with the REST
+        # snapshot. Only events after that bridge enforce pu continuity.
+        if validate_previous_sequence:
+            previous_final_id = event.get("pu")
 
-        if previous_final_id is not None:
-            if int(previous_final_id) != self.last_update_id:
+            if previous_final_id is not None:
+                if int(previous_final_id) != self.last_update_id:
+                    return False
+
+            elif first_update_id > self.last_update_id + 1:
                 return False
-
-        elif first_update_id > self.last_update_id + 1:
-            return False
 
         self._update_levels(
             self.bids,
@@ -309,6 +379,9 @@ class BinanceOrderBookStream:
         )
 
         self.last_update_id = final_update_id
+        # A progressing, accepted depth event—not mere message receipt—refreshes
+        # the book's usable-data freshness clock.
+        self.last_book_update_at = time.time()
 
         return True
 
@@ -331,12 +404,58 @@ class BinanceOrderBookStream:
     # --------------------------------------------------
 
     async def get_status(self) -> dict[str, Any]:
+        now = time.time()
+        event_age = max(0.0, now - self.last_event_at) if self.last_event_at is not None else None
+        sync_age = max(0.0, now - self.last_sync_at) if self.last_sync_at is not None else None
+        recovery_age = max(0.0, now - self.last_recovery_at) if self.last_recovery_at is not None else None
+        book_age = (
+            max(0.0, now - self.last_book_update_at)
+            if self.last_book_update_at is not None
+            else None
+        )
+        stale = (
+            not self.connected
+            or not self.synchronized
+            or book_age is None
+            or book_age > self.stale_after_seconds
+        )
+        synchronized_duration = (
+            max(0.0, now - self.synchronized_since)
+            if self.synchronized and self.synchronized_since is not None
+            else None
+        )
+        connected_duration = (
+            max(0.0, now - self.connected_at)
+            if self.connected and self.connected_at is not None
+            else None
+        )
         return {
             "symbol": self.symbol,
             "connected": self.connected,
             "synchronized": self.synchronized,
+            "stale": stale,
+            "fresh": not stale,
+            "healthy": self.connected and self.synchronized and not stale,
+            "stale_after_seconds": self.stale_after_seconds,
             "last_update_id": self.last_update_id,
             "last_error": self.last_error,
+            "connected_duration_seconds": round(connected_duration, 3) if connected_duration is not None else None,
+            "synchronized_duration_seconds": round(synchronized_duration, 3) if synchronized_duration is not None else None,
+            "last_event_age_seconds": round(event_age, 3) if event_age is not None else None,
+            "last_book_update_age_seconds": round(book_age, 3) if book_age is not None else None,
+            "last_sync_age_seconds": round(sync_age, 3) if sync_age is not None else None,
+            "last_disconnect_at": self.last_disconnect_at,
+            "last_disconnect_reason": self.last_disconnect_reason,
+            "connection_attempt_count": self.connection_attempt_count,
+            "successful_connection_count": self.successful_connection_count,
+            "reconnect_count": self.reconnect_count,
+            "recovery_count": self.recovery_count,
+            "last_reconnect_at": self.last_reconnect_at,
+            "last_recovery_at": self.last_recovery_at,
+            "last_recovery_age_seconds": round(recovery_age, 3) if recovery_age is not None else None,
+            "messages_received": self.messages_received,
+            "snapshot_count": self.snapshot_count,
+            "sequence_gap_count": self.sequence_gap_count,
         }
 
     async def get_order_book(
@@ -345,9 +464,17 @@ class BinanceOrderBookStream:
     ) -> dict[str, Any] | None:
 
         async with self._lock:
+            age_seconds = (
+                max(0.0, time.time() - self.last_book_update_at)
+                if self.last_book_update_at is not None
+                else None
+            )
             if (
-                not self.synchronized
+                not self.connected
+                or not self.synchronized
                 or self.last_update_id is None
+                or age_seconds is None
+                or age_seconds > self.stale_after_seconds
             ):
                 return None
 
@@ -364,6 +491,8 @@ class BinanceOrderBookStream:
 
             return {
                 "last_update_id": self.last_update_id,
+                "age_seconds": round(age_seconds, 3),
+                "stale": False,
                 "bids": [
                     [price, quantity]
                     for price, quantity in sorted_bids

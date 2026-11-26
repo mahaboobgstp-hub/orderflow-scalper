@@ -1,6 +1,6 @@
 # Nine-Layer Decision Engine — Development Record
 
-**Status:** Integrated into the autonomous PAPER runtime; testing intentionally deferred by operator request.
+**Status:** Integrated into the autonomous PAPER runtime; feature-branch CI tests/build checks have passed. Strategy profitability and sustained live-feed validation remain unproven.
 **Execution safety:** Paper simulator only. No live exchange order execution is called by this engine.
 
 ## Layers and evidence mapping
@@ -33,4 +33,4 @@
 - Detector availability depends on a symbol actually having synchronized live book and trades in the unified engine.
 - Layer 7/8 use ticker proxies and are not validated candle-based regime/context.
 - Daily loss and consecutive loss gates currently use in-memory simulator trade history; durable recovery and edge cases require later testing.
-- This record does not imply any test execution, strategy profitability, or deployment validation.
+- This record documents code/CI validation only; it does not imply strategy profitability, sustained live-feed quality, or production deployment validation.
