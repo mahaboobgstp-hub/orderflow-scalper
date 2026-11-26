@@ -72,39 +72,12 @@ class AutonomousPaperRuntime:
             inputs["absorption"]=self._detect(self.absorption,book,trades,15)
             inputs["zones"]=self._detect(self.zones,book,trades,300)
             inputs["trade_flow"]=self._detect(self.trade_flow,book,trades,15)
-        # Paper portfolio risk assessment: daily loss/consecutive loss are not yet
-        # reconstructed into durable guard counters, so use conservative known-state checks.
         account=self.paper_engine.account()
-        equity=float(account.get("equity",0)); positions=len(self.paper_engine.positions)
-        cfg=self.config
-        risk_blockers=[]
-        max_positions=int(cfg.get("max_open_positions",3))
-        if positions>=max_positions: risk_blockers.append("MAX_OPEN_POSITIONS_REACHED")
-        if symbol in self.paper_engine.positions: risk_blockers.append("DUPLICATE_SYMBOL_POSITION")
-        if not book: risk_blockers.append("SYNCHRONIZED_BOOK_UNAVAILABLE")
-        # Daily loss and consecutive-loss guardrails are computed from simulator history.
-        today=datetime.now(timezone.utc).date()
-        today_losses=sum(max(0.0,-float(t.get("net_pnl",0) or 0)) for t in self.paper_engine.closed_trades
-            if datetime.fromtimestamp(int(t.get("closed_at_ms",0))/1000,timezone.utc).date()==today)
-        daily_loss_limit=equity*float(cfg.get("max_daily_loss_pct",2.0))/100
-        if today_losses>=daily_loss_limit: risk_blockers.append("DAILY_LOSS_LIMIT_REACHED")
-        recent=self.paper_engine.closed_trades[-int(cfg.get("max_consecutive_losses",3)):]
-        consecutive=0
-        for trade in reversed(recent):
-            if float(trade.get("net_pnl",0) or 0)<0: consecutive+=1
-            else: break
-        if consecutive>=int(cfg.get("max_consecutive_losses",3)): risk_blockers.append("CONSECUTIVE_LOSS_LIMIT_REACHED")
-        open_risk=0.0
-        for pos in self.paper_engine.positions.values():
-            stop=pos.get("stop_loss_price")
-            if stop:
-                open_risk+=abs(float(pos.get("entry_price",0))-float(stop))*float(pos.get("quantity",0))
-        next_risk=equity*float(cfg.get("risk_per_trade_pct",0.5))/100
-        total_risk_limit=equity*float(cfg.get("max_total_exposure_pct",25))/100
-        if open_risk+next_risk>total_risk_limit: risk_blockers.append("TOTAL_OPEN_RISK_LIMIT_WOULD_BE_EXCEEDED")
-        risk={"allowed":not risk_blockers,"blockers":risk_blockers,"equity":equity,"open_positions":positions,
-            "exchange":exchange,"daily_realized_loss":today_losses,"daily_loss_limit":daily_loss_limit,
-            "open_stop_risk":open_risk,"open_risk_limit":total_risk_limit,"consecutive_losses":consecutive}
+        equity=float(account.get("equity",0)); positions=len(self.paper_engine.positions); cfg=self.config
+        risk=self.risk_engine.evaluate_runtime_gate(account_equity=equity,closed_trades=self.paper_engine.closed_trades,
+            orders=self.paper_engine.orders,positions=self.paper_engine.positions,symbol=symbol,config=cfg,synchronized_book=bool(book))
+        risk_blockers=risk["blockers"]
+        risk["exchange"]=exchange
         result=self.decision_engine.evaluate(symbol,inputs,risk)
         result["exchange"]=exchange; result["price"]=market.get("last_price")
         # Convert decision into a guarded PAPER-only simulated order. No exchange
