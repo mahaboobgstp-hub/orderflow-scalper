@@ -202,6 +202,14 @@ class BinanceOrderBookStream:
                 while not self.synchronized:
                     event = await next_event()
 
+                    # A forward jump beyond the first snapshot-bridging update
+                    # cannot be repaired by waiting for later events on this stream.
+                    # Restart and fetch a new REST snapshot instead.
+                    if self._snapshot_bridge_gap(event):
+                        raise ConnectionError(
+                            "Depth stream gap before snapshot bridge; resynchronizing."
+                        )
+
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
                             applied = self._apply_event(
@@ -351,6 +359,18 @@ class BinanceOrderBookStream:
             except (ValueError, OverflowError):
                 return None
         return None
+
+    def _snapshot_bridge_gap(self, event: dict[str, Any]) -> bool:
+        """Return True when the first buffered event already skipped the snapshot bridge."""
+        if self.last_update_id is None or not isinstance(event, dict):
+            return False
+        first_update_id = self._parse_update_id(event.get("U"))
+        final_update_id = self._parse_update_id(event.get("u"))
+        if first_update_id is None or final_update_id is None:
+            return False
+        if first_update_id > final_update_id:
+            return False
+        return first_update_id > self.last_update_id + 1
 
     def _event_bridges_snapshot(
         self,
