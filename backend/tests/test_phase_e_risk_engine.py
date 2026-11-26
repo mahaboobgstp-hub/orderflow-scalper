@@ -11,7 +11,7 @@ def test_phase_e_daily_loss_uses_net_pnl_not_gross_loss_sum():
 
 def test_phase_e_daily_loss_limit_blocks():
     e=RiskManagementEngine(); r=e.evaluate_runtime_gate(account_equity=10000,closed_trades=_closed([-200]),orders=[],positions={},symbol="BTCUSDT",config={"max_daily_loss_pct":2},now_ms=DAY_MS)
-    assert "DAILY_LOSS_LIMIT_REACHED" in r["blockers"]]
+    assert "DAILY_LOSS_LIMIT_REACHED" in r["blockers"]
 
 def test_phase_e_trade_count_limit_blocks():
     e=RiskManagementEngine(); orders=[{"created_at_ms":DAY_MS,"status":"FILLED_SIMULATED"} for _ in range(3)]
