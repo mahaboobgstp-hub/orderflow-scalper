@@ -141,8 +141,11 @@ class AbsorptionLiquidityDetector:
         # Without a temporal baseline, scores remain zero to avoid false absorption.
         if has_recent_baseline and len(normalized)>=self.min_trades and total_qty>0:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
-            buy_absorption_score=buy_share*max(0.0,1.0-min(max(buy_progress_pct,0.0)/0.10,1.0))
-            sell_absorption_score=sell_share*max(0.0,1.0-min(max(sell_progress_pct,0.0)/0.10,1.0))
+            # Absorption is a stall hypothesis: movement away from the prior mid
+            # in either direction weakens the score. Adverse movement can reflect
+            # opposing pressure, not passive liquidity absorbing aggressor flow.
+            buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
+            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
         sell_absorbed=sell_absorption_score>=self.absorption_threshold
         if buy_absorbed and sell_absorbed: label="MIXED_ABSORPTION"
