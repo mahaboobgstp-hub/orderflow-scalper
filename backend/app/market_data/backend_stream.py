@@ -10,6 +10,7 @@ Market data only:
 import asyncio
 import json
 import logging
+import time
 from collections import deque
 from typing import Any
 
@@ -40,6 +41,13 @@ class BinanceOrderBookStream:
         self.connected = False
         self.synchronized = False
         self.last_error: str | None = None
+        self.connected_at: float | None = None
+        self.last_event_at: float | None = None
+        self.last_sync_at: float | None = None
+        self.last_disconnect_at: float | None = None
+        self.messages_received = 0
+        self.snapshot_count = 0
+        self.sequence_gap_count = 0
 
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
@@ -78,6 +86,7 @@ class BinanceOrderBookStream:
 
         self.connected = False
         self.synchronized = False
+        self.last_disconnect_at = time.time()
 
     # --------------------------------------------------
     # Connection and synchronization
@@ -124,6 +133,7 @@ class BinanceOrderBookStream:
         ) as websocket:
 
             self.connected = True
+            self.connected_at = time.time()
             self.synchronized = False
             self.last_error = None
 
@@ -138,6 +148,8 @@ class BinanceOrderBookStream:
             async def collect_events():
                 async for message in websocket:
                     event = json.loads(message)
+                    self.messages_received += 1
+                    self.last_event_at = time.time()
                     await event_queue.put(event)
 
             collector_task = asyncio.create_task(
@@ -159,6 +171,7 @@ class BinanceOrderBookStream:
                             self._apply_event(event)
 
                         self.synchronized = True
+                        self.last_sync_at = time.time()
 
                 logger.info(
                     "Order book synchronized: %s update_id=%s",
@@ -174,6 +187,10 @@ class BinanceOrderBookStream:
                         if not self._apply_event(event):
                             # A sequence gap occurred.
                             # Reconnect and obtain a fresh snapshot.
+                            self.sequence_gap_count += 1
+                            self.synchronized = False
+                            self.last_error = "Order-book sequence gap; reconnecting for snapshot recovery"
+                            self.last_disconnect_at = time.time()
                             logger.warning(
                                 "Order-book sequence gap detected"
                             )
@@ -234,6 +251,8 @@ class BinanceOrderBookStream:
         )
 
         self.synchronized = False
+        self.snapshot_count += 1
+        self.last_error = None
 
     def _event_bridges_snapshot(
         self,
@@ -331,12 +350,20 @@ class BinanceOrderBookStream:
     # --------------------------------------------------
 
     async def get_status(self) -> dict[str, Any]:
+        now = time.time()
         return {
             "symbol": self.symbol,
             "connected": self.connected,
             "synchronized": self.synchronized,
             "last_update_id": self.last_update_id,
             "last_error": self.last_error,
+            "connected_duration_seconds": round(now-self.connected_at, 3) if self.connected_at is not None and self.connected else None,
+            "last_event_age_seconds": round(now-self.last_event_at, 3) if self.last_event_at is not None else None,
+            "last_sync_age_seconds": round(now-self.last_sync_at, 3) if self.last_sync_at is not None else None,
+            "last_disconnect_at": self.last_disconnect_at,
+            "messages_received": self.messages_received,
+            "snapshot_count": self.snapshot_count,
+            "sequence_gap_count": self.sequence_gap_count,
         }
 
     async def get_order_book(
