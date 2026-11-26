@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 
 
@@ -15,18 +16,24 @@ def trades(side="buy",qty=1.0,count=8,price=100.05):
 class Phase6DetectorTests(unittest.TestCase):
     def test_high_aggressive_buy_with_limited_progress_is_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("buy"),15)
-        result=detector.analyze(book(),trades("buy"),15)
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        self._analyze_at(detector,book(),tape,t0)
+        result=self._analyze_at(detector,book(),tape,t0+1000)
         self.assertEqual(result["classification"],"POSSIBLE_BUY_ABSORPTION")
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
+        self.assertFalse(result["metrics"]["sell_absorption_candidate"])
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],8.0)
 
     def test_sell_side_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("sell"),15)
-        result=detector.analyze(book(),trades("sell"),15)
+        t0=1_000_000
+        tape=self._fixed_tape("sell",100.05,t0,count=8)
+        self._analyze_at(detector,book(),tape,t0)
+        result=self._analyze_at(detector,book(),tape,t0+1000)
         self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
         self.assertTrue(result["metrics"]["sell_absorption_candidate"])
+        self.assertFalse(result["metrics"]["buy_absorption_candidate"])
 
     def test_first_sample_does_not_infer_absorption_without_temporal_baseline(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades("buy"),15)
@@ -34,19 +41,28 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
 
     def test_buy_and_sell_progress_are_temporal_and_directional(self):
-        detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("buy"),15)
-        up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),trades("buy"),15)
-        self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
-        self.assertEqual(up["metrics"]["sell_price_progress_pct"],0.0)
-        down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),trades("sell"),15)
-        self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
-        self.assertEqual(down["metrics"]["buy_price_progress_pct"],0.0)
+        up=self._progress_case("buy",0.10)
+        self.assertAlmostEqual(up["metrics"]["buy_price_progress_pct"],0.10,places=5)
+        self.assertAlmostEqual(up["metrics"]["sell_price_progress_pct"],-0.10,places=5)
+        down=self._progress_case("sell",-0.10)
+        self.assertAlmostEqual(down["metrics"]["sell_price_progress_pct"],0.10,places=5)
+        self.assertAlmostEqual(down["metrics"]["buy_price_progress_pct"],-0.10,places=5)
 
     def test_no_clear_absorption_when_tape_below_minimum(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["trade_count"],2)
+
+    def test_refuses_nonboolean_sync_and_stale_flags(self):
+        detector = AbsorptionLiquidityDetector()
+        for value in (1, "true", None):
+            with self.subTest(synchronized=value):
+                with self.assertRaisesRegex(ValueError, "unsynchronized"):
+                    detector.analyze(book(synchronized=value), trades())
+        for value in (0, "false", None):
+            with self.subTest(stale=value):
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    detector.analyze(book(stale=value), trades())
 
     def test_refuses_unsynced_and_stale_book(self):
         detector=AbsorptionLiquidityDetector()
@@ -61,16 +77,18 @@ class Phase6DetectorTests(unittest.TestCase):
 
     def test_liquidity_changes_need_two_samples(self):
         detector=AbsorptionLiquidityDetector()
-        first=detector.analyze(book(),trades())
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        first=self._analyze_at(detector,book(),tape,t0)
         self.assertIsNone(first["liquidity_observation"]["replenishment"])
-        second=detector.analyze(book(bids=[[100.0,14.0],[99.9,8.0]]),trades())
+        second=self._analyze_at(detector,book(bids=[[100.0,14.0],[99.9,8.0]]),tape,t0+1000)
         self.assertTrue(second["liquidity_observation"]["replenishment"]["bid_replenished"])
 
     def test_trade_flow_summary_and_diagnostics(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=7),15)
         self.assertIn("flow_exhaustion",result)
         self.assertIn("quality",result)
-        self.assertIn("not an entry",result["diagnostics"][4].lower())
+        self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
 
 
     def test_rejects_negative_and_nonfinite_book_age(self):
@@ -83,6 +101,35 @@ class Phase6DetectorTests(unittest.TestCase):
     def test_rejects_non_numeric_book_age(self):
         with self.assertRaisesRegex(ValueError, "age"):
             AbsorptionLiquidityDetector().analyze(book(age_seconds="not-a-number"),trades())
+
+    def test_rejects_boolean_and_fractional_integer_configuration(self):
+        for value in (True, 3.5):
+            with self.subTest(history_size=value):
+                with self.assertRaisesRegex(ValueError, "history_size"):
+                    AbsorptionLiquidityDetector(history_size=value)
+            with self.subTest(min_trades=value):
+                with self.assertRaisesRegex(ValueError, "min_trades"):
+                    AbsorptionLiquidityDetector(min_trades=value)
+        with self.assertRaisesRegex(ValueError, "finite numeric"):
+            AbsorptionLiquidityDetector(max_book_age_seconds=True)
+        with self.assertRaisesRegex(ValueError, "finite numeric"):
+            AbsorptionLiquidityDetector(absorption_threshold=False)
+
+    def test_stale_prior_sample_does_not_report_liquidity_changes(self):
+        detector=AbsorptionLiquidityDetector()
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        self._analyze_at(detector,book(),tape,t0)
+        detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=20_000
+        t1=t0+1_000
+        current_tape=self._fixed_tape("buy",100.05,t1,count=8)
+        with patch("app.services.absorption_detector.time.time",return_value=t1/1000.0):
+            result=detector.analyze(book(),current_tape,lookback_seconds=1)
+        observation=result["liquidity_observation"]
+        self.assertFalse(observation["previous_sample_available"])
+        self.assertIsNone(observation["replenishment"])
+        self.assertIsNone(observation["depletion"])
+        self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
 
     def test_rejects_nonfinite_detector_configuration(self):
         for value in (float("nan"),float("inf"),float("-inf")):
@@ -116,14 +163,20 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertEqual(result["trade_count"],2)
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],2.0)
 
-    def test_flow_exhaustion_uses_timestamp_order_not_input_order(self):
+    def test_same_millisecond_samples_do_not_create_temporal_baseline(self):
         detector=AbsorptionLiquidityDetector()
-        now_ms=int(__import__("time").time()*1000)
-        late=[{"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms-100+i} for i in range(3)]
-        early=[{"side":"buy","quantity":10,"price":100.05,"received_timestamp_ms":now_ms-200+i} for i in range(3)]
-        # Deliberately pass later trades before earlier ones.
-        result=detector.analyze(book(),late+early,15)
-        self.assertEqual(result["flow_exhaustion"],"FLOW_WEAKENING")
+        t0=1_000_000
+        tape=self._fixed_tape("buy",100.05,t0,count=8)
+        first=self._analyze_at(detector,self._book_at_mid(100.05),tape,t0)
+        same_ms=self._analyze_at(detector,self._book_at_mid(100.05),tape,t0)
+        self.assertFalse(same_ms["liquidity_observation"]["previous_sample_available"])
+        self.assertIsNone(same_ms["liquidity_observation"]["replenishment"])
+        self.assertEqual(same_ms["metrics"]["buy_price_progress_pct"],0.0)
+        self.assertEqual(same_ms["metrics"]["buy_absorption_score"],0.0)
+        self.assertFalse(same_ms["metrics"]["buy_absorption_candidate"])
+        later=self._analyze_at(detector,self._book_at_mid(100.05),tape,t0+1)
+        self.assertTrue(later["liquidity_observation"]["previous_sample_available"])
+        self.assertTrue(later["metrics"]["buy_absorption_candidate"])
 
     def test_absorption_requires_baseline_within_lookback(self):
         detector=AbsorptionLiquidityDetector()
@@ -133,6 +186,169 @@ class Phase6DetectorTests(unittest.TestCase):
         result=detector.analyze(book(),trades("buy"),lookback_seconds=1)
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
+
+
+    @staticmethod
+    def _fixed_tape(side, price, timestamp_ms, count=8, quantity=1.0):
+        return [{"side":side,"price":price,"quantity":quantity,"received_timestamp_ms":timestamp_ms} for _ in range(count)]
+
+    @staticmethod
+    def _book_at_mid(mid):
+        return book(bids=[[mid-0.05,10.0],[mid-0.15,8.0]],
+                   asks=[[mid+0.05,10.0],[mid+0.15,8.0]])
+
+    def _analyze_at(self, detector, test_book, tape, timestamp_ms):
+        with patch("app.services.absorption_detector.time.time",return_value=timestamp_ms/1000.0):
+            return detector.analyze(test_book,tape,lookback_seconds=15)
+
+    def _progress_case(self, side, movement_pct):
+        detector=AbsorptionLiquidityDetector()
+        base_mid=100.05
+        first_ts=1_000_000
+        first_tape=self._fixed_tape(side,base_mid,first_ts)
+        self._analyze_at(detector,self._book_at_mid(base_mid),first_tape,first_ts)
+        second_ts=1_001_000
+        target_mid=base_mid*(1.0+movement_pct/100.0)
+        second_tape=self._fixed_tape(side,target_mid,second_ts)
+        return self._analyze_at(detector,self._book_at_mid(target_mid),second_tape,second_ts)
+
+    def test_signed_progress_and_abs_movement_score_thresholds_both_sides(self):
+        cases=[
+            ("buy",0.040,0.600,True,"POSSIBLE_BUY_ABSORPTION"),
+            ("buy",0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            # Small adverse moves remain low-displacement candidates; larger
+            # adverse moves are penalized at the same threshold as favorable moves.
+            ("buy",-0.040,0.600,True,"POSSIBLE_BUY_ABSORPTION"),
+            ("buy",-0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            ("buy",-0.060,0.400,False,"NO_CLEAR_ABSORPTION"),
+            ("buy",0.100,0.000,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",-0.040,0.600,True,"POSSIBLE_SELL_ABSORPTION"),
+            ("sell",-0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",0.040,0.600,True,"POSSIBLE_SELL_ABSORPTION"),
+            ("sell",0.041,0.590,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",0.060,0.400,False,"NO_CLEAR_ABSORPTION"),
+            ("sell",-0.100,0.000,False,"NO_CLEAR_ABSORPTION"),
+        ]
+        for side,movement,expected_score,expected_candidate,expected_class in cases:
+            with self.subTest(side=side,movement_pct=movement):
+                result=self._progress_case(side,movement)
+                metrics=result["metrics"]
+                signed_progress=movement if side=="buy" else -movement
+                score_key=f"{side}_absorption_score"
+                candidate_key=f"{side}_absorption_candidate"
+                progress_key=f"{side}_price_progress_pct"
+                self.assertAlmostEqual(metrics[progress_key],signed_progress,places=5)
+                self.assertAlmostEqual(metrics[score_key],expected_score,places=5)
+                self.assertEqual(metrics[candidate_key],expected_candidate)
+                self.assertEqual(result["classification"],expected_class)
+
+    def test_vwap_vs_mid_sign_is_spatial_and_separate_from_temporal_progress(self):
+        detector=AbsorptionLiquidityDetector()
+        mid=100.05
+        t0=1_000_000
+        positive_tape=self._fixed_tape("buy",mid+0.02,t0,count=5)+self._fixed_tape("sell",mid-0.02,t0,count=5)
+        first=self._analyze_at(detector,self._book_at_mid(mid),positive_tape,t0)
+        t1=1_001_000
+        negative_tape=self._fixed_tape("buy",mid-0.02,t1,count=5)+self._fixed_tape("sell",mid+0.02,t1,count=5)
+        second=self._analyze_at(detector,self._book_at_mid(mid),negative_tape,t1)
+        self.assertGreater(first["metrics"]["buy_vwap_vs_mid_pct"],0)
+        self.assertGreater(first["metrics"]["sell_vwap_vs_mid_pct"],0)
+        self.assertLess(second["metrics"]["buy_vwap_vs_mid_pct"],0)
+        self.assertLess(second["metrics"]["sell_vwap_vs_mid_pct"],0)
+        self.assertEqual(second["metrics"]["buy_price_progress_pct"],0.0)
+        self.assertEqual(second["metrics"]["sell_price_progress_pct"],0.0)
+
+    def test_thin_book_is_exposed_as_low_depth_not_silently_rejected(self):
+        detector=AbsorptionLiquidityDetector()
+        mid=100.05
+        thin=self._book_at_mid(mid)
+        thin["bids"]=[[100.0,0.001]]
+        thin["asks"]=[[100.1,0.001]]
+        t0=1_000_000
+        first=self._fixed_tape("buy",mid,t0)
+        self._analyze_at(detector,thin,first,t0)
+        t1=1_001_000
+        result=self._analyze_at(detector,thin,self._fixed_tape("buy",mid,t1),t1)
+        self.assertEqual(result["metrics"]["top5_bid_depth"],0.001)
+        self.assertEqual(result["metrics"]["top5_ask_depth"],0.001)
+        self.assertTrue(result["metrics"]["buy_absorption_candidate"])
+        self.assertAlmostEqual(result["quality"]["depth_coverage_ratio"],0.00025,places=6)
+        self.assertLess(result["quality"]["score"],1.0)
+    def test_flow_exhaustion_uses_timestamp_order_not_input_order(self):
+        base_ts=1_000
+        quantities=[10.0,10.0,10.0,1.0,1.0,1.0]
+        chronological=[{"side":"buy","quantity":q,"price":100.05,
+                "received_timestamp_ms":base_ts+i*1000} for i,q in enumerate(quantities)]
+        for tape in (chronological,list(reversed(chronological))):
+            with self.subTest(order="chronological" if tape[0]["received_timestamp_ms"]<tape[-1]["received_timestamp_ms"] else "newest-first"):
+                detector=AbsorptionLiquidityDetector()
+                with patch("app.services.absorption_detector.time.time",return_value=10.0):
+                    result=detector.analyze(book(),tape,lookback_seconds=15)
+                self.assertEqual(result["trade_count"],6)
+                self.assertEqual(result["flow_exhaustion"],"FLOW_WEAKENING")
+
+
+    def test_boolean_book_levels_are_filtered_before_mid_and_depth(self):
+        detector=AbsorptionLiquidityDetector()
+        invalid_levels=book(
+            bids=[[True,999.0],[99.9,8.0]],
+            asks=[[100.1,10.0],[100.2,8.0]]
+        )
+        result=detector.analyze(invalid_levels,trades("buy",count=5),15)
+        self.assertEqual(result["metrics"]["top5_bid_depth"],8.0)
+        self.assertEqual(result["metrics"]["mid_price"],100.0)
+
+    def test_boolean_age_and_lookback_are_rejected(self):
+        detector=AbsorptionLiquidityDetector()
+        with self.assertRaisesRegex(ValueError,"age"):
+            detector.analyze(book(age_seconds=True),trades())
+        with self.assertRaisesRegex(ValueError,"Lookback"):
+            detector.analyze(book(),trades(),lookback_seconds=True)
+
+    def test_timestamp_precedence_does_not_fallback_from_invalid_or_zero_received_time(self):
+        detector=AbsorptionLiquidityDetector()
+        now_ms=int(__import__("time").time()*1000)
+        valid=self._fixed_tape("buy",100.05,now_ms,count=5)
+        invalid_primary=[
+            {"side":"buy","price":100.05,"quantity":1.0,"received_timestamp_ms":False,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","price":100.05,"quantity":1.0,"received_timestamp_ms":0,"exchange_timestamp_ms":now_ms},
+        ]
+        result=self._analyze_at(detector,book(),valid+invalid_primary,now_ms)
+        self.assertEqual(result["trade_count"],5)
+
+    def test_micro_volume_is_characterized_as_candidate_without_absolute_volume_gate(self):
+        detector=AbsorptionLiquidityDetector()
+        tiny=self._fixed_tape("buy",100.05,1_000_000,count=5,quantity=1e-8)
+        self._analyze_at(detector,book(),tiny,1_000_000)
+        result=self._analyze_at(detector,book(),tiny,1_001_000)
+        self.assertTrue(result["metrics"]["buy_absorption_candidate"])
+        self.assertEqual(result["quality"]["score"],100.0)
+        self.assertEqual(result["quality"]["depth_coverage_ratio"],1.0)
+
+    def test_balanced_alternating_flow_does_not_trigger_absorption_candidates(self):
+        detector=AbsorptionLiquidityDetector()
+        t0=1_000_000
+        balanced=self._fixed_tape("buy",100.05,t0,count=4)+self._fixed_tape("sell",100.05,t0,count=4)
+        self._analyze_at(detector,book(),balanced,t0)
+        result=self._analyze_at(detector,book(),balanced,1_001_000)
+        self.assertEqual(result["metrics"]["buy_absorption_score"],0.5)
+        self.assertEqual(result["metrics"]["sell_absorption_score"],0.5)
+        self.assertFalse(result["metrics"]["buy_absorption_candidate"])
+        self.assertFalse(result["metrics"]["sell_absorption_candidate"])
+
+    def test_rejects_float_and_boolean_trade_timestamps_and_boolean_trade_values(self):
+        detector=AbsorptionLiquidityDetector()
+        now_ms=1_000_000
+        valid=self._fixed_tape("buy",100.05,now_ms,count=5)
+        invalid_timestamp_values=(1000000.5,1000000.0,True,False,float("nan"),float("inf"),"1000000.5","bad")
+        invalid=[{"side":"buy","price":100.05,"quantity":1.0,"received_timestamp_ms":value} for value in invalid_timestamp_values]
+        invalid.extend([
+            {"side":"buy","price":True,"quantity":1.0,"received_timestamp_ms":now_ms},
+            {"side":"buy","price":100.05,"quantity":True,"received_timestamp_ms":now_ms},
+        ])
+        result=self._analyze_at(detector,book(),valid+invalid,now_ms)
+        self.assertEqual(result["trade_count"],5)
+        self.assertEqual(result["metrics"]["aggressive_buy_quantity"],5.0)
 
 if __name__=="__main__":
     unittest.main()
