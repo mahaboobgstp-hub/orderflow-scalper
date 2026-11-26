@@ -111,7 +111,8 @@ def test_nine_layer_trace_schema_is_complete_and_bounded(engine):
         assert record["direction"] in ("BUY", "SELL", "NEUTRAL", "BLOCK")
         assert isinstance(record["available"], bool)
         assert isinstance(record["reasons"], list)
-        assert isinstance(record["data"], dict)
+        # Layer evidence is intentionally heterogeneous: structured objects or zone lists.
+        assert isinstance(record["data"], (dict, list))
         assert type(record["confidence"]) in (int, float)
         assert 0 <= record["confidence"] <= 100
         if record["score"] is not None:
