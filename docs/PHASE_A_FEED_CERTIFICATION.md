@@ -66,3 +66,8 @@ The exchange-neutral unified market-data engine must not mark an order book fres
 ## Unified-engine retained-depth bound
 
 The exchange-neutral engine's `max_levels` is a per-side in-memory bound, not merely an output-display limit. Snapshots and accepted deltas retain the nearest bid levels (highest prices) and nearest ask levels (lowest prices) up to the configured cap. The best bid/ask and integrity checks are evaluated before trimming, and the cap must be a positive integer. This keeps depth state bounded while preserving the top of book. Tests verify both snapshot and delta trimming and invalid cap rejection.
+
+
+## Database status endpoint is read-only
+
+`GET /api/database/status` performs a read-only connectivity check against `engine_state` and returns cached status fields. It does **not** write an `engine_heartbeat` row. The response keeps `heartbeat_write_verified` for compatibility, set to `null` because no write was attempted, and reports `diagnostic_mode: read_only`. Heartbeats remain lifecycle/periodic writes and must not be triggered by a GET diagnostic.

@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app import main
 from app.market_data.backend_stream import BinanceOrderBookStream
@@ -438,6 +438,23 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(self.stream.bids, {100.0: 2.0})
         self.assertEqual(self.stream.asks, {101.0: 3.0})
         self.assertFalse(self.stream.synchronized)
+
+    def test_database_status_route_is_read_only(self):
+        async def invoke():
+            with patch.object(main.database, "check_connection", new=AsyncMock(return_value=True)) as check, \
+                 patch.object(main.database, "status", new=AsyncMock(return_value={"provider": "supabase", "connected": True})) as status, \
+                 patch.object(main.database, "write_heartbeat", new=AsyncMock(return_value=True)) as heartbeat:
+                payload = await main.database_status()
+                check.assert_awaited_once()
+                status.assert_awaited_once_with(refresh=False)
+                heartbeat.assert_not_awaited()
+                return payload
+
+        payload = asyncio.run(invoke())
+        self.assertEqual(payload["diagnostic_mode"], "read_only")
+        self.assertIsNone(payload["heartbeat_write_verified"])
+        self.assertTrue(payload["connected"])
+
 
 if __name__ == "__main__":
     unittest.main()
