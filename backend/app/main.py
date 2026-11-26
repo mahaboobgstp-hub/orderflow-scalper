@@ -222,19 +222,57 @@ async def get_order_book():
     book=await app.state.market_stream.get_order_book()
     if book is None: raise HTTPException(status_code=503,detail="Order book is not synchronized yet.")
     return {"symbol":"BTCUSDT","order_book":book}
+def _feed_health_counts(exchange_connections, unified_market_data):
+    """Separate message freshness from a fully synchronized, fresh order book."""
+    stale_after = float(unified_market_data.get("stale_after_seconds", 3.0))
+    books = unified_market_data.get("books", {})
+    fresh_message_feed_count = 0
+    healthy_feed_count = 0
+
+    for adapter in exchange_connections.get("exchanges", []):
+        if not adapter.get("connected"):
+            continue
+        age = adapter.get("last_message_age_seconds")
+        if age is None:
+            continue
+        try:
+            age = float(age)
+        except (TypeError, ValueError):
+            continue
+        if age > stale_after:
+            continue
+
+        fresh_message_feed_count += 1
+        exchange = str(adapter.get("exchange", "")).lower()
+        symbol = str(adapter.get("symbol", "")).upper()
+        book = books.get(f"{exchange}:{symbol}", {})
+        if (
+            book.get("synchronized") is True
+            and book.get("stale") is False
+            and not book.get("integrity_error")
+        ):
+            healthy_feed_count += 1
+
+    return {
+        "fresh_message_feed_count": fresh_message_feed_count,
+        "healthy_feed_count": healthy_feed_count,
+    }
+
+
 @app.get("/api/market-data/observability")
 async def market_data_observability():
     """Read-only consolidated feed diagnostics for the monitoring UI."""
     unified=app.state.unified_market_data.get_status()
     primary=await app.state.market_stream.get_status()
     exchanges=await app.state.exchange_manager.status()
+    feed_counts = _feed_health_counts(exchanges, unified)
     return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
         "live_execution_enabled":False,"primary_binance_demo_stream":primary,
         "unified_market_data":unified,"exchange_connections":exchanges,
         "summary":{"exchange_adapter_count":len(exchanges.get("exchanges",[])),
           "unified_book_count":len(unified.get("books",{})),
-          "synchronized_book_count":sum(1 for b in unified.get("books",{}).values() if b.get("synchronized") and not b.get("stale")),
-          "healthy_feed_count":sum(1 for e in exchanges.get("exchanges",[]) if e.get("connected") and e.get("last_message_age_seconds") is not None and e.get("last_message_age_seconds")<=unified.get("stale_after_seconds",3)),
+          "synchronized_book_count":sum(1 for b in unified.get("books",{}).values() if b.get("synchronized") and not b.get("stale") and not b.get("integrity_error")),
+          **feed_counts,
           "feed_errors":sum(1 for e in exchanges.get("exchanges",[]) if e.get("last_error")),
           "safety":"PUBLIC_FEEDS_ONLY; REAL_EXCHANGE_ORDERS_DISABLED"}}
 
