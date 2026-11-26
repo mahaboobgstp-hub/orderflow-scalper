@@ -18,6 +18,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["snapshot_count"], 0)
         self.assertEqual(status["sequence_gap_count"], 0)
         self.assertIsNone(status["last_event_age_seconds"])
+        self.assertIsNone(status["last_book_update_age_seconds"])
         self.assertIsNone(status["last_sync_age_seconds"])
         self.assertTrue(status["stale"])
         self.assertFalse(status["fresh"])
@@ -34,6 +35,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             self.stream.connected_at = 90.0
             self.stream.synchronized_since = 95.0
             self.stream.last_event_at = 98.5
+            self.stream.last_book_update_at = 98.5
             status = __import__("asyncio").run(self.stream.get_status())
         self.assertFalse(status["stale"])
         self.assertTrue(status["fresh"])
@@ -49,11 +51,13 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             self.stream.connected_at = 90.0
             self.stream.synchronized_since = 95.0
             self.stream.last_event_at = 96.0
+            self.stream.last_book_update_at = 96.0
             status = __import__("asyncio").run(self.stream.get_status())
         self.assertTrue(status["synchronized"])
         self.assertTrue(status["stale"])
         self.assertFalse(status["healthy"])
         self.assertEqual(status["last_event_age_seconds"], 4.0)
+        self.assertEqual(status["last_book_update_age_seconds"], 4.0)
 
     def test_reconnect_and_snapshot_recovery_metrics(self):
         self.stream._record_connection_attempt()
