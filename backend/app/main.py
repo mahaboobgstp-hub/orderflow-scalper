@@ -27,6 +27,7 @@ from app.services.backtesting import BacktestEngine
 from app.services.monitoring import MonitoringService
 from app.services.operator_control import router as operator_control_router, set_runtime, state as operator_control_state
 from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
+from app.services.trade_management import TradeManagementEngine, TradeManagementConfig
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 from app.services.controlled_paper_session import ControlledPaperSession
 import logging
@@ -151,7 +152,7 @@ class PaperOrderRequest(BaseModel):
     ttp_enabled:bool=False
     ttp_activation_pct:float|None=Field(default=None,gt=0,lt=100)
     ttp_trail_pct:float|None=Field(default=None,gt=0,lt=100)
-class PaperManagementRequest(BaseModel):
+class PhaseDManagementEvaluationRequest(BaseModel):\n    position: dict[str, Any]\n    market: dict[str, Any]\n    config: dict[str, Any] = Field(default_factory=dict)\n    now_seconds: float | None = None\n\nclass PaperManagementRequest(BaseModel):
     stop_loss_price:float|None=None
     take_profit_price:float|None=None
     tsl_enabled:bool|None=None
@@ -504,3 +505,19 @@ async def readiness():
 async def binance_connectivity_diagnostics():
     """Backend-origin Binance connectivity checks; read-only, never places orders."""
     return await run_binance_diagnostics()
+
+# Phase D — deterministic trade-management evaluation (advisory; paper-only)
+@app.get("/api/trade-management/status")
+async def trade_management_status():
+    return app.state.trade_management_engine.describe()
+
+@app.post("/api/trade-management/evaluate")
+async def trade_management_evaluate(request: PhaseDManagementEvaluationRequest):
+    try:
+        config = TradeManagementConfig(**request.config)
+        engine = TradeManagementEngine(config)
+        result = engine.evaluate(request.position, request.market, request.now_seconds)
+        return {**result.__dict__, "management_notes": list(result.management_notes), "mode": "PAPER_ONLY", "execution_performed": False}
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)
+)
