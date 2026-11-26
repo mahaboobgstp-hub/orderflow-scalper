@@ -41,6 +41,17 @@ class ImbalanceDetectorTests(unittest.TestCase):
         book = sample_book(bids=[[100, 5], [99.9, 5]], asks=[[100.1, 5], [100.2, 5]])
         self.assertEqual(detector.analyze(book, 2)["classification"], "NEUTRAL")
 
+    def test_refuses_nonboolean_sync_and_stale_flags(self):
+        detector = OrderBookImbalanceDetector()
+        for value in (1, "true", None):
+            with self.subTest(synchronized=value):
+                with self.assertRaisesRegex(ValueError, "unsynchronized"):
+                    detector.analyze(sample_book(synchronized=value))
+        for value in (0, "false", None):
+            with self.subTest(stale=value):
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    detector.analyze(sample_book(stale=value))
+
     def test_refuses_unsynchronized_book(self):
         with self.assertRaisesRegex(ValueError, "unsynchronized"):
             OrderBookImbalanceDetector().analyze(sample_book(synchronized=False))
