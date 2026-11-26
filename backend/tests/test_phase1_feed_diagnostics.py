@@ -17,6 +17,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["messages_received"], 0)
         self.assertEqual(status["snapshot_count"], 0)
         self.assertEqual(status["sequence_gap_count"], 0)
+        self.assertEqual(status["invalid_depth_message_count"], 0)
         self.assertIsNone(status["last_event_age_seconds"])
         self.assertIsNone(status["last_book_update_age_seconds"])
         self.assertIsNone(status["last_sync_age_seconds"])
@@ -220,7 +221,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             "connection_attempt_count", "successful_connection_count",
             "reconnect_count", "recovery_count", "last_disconnect_reason",
             "last_recovery_age_seconds", "messages_received", "snapshot_count",
-            "sequence_gap_count",
+            "sequence_gap_count", "invalid_depth_message_count",
         ):
             self.assertIn(field, primary)
         self.assertFalse(payload["live_execution_enabled"])
@@ -380,6 +381,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(sentinel)
         self.assertEqual(self.stream.messages_received, 2)
         self.assertEqual(self.stream.last_error, "Malformed Binance depth JSON frame")
+        self.assertEqual(self.stream.invalid_depth_message_count, 1)
 
     def test_collector_signals_normal_websocket_end(self):
         class FakeWebSocket:

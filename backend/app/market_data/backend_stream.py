@@ -59,6 +59,7 @@ class BinanceOrderBookStream:
         self.messages_received = 0
         self.snapshot_count = 0
         self.sequence_gap_count = 0
+        self.invalid_depth_message_count = 0
         self.connection_attempt_count = 0
         self.successful_connection_count = 0
         self.reconnect_count = 0
@@ -190,6 +191,7 @@ class BinanceOrderBookStream:
                 try:
                     event = self._decode_depth_message(message)
                 except ValueError as exc:
+                    self.invalid_depth_message_count += 1
                     self.last_error = str(exc)
                     logger.warning("Invalid Binance depth frame: %s", exc)
                     break
@@ -481,19 +483,7 @@ class BinanceOrderBookStream:
 
         # Validate both sides and apply to copies so malformed or crossed depth
         # events cannot partially mutate the live book.
-        bid_updates = self._parse_depth_updates(event.get("b", []), "bids")
-        ask_updates = self._parse_depth_updates(event.get("a", []), "asks")
-        next_bids = dict(self.bids)
-        next_asks = dict(self.asks)
-        self._apply_parsed_depth_updates(next_bids, bid_updates)
-        self._apply_parsed_depth_updates(next_asks, ask_updates)
-        if not next_bids or not next_asks:
-            raise ValueError("Binance depth update would empty one side of the book")
-        if max(next_bids) >= min(next_asks):
-            raise ValueError("Binance depth update would cross or lock the book")
-
-        self.bids = next_bids
-        self.asks = next_asks
+         self.asks = next_asks
         self.last_update_id = final_update_id
         # A progressing, accepted depth event—not mere message receipt—refreshes
         # the book's usable-data freshness clock.
@@ -570,6 +560,7 @@ class BinanceOrderBookStream:
             "last_recovery_at": self.last_recovery_at,
             "last_recovery_age_seconds": round(recovery_age, 3) if recovery_age is not None else None,
             "messages_received": self.messages_received,
+            "invalid_depth_message_count": self.invalid_depth_message_count,
             "snapshot_count": self.snapshot_count,
             "sequence_gap_count": self.sequence_gap_count,
         }

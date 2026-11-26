@@ -251,6 +251,7 @@ export default function App() {
         <div className="list-row"><b>Last disconnect reason</b><span>{primary.last_disconnect_reason||"None recorded"}</span></div>
         <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{payload.primary_binance_demo_stream?.sequence_gap_count??0}</span></div>
         <div className="list-row"><b>Depth events received</b><span>{payload.primary_binance_demo_stream?.messages_received??0}</span></div>
+        <div className="list-row"><b>Rejected depth messages</b><span>{value(primary.invalid_depth_message_count)}</span></div>
         <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
         <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
       </div>

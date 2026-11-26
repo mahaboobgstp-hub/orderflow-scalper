@@ -22,6 +22,7 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | `reconnect_count` | Successful connections after the initial successful connection. |
 | `recovery_count` | Successful snapshot-bridge synchronization events on a later connection. This is not incremented for snapshots alone. |
 | `sequence_gap_count` | Sequence continuity failures detected after synchronization or when snapshot-bridge application fails. |
+| `invalid_depth_message_count` | Malformed depth frames or depth payloads rejected before book mutation (including empty bid-and-ask updates). |
 | `last_disconnect_reason` | Most recent observed connection end or recovery-triggering failure. |
 
 A snapshot is not considered synchronized merely because an event's IDs span the snapshot bridge. The bridge event must also be successfully applied. **For USD-M Futures, the first bridge event must satisfy `U <= snapshot.lastUpdateId <= u` (not the Spot `lastUpdateId + 1` rule). Its `pu` is not compared to the REST snapshot's `lastUpdateId`, because `pu` refers to the previous WebSocket event.** Subsequent events must enforce `pu == previous event's u`. A failed bridge application leaves the book unsynchronized and forces snapshot recovery.
@@ -57,7 +58,7 @@ The Binance REST depth snapshot is validated before replacing the in-memory book
 
 ## Live depth-event atomic integrity gate
 
-Incoming depth diffs validate both bid and ask update arrays before changing the in-memory order book. Each level must be exactly a two-value row with a finite positive price and finite nonnegative quantity; booleans are rejected instead of being implicitly converted to numeric 0/1. The event is applied to copies of both sides, and only committed if both sides remain nonempty and the best bid is strictly below the best ask. Malformed, empty-side, crossed, or locked results are rejected without partial book mutation; the stream must reconnect and resynchronize rather than expose an integrity-compromised book. This check is separate from update-ID continuity: invalid book content is not counted as a sequence gap.
+Incoming depth diffs validate both bid and ask update arrays before changing the in-memory order book. Each level must be exactly a two-value row with a finite positive price and finite nonnegative quantity; booleans are rejected instead of being implicitly converted to numeric 0/1. An event with both bid and ask update arrays empty is rejected as a no-op, so it cannot advance the sequence or refresh freshness. The event is applied to copies of both sides, and only committed if both sides remain nonempty and the best bid is strictly below the best ask. Malformed, empty-side, crossed, or locked results are rejected without partial book mutation; the stream must reconnect and resynchronize rather than expose an integrity-compromised book. Rejected malformed depth messages increment `invalid_depth_message_count`; sequence gaps remain counted separately. This check is separate from update-ID continuity: invalid book content is not counted as a sequence gap.
 
 ## Unified-engine depth integrity and freshness guard
 

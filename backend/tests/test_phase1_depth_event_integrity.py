@@ -74,6 +74,24 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
                 self.assertEqual(self.stream.asks, before_asks)
                 self.assertEqual(self.stream.last_update_id, before_update_id)
 
+    def test_empty_depth_event_is_rejected_without_mutation_and_counted(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_update_id = self.stream.last_update_id
+        with self.assertRaisesRegex(ValueError, "no level updates"):
+            self.stream._apply_event({"U": 101, "u": 102, "b": [], "a": []})
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_update_id)
+        self.assertEqual(self.stream.invalid_depth_message_count, 1)
+
+    def test_one_sided_depth_event_is_valid_and_counted_as_applied(self):
+        before_asks = dict(self.stream.asks)
+        self.assertTrue(self.stream._apply_event({"U": 101, "u": 102, "b": [["99.5", "7"]], "a": []}))
+        self.assertEqual(self.stream.bids[99.5], 7.0)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.invalid_depth_message_count, 0)
+
     def test_valid_two_sided_depth_event_applies_atomically(self):
         event = {
             "U": 101, "u": 102,
