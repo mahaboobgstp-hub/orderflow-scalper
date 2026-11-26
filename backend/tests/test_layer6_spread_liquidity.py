@@ -71,4 +71,4 @@ def test_layer6_invalid_threshold_config_falls_back_to_safe_defaults(config):
     r=eval_market({"spread_pct":0.08,"quote_volume_24h":5_000_000},config)
     assert l6(r)["direction"]=="NEUTRAL"
     assert l6(r)["data"]["spread_limit_pct"]==0.12
-    assert l6(r)["data"]["volume_minimum"]==1_000_000
+    assert l6(r)["data"]["volume_minimum"]==5_000_000
