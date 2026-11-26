@@ -38,9 +38,14 @@ class UnifiedMarketDataEngine:
     def as_int(x):
         try: return int(x)
         except (ValueError,TypeError): return None
+    def touch_message(self,ex,ts):
+        now=time.time()
+        self.last_seen[ex]=now
+        self.counts[ex]=self.counts.get(ex,0)+1
+        return now
     def touch(self,ex,b,ts):
-        now=time.time(); b.exchange_ts=ts; b.received_ts=int(now*1000); b.stale=False
-        self.last_seen[ex]=now; self.counts[ex]=self.counts.get(ex,0)+1
+        now=self.touch_message(ex,ts)
+        b.exchange_ts=ts; b.received_ts=int(now*1000); b.stale=False
     def process(self,exchange,raw,default_symbol="BTCUSDT"):
         ex=exchange.lower()
         if not isinstance(raw,dict): return None
@@ -89,7 +94,7 @@ class UnifiedMarketDataEngine:
                 if side not in ("buy","sell"): side=None
                 trade=Trade(ex,symbol,p,q,side,self.as_int(t.get("T") or t.get("timestamp") or ts),int(time.time()*1000))
                 key=self.key(ex,symbol); self.trades.setdefault(key,[]).append(trade)
-                self.trades[key]=self.trades[key][-5000:]; self.touch(ex,b,ts)
+                self.trades[key]=self.trades[key][-5000:]; self.touch_message(ex,ts)
                 return {"type":"trade","exchange":ex,"symbol":symbol,"price":p,"quantity":q,"side":side}
         except (ValueError,TypeError,KeyError) as err:
             b.error="Payload parse error: "+str(err); self.errors[self.key(ex,symbol)]=b.error
