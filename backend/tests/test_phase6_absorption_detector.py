@@ -36,13 +36,27 @@ class Phase6DetectorTests(unittest.TestCase):
             detector.analyze(book_at(baseline_mid), tape, 15)
             return detector.analyze(book_at(current_mid), tape, 15)
 
-    def test_adverse_midpoint_movement_is_not_favorable_progress_for_absorption(self):
+    def test_adverse_midpoint_movement_reduces_stall_score_for_both_sides(self):
         buy = self._fixed_movement_result("buy", -0.05)
         sell = self._fixed_movement_result("sell", 0.05)
         self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], -0.05, places=6)
         self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], -0.05, places=6)
-        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 1.0, places=6)
-        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 1.0, places=6)
+        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 0.5, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 0.5, places=6)
+
+    def test_adverse_progress_boundary_zeroes_stall_scores_for_both_sides(self):
+        buy = self._fixed_movement_result("buy", -0.10)
+        sell = self._fixed_movement_result("sell", 0.10)
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], -0.10, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], -0.10, places=6)
+        self.assertEqual(buy["metrics"]["buy_absorption_score"], 0.0)
+        self.assertEqual(sell["metrics"]["sell_absorption_score"], 0.0)
+
+    def test_flat_midpoint_maximizes_stall_score_for_both_sides(self):
+        buy = self._fixed_movement_result("buy", 0.0)
+        sell = self._fixed_movement_result("sell", 0.0)
+        self.assertEqual(buy["metrics"]["buy_absorption_score"], 1.0)
+        self.assertEqual(sell["metrics"]["sell_absorption_score"], 1.0)
 
     def test_favorable_progress_boundary_zeroes_scores_for_both_sides(self):
         buy = self._fixed_movement_result("buy", 0.10)
