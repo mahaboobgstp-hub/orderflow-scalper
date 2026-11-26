@@ -32,6 +32,8 @@ class BinanceOrderBookStream:
         snapshot_limit: int = 1000,
         max_book_age_seconds: float = 3.0,
     ):
+        if isinstance(max_book_age_seconds, bool):
+            raise ValueError("Maximum book age must be finite numeric.")
         max_age = float(max_book_age_seconds)
         if not math.isfinite(max_age):
             raise ValueError("Maximum book age must be finite.")
