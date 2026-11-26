@@ -65,3 +65,10 @@ def test_phase_e_manual_order_configured_leverage_cap():
         config={"risk_per_trade_pct":1,"max_leverage":2,"max_total_exposure_pct":25,"max_total_open_risk_pct":3,"cooldown_seconds":0},
         proposed_trade_risk_cash=20,proposed_notional=2000,proposed_leverage=3,now_ms=DAY_MS)
     assert "PROPOSED_LEVERAGE_EXCEEDS_CONFIGURED_LIMIT" in result["blockers"]
+
+def test_phase_e_position_notional_cap_is_separate_from_portfolio_exposure():
+    e=RiskManagementEngine()
+    sizing=e.calculate({"account_equity":10000,"entry_price":100,"stop_loss_price":90,"side":"long",
+        "risk_per_trade_pct":1,"leverage":1,"max_position_notional_pct":10})
+    assert sizing["position_notional"]==1000
+    assert sizing["position_limited_by_notional_cap"] is True
