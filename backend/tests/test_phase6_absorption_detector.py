@@ -22,6 +22,7 @@ class Phase6DetectorTests(unittest.TestCase):
         result=self._analyze_at(detector,book(),tape,t0+1000)
         self.assertEqual(result["classification"],"POSSIBLE_BUY_ABSORPTION")
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
+        self.assertFalse(result["metrics"]["sell_absorption_candidate"])
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],8.0)
 
     def test_sell_side_absorption_candidate(self):
@@ -32,6 +33,7 @@ class Phase6DetectorTests(unittest.TestCase):
         result=self._analyze_at(detector,book(),tape,t0+1000)
         self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
         self.assertTrue(result["metrics"]["sell_absorption_candidate"])
+        self.assertFalse(result["metrics"]["buy_absorption_candidate"])
 
     def test_first_sample_does_not_infer_absorption_without_temporal_baseline(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades("buy"),15)
