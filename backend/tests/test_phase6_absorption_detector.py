@@ -36,13 +36,13 @@ class Phase6DetectorTests(unittest.TestCase):
             detector.analyze(book_at(baseline_mid), tape, 15)
             return detector.analyze(book_at(current_mid), tape, 15)
 
-    def test_adverse_midpoint_movement_reduces_both_absorption_scores(self):
+    def test_adverse_midpoint_movement_is_not_favorable_progress_for_absorption(self):
         buy = self._fixed_movement_result("buy", -0.05)
         sell = self._fixed_movement_result("sell", 0.05)
         self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], -0.05, places=6)
         self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], -0.05, places=6)
-        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 0.5, places=6)
-        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 0.5, places=6)
+        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 1.0, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 1.0, places=6)
 
     def test_favorable_progress_boundary_zeroes_scores_for_both_sides(self):
         buy = self._fixed_movement_result("buy", 0.10)
@@ -262,10 +262,14 @@ class Phase6SpatialVwapAndApiTests(unittest.TestCase):
         sell_above_mid = AbsorptionLiquidityDetector().analyze(
             book(), trades("sell", count=8, price=100.10), 15
         )
-        self.assertGreater(buy_at_ask["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
-        self.assertGreater(sell_at_bid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
-        self.assertLess(buy_below_mid["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
-        self.assertLess(sell_above_mid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
+        self.assertLess(buy_at_ask["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertLess(sell_at_bid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
+        self.assertGreater(buy_below_mid["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertGreater(sell_above_mid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
+        self.assertAlmostEqual(buy_at_ask["metrics"]["buy_vwap_vs_mid_pct"], -0.049975, places=6)
+        self.assertAlmostEqual(sell_at_bid["metrics"]["sell_vwap_vs_mid_pct"], -0.049975, places=6)
+        self.assertAlmostEqual(buy_below_mid["metrics"]["buy_vwap_vs_mid_pct"], 0.049975, places=6)
+        self.assertAlmostEqual(sell_above_mid["metrics"]["sell_vwap_vs_mid_pct"], 0.049975, places=6)
         # Spatial VWAP offset alone is not temporal midpoint progress.
         self.assertEqual(buy_at_ask["metrics"]["buy_price_progress_pct"], 0.0)
         self.assertEqual(sell_at_bid["metrics"]["sell_price_progress_pct"], 0.0)
