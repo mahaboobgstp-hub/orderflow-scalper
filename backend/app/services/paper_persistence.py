@@ -135,6 +135,7 @@ class PaperPersistenceWorker:
             "last_processed_event": self.last_processed_event,
             "last_error": self.last_error,
             "recovery": self.recovery_report,
+            "risk_control_state": dict(self.risk_control_state),
             "mode": "PAPER_ONLY",
         }
 
