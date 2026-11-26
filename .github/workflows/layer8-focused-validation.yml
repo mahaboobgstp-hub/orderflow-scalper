@@ -1,0 +1,32 @@
+name: Layer 8 Broader Market Context Focused Validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/services/nine_layer_decision_engine.py"
+      - "backend/tests/test_layer8_broader_market_context.py"
+      - ".github/workflows/layer8-focused-validation.yml"
+  pull_request:
+    paths:
+      - "backend/app/services/nine_layer_decision_engine.py"
+      - "backend/tests/test_layer8_broader_market_context.py"
+      - ".github/workflows/layer8-focused-validation.yml"
+jobs:
+  layer8-broader-market-context:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile Layer 8 source and tests
+        run: python -m compileall -q backend/app/services/nine_layer_decision_engine.py backend/tests/test_layer8_broader_market_context.py
+      - name: Run Layer 8 focused tests
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -q tests/test_layer8_broader_market_context.py tests/test_phase8_nine_layer_integration.py
