@@ -392,6 +392,8 @@ async def paper_orders():
     return {"mode":"PAPER_ONLY","real_orders":False,"orders":list(engine.orders[-500:]),"count":len(engine.orders)}
 @app.post("/api/paper/orders")
 async def paper_submit_order(request:PaperOrderRequest):
+    if app.state.risk_management_engine.kill_switch_status()["active"]:
+        raise HTTPException(status_code=423,detail="Emergency risk kill switch is active; paper entries are blocked.")
     try: return app.state.paper_trading_engine.submit(request.model_dump())
     except ValueError as exc: raise HTTPException(status_code=422,detail=str(exc))
 @app.post("/api/paper/manage/{symbol}")
