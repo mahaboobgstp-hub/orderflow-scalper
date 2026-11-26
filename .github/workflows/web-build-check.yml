@@ -21,6 +21,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install
+      - name: Run feed freshness tests
+        working-directory: frontend
+        run: npm test
       - name: Build Vite frontend
         working-directory: frontend
         run: npm run build
