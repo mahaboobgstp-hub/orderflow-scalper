@@ -125,7 +125,8 @@ class BinanceStreamReconnectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream.bids[100.0], 4.0)
         self.assertIsNone(stream.last_error)
 
-    async def test_closed_websocket_reconnects_after_synchronization(selfself = stream = BinanceOrderBookStream("BTCUSDT")
+    async def test_closed_websocket_reconnects_after_synchronization(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
         original_sleep = asyncio.sleep
 
         async def fast_sleep(_seconds):
