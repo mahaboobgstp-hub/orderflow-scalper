@@ -183,3 +183,41 @@ def test_metrics_are_finite_or_nullable_and_bounded():
         assert math.isfinite(metrics[key])
     assert metrics["volatility_ratio"] is None or math.isfinite(metrics["volatility_ratio"])
     assert metrics["range_ratio"] is None or math.isfinite(metrics["range_ratio"])
+
+# Integration coverage for Layer 7 as currently represented inside the nine-layer
+# decision engine (scanner 24-hour trend/range proxy, distinct from the candle
+# classifier endpoint).
+from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
+
+
+def decision_engine_l7(market):
+    return NineLayerDecisionEngine().evaluate("BTCUSDT", {"market":market}, risk={"allowed":True,"blockers":[]})
+
+
+def l7(result):
+    return result["layers"]["volatility_regime"]
+
+
+@pytest.mark.parametrize("change,expected",[(10,"BUY"),(-10,"SELL"),(0,"NEUTRAL"),(7.4,"NEUTRAL")])
+def test_nine_layer_l7_direction_from_24h_price_change_proxy(change,expected):
+    result=decision_engine_l7({"range_24h_pct":5.0,"price_change_24h_pct":change})
+    assert l7(result)["available"] is True
+    assert l7(result)["direction"]==expected
+
+
+def test_nine_layer_l7_proxy_score_is_bounded():
+    result=decision_engine_l7({"range_24h_pct":100.0,"price_change_24h_pct":9999})
+    assert l7(result)["score"]==50
+
+
+@pytest.mark.parametrize("market",[
+    {}, {"range_24h_pct":2.0}, {"price_change_24h_pct":1.0},
+    {"range_24h_pct":None,"price_change_24h_pct":2.0},
+    {"range_24h_pct":2.0,"price_change_24h_pct":"invalid"},
+    {"range_24h_pct":2.0,"price_change_24h_pct":float("nan")},
+    {"range_24h_pct":2.0,"price_change_24h_pct":float("inf")},
+])
+def test_nine_layer_l7_proxy_missing_or_invalid_data_unavailable(market):
+    result=decision_engine_l7(market)
+    assert l7(result)["available"] is False
+    assert l7(result)["score"] is None
