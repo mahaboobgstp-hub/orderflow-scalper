@@ -358,7 +358,14 @@ async def market_context_regime(symbol:str,interval:str="1m",limit:int=Query(def
 # Phase 10 risk-management endpoints — advisory/calculation only
 @app.get("/api/risk/status")
 async def risk_engine_status():
-    return app.state.risk_management_engine.status()
+    engine=app.state.risk_management_engine; paper=app.state.paper_trading_engine
+    config=operator_control_state["config"]
+    account=paper.account()
+    live_gate=engine.evaluate_runtime_gate(account_equity=account.get("equity",0),closed_trades=paper.closed_trades,
+        orders=paper.orders,positions=paper.positions,symbol="RISK_MONITOR",config=config,synchronized_book=True,
+        proposed_trade_risk_cash=0,proposed_notional=0,proposed_leverage=1)
+    return {**engine.status(),"mode":"PAPER_ONLY","live_portfolio_gate":live_gate,
+        "account":account,"execution_enabled":False}
 @app.post("/api/risk/position-size")
 async def risk_position_size(request:RiskSizingRequest):
     try: return app.state.risk_management_engine.calculate(request.model_dump())
