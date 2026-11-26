@@ -134,4 +134,18 @@ class Tests(unittest.TestCase):
    self.assertIsNone(x)
   self.assertEqual(self.e.get_recent_trades("bybit","BTCUSDT"),[])
 
+ def test_malformed_trade_does_not_invalidate_or_refresh_book(self):
+  snapshot={"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","2"]],"a":[["101","3"]],"u":1}}
+  with patch("app.market_data.unified_engine.time.time",return_value=100.0):
+   self.e.process("bybit",snapshot)
+  malformed={"topic":"publicTrade.BTCUSDT","data":{"s":"BTCUSDT","p":"not-a-price","v":"1","S":"Buy"}}
+  with patch("app.market_data.unified_engine.time.time",return_value=200.0):
+   result=self.e.process("bybit",malformed)
+  with patch("app.market_data.unified_engine.time.time",return_value=201.0):
+   book=self.e.get_book("bybit","BTCUSDT")
+  self.assertIsNone(result)
+  self.assertTrue(book["synchronized"])
+  self.assertIsNone(book["integrity_error"])
+  self.assertEqual(book["received_timestamp_ms"],100000)
+
 if __name__=="__main__":unittest.main()
