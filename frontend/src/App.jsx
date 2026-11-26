@@ -114,7 +114,7 @@ export default function App() {
     setBusy(true); setNotice("");
     try {
       const result = await api("/api/control/engine", { method:"POST", body:JSON.stringify({command:cmd}) });
-      setNotice(result.message || "Command accepted.");
+      setNotice(cmd === "EMERGENCY_HALT" ? ("Emergency risk halt activated. Persistent storage: " + (result.risk_kill_switch_persisted ? "confirmed" : "not confirmed; active in memory only") + ". Existing paper-position monitoring remains running.") : (result.message || "Command accepted."));
       await refreshAll();
     } catch (e) { setNotice(e.message); }
     finally { setBusy(false); }
