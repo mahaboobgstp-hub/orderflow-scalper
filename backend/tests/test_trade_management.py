@@ -83,3 +83,12 @@ def test_trailing_stop_does_not_tighten_before_favorable_move():
                              {"mark_price":100,"trend_score":50})
     assert result.stop_price == result.initial_stop_price
     assert result.trailing_stop_active is False
+
+
+def test_favorable_mark_updates_extreme_and_activates_on_same_evaluation():
+    engine = TradeManagementEngine()
+    result = engine.evaluate({"symbol":"L","side":"long","entry_price":100,"best_price":100},
+                             {"mark_price":101,"trend_score":70})
+    assert result.best_price == 101
+    assert result.break_even_active
+    assert result.trailing_take_profit_active
