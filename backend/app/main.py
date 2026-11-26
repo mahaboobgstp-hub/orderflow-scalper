@@ -225,8 +225,11 @@ async def get_order_book():
     return {"symbol":"BTCUSDT","order_book":book}
 def _feed_health_counts(exchange_connections, unified_market_data):
     """Separate message freshness from a fully synchronized, fresh order book."""
+    raw_stale_after = unified_market_data.get("stale_after_seconds", 3.0)
     try:
-        stale_after = float(unified_market_data.get("stale_after_seconds", 3.0))
+        if isinstance(raw_stale_after, bool):
+            raise ValueError("boolean stale cutoff is invalid")
+        stale_after = float(raw_stale_after)
     except (TypeError, ValueError):
         stale_after = 3.0
     if not math.isfinite(stale_after) or stale_after <= 0:
@@ -240,6 +243,8 @@ def _feed_health_counts(exchange_connections, unified_market_data):
             continue
         age = adapter.get("last_message_age_seconds")
         if age is None:
+            continue
+        if isinstance(age, bool):
             continue
         try:
             age = float(age)
