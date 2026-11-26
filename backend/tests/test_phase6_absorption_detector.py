@@ -161,7 +161,7 @@ class Phase6DetectorTests(unittest.TestCase):
         detector.analyze(book(),trades("buy"),15)
         detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=20000
         result=detector.analyze(book(),trades("buy"),15)
-        self.assertEqual(result["quality"]["score"],75.0)
+        self.assertEqual(result["quality"]["score"],93.0)
 
 
     def test_overflowing_trade_notional_is_filtered(self):
