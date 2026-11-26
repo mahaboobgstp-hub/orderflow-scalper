@@ -96,3 +96,61 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# API-level checks for the read-only Layer 1 analysis route.
+import asyncio
+import pytest
+from fastapi import HTTPException
+from app import main
+
+class StubUnifiedBooks:
+    def __init__(self, book):
+        self.book = book
+    def get_book(self, exchange, symbol):
+        return self.book
+
+
+def valid_normalized_book():
+    return {
+        "exchange": "bybit", "symbol": "BTCUSDT",
+        "bids": [[100.0, 10.0], [99.9, 8.0]],
+        "asks": [[100.1, 2.0], [100.2, 2.0]],
+        "synchronized": True, "stale": False, "age_seconds": 0.2,
+        "integrity_error": None,
+    }
+
+
+def setup_layer1_api(monkeypatch, book):
+    monkeypatch.setattr(main.app.state, "unified_market_data", StubUnifiedBooks(book), raising=False)
+    monkeypatch.setattr(main.app.state, "imbalance_detector", OrderBookImbalanceDetector(), raising=False)
+
+
+def test_layer1_api_valid_book_returns_imbalance(monkeypatch):
+    setup_layer1_api(monkeypatch, valid_normalized_book())
+    result = asyncio.run(main.analyze_imbalance("bybit", "BTCUSDT", 2))
+    assert result["classification"] == "BUY_PRESSURE"
+    assert result["metrics"]["weighted_imbalance"] > 0
+
+
+def test_layer1_api_missing_book_returns_404(monkeypatch):
+    setup_layer1_api(monkeypatch, None)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(main.analyze_imbalance("bybit", "BTCUSDT", 10))
+    assert exc.value.status_code == 404
+
+
+def test_layer1_api_invalid_book_returns_422(monkeypatch):
+    book = valid_normalized_book()
+    book["synchronized"] = False
+    setup_layer1_api(monkeypatch, book)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(main.analyze_imbalance("bybit", "BTCUSDT", 10))
+    assert exc.value.status_code == 422
+
+
+def test_layer1_api_unsupported_exchange_returns_400(monkeypatch):
+    setup_layer1_api(monkeypatch, valid_normalized_book())
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(main.analyze_imbalance("unsupported", "BTCUSDT", 10))
+    assert exc.value.status_code == 400
