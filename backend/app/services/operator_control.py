@@ -24,6 +24,7 @@ state: dict[str, Any] = {
         "max_open_positions": 3,
         "max_leverage": 5,
         "max_total_exposure_pct": 25.0,
+        "max_position_notional_pct": 25.0,
         "max_total_open_risk_pct": 3.0,
         "max_trades_per_day": 20,
         "max_consecutive_losses": 3,
@@ -127,7 +128,7 @@ def update_config(request: ConfigRequest, x_control_token: str | None = Header(d
     numeric_limits = {
         "risk_per_trade_pct": (0.01, 5), "max_daily_loss_pct": (0.1, 20),
         "max_open_positions": (1, 50), "max_leverage": (1, 5),
-        "max_total_exposure_pct": (1, 100), "max_total_open_risk_pct": (0.1, 20), "max_trades_per_day": (1, 500),
+        "max_total_exposure_pct": (1, 100), "max_position_notional_pct": (1, 100), "max_total_open_risk_pct": (0.1, 20), "max_trades_per_day": (1, 500),
         "max_consecutive_losses": (1, 20), "min_risk_reward": (0.1, 20),
         "cooldown_seconds": (0, 86400), "trailing_stop_pct": (0.05, 50),
         "trailing_take_profit_activation_pct": (0.05, 50), "trailing_take_profit_pct": (0.05, 50),
