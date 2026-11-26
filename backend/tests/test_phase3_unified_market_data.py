@@ -148,4 +148,34 @@ class Tests(unittest.TestCase):
   self.assertIsNone(book["integrity_error"])
   self.assertEqual(book["received_timestamp_ms"],100000)
 
+ def test_snapshot_retains_only_configured_best_levels(self):
+  e=UnifiedMarketDataEngine(max_levels=2)
+  s={"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","1"],["99","1"],["98","1"]],"a":[["101","1"],["102","1"],["103","1"]],"u":1}}
+  e.process("bybit",s)
+  book=e.get_book("bybit","BTCUSDT")
+  self.assertEqual(book["bids"],[[100.0,1.0],[99.0,1.0]])
+  self.assertEqual(book["asks"],[[101.0,1.0],[102.0,1.0]])
+  self.assertEqual(len(e.books["bybit:BTCUSDT"].bids),2)
+  self.assertEqual(len(e.books["bybit:BTCUSDT"].asks),2)
+
+ def test_delta_trims_depth_but_preserves_best_prices(self):
+  e=UnifiedMarketDataEngine(max_levels=2)
+  s={"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","1"],["99","1"],["98","1"]],"a":[["101","1"],["102","1"],["103","1"]],"u":1}}
+  e.process("bybit",s)
+  d={"topic":"orderbook.50.BTCUSDT","type":"delta","data":{"s":"BTCUSDT","b":[["99.5","2"]],"a":[["102.5","2"]],"u":2}}
+  e.process("bybit",d)
+  book=e.get_book("bybit","BTCUSDT")
+  self.assertEqual(book["bids"],[[100.0,1.0],[99.5,2.0]])
+  self.assertEqual(book["asks"],[[101.0,1.0],[102.0,1.0]])
+  self.assertEqual(book["best_bid"],100.0)
+  self.assertEqual(book["best_ask"],101.0)
+  self.assertEqual(len(e.books["bybit:BTCUSDT"].bids),2)
+  self.assertEqual(len(e.books["bybit:BTCUSDT"].asks),2)
+
+ def test_max_levels_must_be_positive_integer(self):
+  for invalid in (0,-1,1.5,True,"2"):
+   with self.assertRaises(ValueError):
+    UnifiedMarketDataEngine(max_levels=invalid)
+
+
 if __name__=="__main__":unittest.main()
