@@ -108,7 +108,7 @@ class InitialSnapshotBridgeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             stream, "_fetch_snapshot", new=AsyncMock(return_value=snapshot(100))
         ):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(ConnectionError):
                 await stream._connect_and_sync()
 
         self.assertFalse(stream.synchronized)
