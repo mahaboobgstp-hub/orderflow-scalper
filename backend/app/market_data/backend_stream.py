@@ -29,10 +29,12 @@ class BinanceOrderBookStream:
         self,
         symbol: str = "BTCUSDT",
         snapshot_limit: int = 1000,
+        stale_after_seconds: float = 3.0,
     ):
         self.symbol = symbol.upper()
         self.stream_symbol = symbol.lower()
         self.snapshot_limit = snapshot_limit
+        self.stale_after_seconds = max(0.1, float(stale_after_seconds))
 
         self.bids: dict[float, float] = {}
         self.asks: dict[float, float] = {}
@@ -48,6 +50,14 @@ class BinanceOrderBookStream:
         self.messages_received = 0
         self.snapshot_count = 0
         self.sequence_gap_count = 0
+        self.connection_attempt_count = 0
+        self.successful_connection_count = 0
+        self.reconnect_count = 0
+        self.recovery_count = 0
+        self.last_reconnect_at: float | None = None
+        self.last_recovery_at: float | None = None
+        self.synchronized_since: float | None = None
+        self.last_disconnect_reason: str | None = None
 
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
@@ -84,9 +94,48 @@ class BinanceOrderBookStream:
 
             self._task = None
 
+        self._record_disconnect("stop_requested")
+
+    def _record_connection_attempt(self):
+        self.connection_attempt_count += 1
+
+    def _record_connection_success(self, now: float | None = None):
+        now = time.time() if now is None else now
+        self.connected = True
+        self.connected_at = now
+        self.successful_connection_count += 1
+        if self.successful_connection_count > 1:
+            self.reconnect_count += 1
+            self.last_reconnect_at = now
+        self.synchronized = False
+        self.synchronized_since = None
+        self.last_error = None
+
+    def _record_disconnect(self, reason: str):
+        now = time.time()
         self.connected = False
         self.synchronized = False
-        self.last_disconnect_at = time.time()
+        self.synchronized_since = None
+        self.last_disconnect_at = now
+        self.last_disconnect_reason = reason
+
+    def _record_synchronized(self, now: float | None = None):
+        now = time.time() if now is None else now
+        self.synchronized = True
+        self.last_sync_at = now
+        self.synchronized_since = now
+        if self.successful_connection_count > 1:
+            self.recovery_count += 1
+            self.last_recovery_at = now
+
+    def _apply_snapshot_bridge(self, event: dict[str, Any]) -> bool:
+        """Apply the first event bridging the REST snapshot before marking the book synced."""
+        if not self._event_bridges_snapshot(event):
+            return False
+        if not self._apply_event(event):
+            return False
+        self._record_synchronized()
+        return True
 
     # --------------------------------------------------
     # Connection and synchronization
@@ -102,13 +151,12 @@ class BinanceOrderBookStream:
 
             except Exception as exc:
                 self.last_error = str(exc)
+                self._record_disconnect(self.last_error)
+                logger.exception("Binance order-book connection failed")
 
-                logger.exception(
-                    "Binance order-book connection failed"
-                )
-
-            self.connected = False
-            self.synchronized = False
+            else:
+                if not self._stop_event.is_set():
+                    self._record_disconnect(self.last_error or "WebSocket session ended")
 
             if not self._stop_event.is_set():
                 await asyncio.sleep(3)
@@ -124,6 +172,7 @@ class BinanceOrderBookStream:
             f"{self.stream_symbol}@depth@100ms"
         )
 
+        self._record_connection_attempt()
         async with websockets.connect(
             stream_url,
             ping_interval=20,
@@ -132,10 +181,7 @@ class BinanceOrderBookStream:
             max_size=2**20,
         ) as websocket:
 
-            self.connected = True
-            self.connected_at = time.time()
-            self.synchronized = False
-            self.last_error = None
+            self._record_connection_success()
 
             logger.info(
                 "Connected to Binance stream: %s",
@@ -168,10 +214,13 @@ class BinanceOrderBookStream:
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
-                            self._apply_event(event)
-
-                        self.synchronized = True
-                        self.last_sync_at = time.time()
+                            if not self._apply_snapshot_bridge(event):
+                                self.sequence_gap_count += 1
+                                self.last_error = (
+                                    "Snapshot bridge event failed continuity validation; "
+                                    "reconnecting for a fresh snapshot"
+                                )
+                                return
 
                 logger.info(
                     "Order book synchronized: %s update_id=%s",
@@ -189,8 +238,8 @@ class BinanceOrderBookStream:
                             # Reconnect and obtain a fresh snapshot.
                             self.sequence_gap_count += 1
                             self.synchronized = False
+                            self.synchronized_since = None
                             self.last_error = "Order-book sequence gap; reconnecting for snapshot recovery"
-                            self.last_disconnect_at = time.time()
                             logger.warning(
                                 "Order-book sequence gap detected"
                             )
@@ -351,16 +400,43 @@ class BinanceOrderBookStream:
 
     async def get_status(self) -> dict[str, Any]:
         now = time.time()
+        event_age = max(0.0, now - self.last_event_at) if self.last_event_at is not None else None
+        sync_age = max(0.0, now - self.last_sync_at) if self.last_sync_at is not None else None
+        recovery_age = max(0.0, now - self.last_recovery_at) if self.last_recovery_at is not None else None
+        stale = event_age is None or event_age > self.stale_after_seconds
+        synchronized_duration = (
+            max(0.0, now - self.synchronized_since)
+            if self.synchronized and self.synchronized_since is not None
+            else None
+        )
+        connected_duration = (
+            max(0.0, now - self.connected_at)
+            if self.connected and self.connected_at is not None
+            else None
+        )
         return {
             "symbol": self.symbol,
             "connected": self.connected,
             "synchronized": self.synchronized,
+            "stale": stale,
+            "fresh": not stale,
+            "healthy": self.connected and self.synchronized and not stale,
+            "stale_after_seconds": self.stale_after_seconds,
             "last_update_id": self.last_update_id,
             "last_error": self.last_error,
-            "connected_duration_seconds": round(now-self.connected_at, 3) if self.connected_at is not None and self.connected else None,
-            "last_event_age_seconds": round(now-self.last_event_at, 3) if self.last_event_at is not None else None,
-            "last_sync_age_seconds": round(now-self.last_sync_at, 3) if self.last_sync_at is not None else None,
+            "connected_duration_seconds": round(connected_duration, 3) if connected_duration is not None else None,
+            "synchronized_duration_seconds": round(synchronized_duration, 3) if synchronized_duration is not None else None,
+            "last_event_age_seconds": round(event_age, 3) if event_age is not None else None,
+            "last_sync_age_seconds": round(sync_age, 3) if sync_age is not None else None,
             "last_disconnect_at": self.last_disconnect_at,
+            "last_disconnect_reason": self.last_disconnect_reason,
+            "connection_attempt_count": self.connection_attempt_count,
+            "successful_connection_count": self.successful_connection_count,
+            "reconnect_count": self.reconnect_count,
+            "recovery_count": self.recovery_count,
+            "last_reconnect_at": self.last_reconnect_at,
+            "last_recovery_at": self.last_recovery_at,
+            "last_recovery_age_seconds": round(recovery_age, 3) if recovery_age is not None else None,
             "messages_received": self.messages_received,
             "snapshot_count": self.snapshot_count,
             "sequence_gap_count": self.sequence_gap_count,

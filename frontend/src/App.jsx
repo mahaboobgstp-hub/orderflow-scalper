@@ -221,6 +221,8 @@ export default function App() {
     const unified=payload.unified_market_data||{};
     const adapterList=payload.exchange_connections?.exchanges||[];
     const books=unified.books||{};
+    const primary=payload.primary_binance_demo_stream||{};
+    const primaryStale=primary.stale??(primary.last_event_age_seconds==null||primary.last_event_age_seconds>(primary.stale_after_seconds??3));
     const healthy=(x)=>x.connected && x.last_message_age_seconds!=null && x.last_message_age_seconds<= (unified.stale_after_seconds||3);
     return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
       <div className="stats-grid">
@@ -232,11 +234,16 @@ export default function App() {
       <div className="panel"><div className="panel-title"><h2>Safety & Runtime Boundary</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
         <div className="list-row"><b>Market data mode</b><span>{payload.mode||"Unknown"}</span></div>
         <div className="list-row"><b>Real exchange execution</b><span className="negative">Disabled</span></div>
-        <div className="list-row"><b>Primary Binance demo book</b><span>{payload.primary_binance_demo_stream?.synchronized?"SYNCHRONIZED":payload.primary_binance_demo_stream?.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
+        <div className="list-row"><b>Primary Binance demo book</b><span>{primary.synchronized&&!primaryStale?"SYNCHRONIZED & FRESH":primary.synchronized&&primaryStale?"SYNCHRONIZED / STALE":primary.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
         <div className="list-row"><b>Binance demo last update ID</b><span>{value(payload.primary_binance_demo_stream?.last_update_id)}</span></div>
-        <div className="list-row"><b>Primary stream freshness</b><span>{payload.primary_binance_demo_stream?.last_event_age_seconds==null?"--":payload.primary_binance_demo_stream.last_event_age_seconds+"s ago"}</span></div>
-        <div className="list-row"><b>Stream synchronized for</b><span>{payload.primary_binance_demo_stream?.connected_duration_seconds==null?"--":payload.primary_binance_demo_stream.connected_duration_seconds+"s connected"}</span></div>
-        <div className="list-row"><b>Snapshot recoveries</b><span>{payload.primary_binance_demo_stream?.snapshot_count??0}</span></div>
+        <div className="list-row"><b>Primary stream freshness</b><span className={"status-chip "+(primaryStale?"bad":"good")}>{primaryStale?"STALE":"FRESH"} · {primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s age"}</span></div>
+        <div className="list-row"><b>Connected for</b><span>{primary.connected_duration_seconds==null?"--":primary.connected_duration_seconds+"s"}</span></div>
+        <div className="list-row"><b>Synchronized for</b><span>{primary.synchronized_duration_seconds==null?"--":primary.synchronized_duration_seconds+"s"}</span></div>
+        <div className="list-row"><b>Connection attempts / successes</b><span>{primary.connection_attempt_count??0} / {primary.successful_connection_count??0}</span></div>
+        <div className="list-row"><b>Reconnects / recoveries</b><span>{primary.reconnect_count??0} / {primary.recovery_count??0}</span></div>
+        <div className="list-row"><b>Last recovery</b><span>{primary.last_recovery_age_seconds==null?"Never":primary.last_recovery_age_seconds+"s ago"}</span></div>
+        <div className="list-row"><b>REST snapshots loaded</b><span>{primary.snapshot_count??0}</span></div>
+        <div className="list-row"><b>Last disconnect reason</b><span>{primary.last_disconnect_reason||"None recorded"}</span></div>
         <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{payload.primary_binance_demo_stream?.sequence_gap_count??0}</span></div>
         <div className="list-row"><b>Depth events received</b><span>{payload.primary_binance_demo_stream?.messages_received??0}</span></div>
         <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
