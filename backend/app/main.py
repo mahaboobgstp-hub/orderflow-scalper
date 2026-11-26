@@ -525,5 +525,4 @@ async def trade_management_evaluate(request: PhaseDManagementEvaluationRequest):
         result = engine.evaluate(request.position, request.market, request.now_seconds)
         return {**result.__dict__, "management_notes": list(result.management_notes), "mode": "PAPER_ONLY", "execution_performed": False}
     except (ValueError, TypeError, KeyError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)
-)
+        raise HTTPException(status_code=422, detail=str(exc))
