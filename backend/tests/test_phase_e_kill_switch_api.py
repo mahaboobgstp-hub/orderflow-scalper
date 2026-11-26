@@ -234,7 +234,7 @@ async def test_phase_e_exchange_enabled_config_uses_exchange_keys(monkeypatch):
     monkeypatch.setenv("CONTROL_API_TOKEN","test-control-token")
     try:
         request=operator_control.ConfigRequest(config={"exchange_enabled":{"binance":True,"bybit":False,"delta":False}})
-        result=await operator_control.update_config(request,"test-control-token")
+        result=operator_control.update_config(request,"test-control-token")
         assert result["accepted"] is True
         assert operator_control.state["config"]["exchange_enabled"]["binance"] is True
     finally:
