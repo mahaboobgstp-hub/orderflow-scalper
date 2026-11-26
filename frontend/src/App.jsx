@@ -14,6 +14,7 @@ const CONFIG_FIELDS = [
   ["max_open_positions", "Maximum open positions", 1, 50, 1],
   ["max_leverage", "Maximum leverage", 1, 5, 1],
   ["max_total_exposure_pct", "Max total exposure (%)", 1, 100, 1],
+  ["max_position_notional_pct", "Max single-position notional (%)", 1, 100, 1],
   ["max_total_open_risk_pct", "Max aggregate stop risk (%)", 0.1, 20, 0.1],
   ["max_trades_per_day", "Max trades per day", 1, 500, 1],
   ["max_consecutive_losses", "Loss streak limit", 1, 20, 1],
