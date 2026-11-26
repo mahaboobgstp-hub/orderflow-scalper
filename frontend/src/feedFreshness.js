@@ -9,3 +9,15 @@ export function isFreshMessageFeed(adapter, staleAfterSeconds) {
   const cutoff = Number.isFinite(rawCutoff) && rawCutoff > 0 ? rawCutoff : DEFAULT_FEED_STALE_AFTER_SECONDS;
   return Number.isFinite(age) && age >= 0 && age <= cutoff;
 }
+
+export function getPrimaryBookState(primary) {
+  if (!primary || typeof primary !== "object") return "UNKNOWN";
+  if (primary.connected === false) return "DISCONNECTED";
+  if (primary.connected !== true) return "UNKNOWN";
+  if (primary.synchronized !== true) return "UNSYNCHRONIZED";
+  if (primary.stale === true) return "STALE";
+  if (primary.healthy === true) return "HEALTHY";
+  if (primary.healthy === false) return "UNHEALTHY";
+  if (primary.stale === false) return "FRESH (LEGACY)";
+  return "UNKNOWN";
+}
