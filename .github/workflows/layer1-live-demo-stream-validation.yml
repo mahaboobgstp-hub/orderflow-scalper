@@ -1,0 +1,26 @@
+name: Layer 1 Live Demo Stream Validation
+
+on:
+  push:
+    branches:
+      - validation/layer1-integrity-mainline
+    paths:
+      - "backend/tests/live_demo_stream_probe.py"
+      - ".github/workflows/layer1-live-demo-stream-validation.yml"
+
+jobs:
+  live-demo-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run bounded read-only demo stream probe
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: python tests/live_demo_stream_probe.py
