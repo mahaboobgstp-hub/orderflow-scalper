@@ -54,3 +54,35 @@ def test_layer5_invalid_scale_config_uses_default(bad):
     e=NineLayerDecisionEngine({"momentum_price_move_scale_pct":bad})
     r=e.evaluate("BTCUSDT",{"trade_flow":{"trade_count":8,"metrics":{"price_move_pct":0.5}}},risk={"allowed":True,"blockers":[]})
     assert r["layers"]["momentum"]["score"]==100
+
+from app.services.trade_flow_momentum import TradeFlowMomentumDetector
+import time
+
+def valid_book():
+    return {"exchange":"bybit","symbol":"BTCUSDT","bids":[[99.99,4]],"asks":[[100.01,4]],
+            "synchronized":True,"stale":False,"age_seconds":0.1,"integrity_error":None}
+
+def rising_tape():
+    now=int(time.time()*1000)
+    return [{"side":"buy","price":100+i*0.05,"quantity":1.0,"received_timestamp_ms":now-(7-i)*500} for i in range(8)]
+
+def falling_tape():
+    now=int(time.time()*1000)
+    return [{"side":"buy","price":100-i*0.05,"quantity":1.0,"received_timestamp_ms":now-(7-i)*500} for i in range(8)]
+
+def test_detector_price_progress_feeds_layer5_rising_prices():
+    detector=TradeFlowMomentumDetector()
+    output=detector.analyze(valid_book(),rising_tape(),15)
+    decision=NineLayerDecisionEngine().evaluate("BTCUSDT",{"trade_flow":output},risk={"allowed":True,"blockers":[]})
+    assert output["metrics"]["price_move_pct"]>0
+    assert decision["layers"]["momentum"]["direction"]=="BUY"
+    assert decision["layers"]["momentum"]["available"] is True
+
+def test_detector_price_progress_feeds_layer5_falling_prices_despite_buy_delta():
+    detector=TradeFlowMomentumDetector()
+    output=detector.analyze(valid_book(),falling_tape(),15)
+    decision=NineLayerDecisionEngine().evaluate("BTCUSDT",{"trade_flow":output},risk={"allowed":True,"blockers":[]})
+    assert output["metrics"]["delta_ratio"]==1.0
+    assert output["metrics"]["price_move_pct"]<0
+    assert decision["layers"]["aggressive_order_flow"]["direction"]=="BUY"
+    assert decision["layers"]["momentum"]["direction"]=="SELL"
