@@ -1,6 +1,8 @@
+import asyncio
 import unittest
 from unittest.mock import patch
 
+from app import main
 from app.market_data.backend_stream import BinanceOrderBookStream
 
 
@@ -112,6 +114,75 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         }))
         self.assertEqual(self.stream.last_update_id, 100)
 
+
+    def test_observability_route_exposes_phase_a_feed_schema(self):
+        class FakeUnified:
+            def get_status(self):
+                return {
+                    "stale_after_seconds": 3.0,
+                    "books": {
+                        "bybit:BTCUSDT": {"synchronized": True, "stale": False}
+                    },
+                    "exchanges": {
+                        "bybit": {"messages_received": 12, "last_message_age_seconds": 0.25}
+                    },
+                    "trade_streams": {},
+                    "errors": {},
+                }
+
+        class FakePrimary:
+            async def get_status(self):
+                return {
+                    "symbol": "BTCUSDT", "connected": True, "synchronized": True,
+                    "stale": False, "fresh": True, "healthy": True,
+                    "stale_after_seconds": 3.0, "last_update_id": 101,
+                    "connected_duration_seconds": 40.0, "synchronized_duration_seconds": 35.0,
+                    "last_event_age_seconds": 0.25, "last_sync_age_seconds": 5.0,
+                    "last_disconnect_at": None, "last_disconnect_reason": None,
+                    "connection_attempt_count": 1, "successful_connection_count": 1,
+                    "reconnect_count": 0, "recovery_count": 0,
+                    "last_reconnect_at": None, "last_recovery_at": None,
+                    "last_recovery_age_seconds": None, "messages_received": 12,
+                    "snapshot_count": 1, "sequence_gap_count": 0,
+                }
+
+        class FakeExchanges:
+            async def status(self):
+                return {"exchanges": [{
+                    "exchange": "bybit", "connected": True,
+                    "last_message_age_seconds": 0.25, "last_error": None,
+                }]}
+
+        state = main.app.state
+        names = ("market_stream", "unified_market_data", "exchange_manager")
+        originals = {name: getattr(state, name, None) for name in names}
+        missing = {name: not hasattr(state, name) for name in names}
+        state.market_stream = FakePrimary()
+        state.unified_market_data = FakeUnified()
+        state.exchange_manager = FakeExchanges()
+        try:
+            payload = asyncio.run(main.market_data_observability())
+        finally:
+            for name in names:
+                if missing[name]:
+                    delattr(state, name)
+                else:
+                    setattr(state, name, originals[name])
+
+        primary = payload["primary_binance_demo_stream"]
+        for field in (
+            "stale", "fresh", "healthy", "stale_after_seconds",
+            "connected_duration_seconds", "synchronized_duration_seconds",
+            "connection_attempt_count", "successful_connection_count",
+            "reconnect_count", "recovery_count", "last_disconnect_reason",
+            "last_recovery_age_seconds", "messages_received", "snapshot_count",
+            "sequence_gap_count",
+        ):
+            self.assertIn(field, primary)
+        self.assertFalse(payload["live_execution_enabled"])
+        self.assertEqual(payload["mode"], "PUBLIC_MARKET_DATA_PAPER_ONLY")
+        self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
+        self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
 
 if __name__ == "__main__":
     unittest.main()

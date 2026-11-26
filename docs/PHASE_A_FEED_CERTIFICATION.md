@@ -24,9 +24,9 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 
 A snapshot is not considered synchronized merely because an event's IDs span the snapshot bridge. The bridge event must also be successfully applied. A failed application leaves the book unsynchronized and forces snapshot recovery.
 
-## Frontend contract
+## Frontend and API contract
 
-Feed Monitor labels connected time separately from synchronized time, shows freshness classification, attempts/successes, reconnect/recovery counts, REST snapshot count, sequence gaps, and last disconnect reason. Missing metrics from an older API payload use safe display fallbacks.
+Feed Monitor labels connected time separately from synchronized time, shows freshness classification, attempts/successes, reconnect/recovery counts, REST snapshot count, sequence gaps, and last disconnect reason. Missing metrics from an older API payload use safe display fallbacks. The deterministic API contract test calls the consolidated observability route with stubs and asserts the Phase A fields and public-feed-only execution flag.
 
 ## Evidence required for certification
 
