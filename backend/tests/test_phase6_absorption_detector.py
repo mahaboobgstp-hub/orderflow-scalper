@@ -163,5 +163,14 @@ class Phase6DetectorTests(unittest.TestCase):
         result=detector.analyze(book(),trades("buy"),15)
         self.assertEqual(result["quality"]["score"],75.0)
 
+
+    def test_overflowing_trade_notional_is_filtered(self):
+        now_ms=int(__import__("time").time()*1000)
+        result=AbsorptionLiquidityDetector().analyze(book(),trades("buy",count=3)+[
+            {"side":"buy","price":1e308,"quantity":1e308,"received_timestamp_ms":now_ms}
+        ],15)
+        self.assertEqual(result["trade_count"],3)
+        self.assertEqual(result["metrics"]["aggressive_buy_notional"],300.15)
+
 if __name__=="__main__":
     unittest.main()
