@@ -22,7 +22,7 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | `sequence_gap_count` | Sequence continuity failures detected after synchronization or when snapshot-bridge application fails. |
 | `last_disconnect_reason` | Most recent observed connection end or recovery-triggering failure. |
 
-A snapshot is not considered synchronized merely because an event's IDs span the snapshot bridge. The bridge event must also be successfully applied. **The first bridge event is validated by the `U`/`u` overlap rule; its `pu` is not compared to the REST snapshot's `lastUpdateId`, because `pu` refers to the previous WebSocket event.** Subsequent events must enforce `pu == previous event's u`. A failed bridge application leaves the book unsynchronized and forces snapshot recovery.
+A snapshot is not considered synchronized merely because an event's IDs span the snapshot bridge. The bridge event must also be successfully applied. **For USD-M Futures, the first bridge event must satisfy `U <= snapshot.lastUpdateId <= u` (not the Spot `lastUpdateId + 1` rule). Its `pu` is not compared to the REST snapshot's `lastUpdateId`, because `pu` refers to the previous WebSocket event.** Subsequent events must enforce `pu == previous event's u`. A failed bridge application leaves the book unsynchronized and forces snapshot recovery.
 
 ## Frontend and API contract
 
