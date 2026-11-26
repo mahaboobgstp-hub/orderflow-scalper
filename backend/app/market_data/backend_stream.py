@@ -483,7 +483,25 @@ class BinanceOrderBookStream:
 
         # Validate both sides and apply to copies so malformed or crossed depth
         # events cannot partially mutate the live book.
-         self.asks = next_asks
+        try:
+            bid_updates = self._parse_depth_updates(event.get("b", []), "bids")
+            ask_updates = self._parse_depth_updates(event.get("a", []), "asks")
+            if not bid_updates and not ask_updates:
+                raise ValueError("Binance depth event contains no level updates")
+            next_bids = dict(self.bids)
+            next_asks = dict(self.asks)
+            self._apply_parsed_depth_updates(next_bids, bid_updates)
+            self._apply_parsed_depth_updates(next_asks, ask_updates)
+            if not next_bids or not next_asks:
+                raise ValueError("Binance depth update would empty one side of the book")
+            if max(next_bids) >= min(next_asks):
+                raise ValueError("Binance depth update would cross or lock the book")
+        except ValueError:
+            self.invalid_depth_message_count += 1
+            raise
+
+        self.bids = next_bids
+        self.asks = next_asks
         self.last_update_id = final_update_id
         # A progressing, accepted depth event—not mere message receipt—refreshes
         # the book's usable-data freshness clock.
