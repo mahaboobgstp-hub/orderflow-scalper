@@ -102,6 +102,7 @@ if __name__ == "__main__":
 import asyncio
 import pytest
 from fastapi import HTTPException
+from app.services.imbalance_detector import OrderBookImbalanceDetector
 from app import main
 
 class StubUnifiedBooks:
