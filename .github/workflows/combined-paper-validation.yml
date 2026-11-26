@@ -9,6 +9,7 @@ on:
       - "backend/app/services/paper_trading.py"
       - "backend/tests/test_combined_nine_layer_integration.py"
       - "backend/tests/test_controlled_paper_session.py"
+      - "backend/tests/test_autonomous_paper_runtime_integration.py"
       - ".github/workflows/combined-paper-validation.yml"
   pull_request:
     paths:
@@ -42,4 +43,4 @@ jobs:
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -q tests/test_controlled_paper_session.py tests/test_phase11_paper_trading.py
+        run: pytest -q tests/test_controlled_paper_session.py tests/test_phase11_paper_trading.py tests/test_autonomous_paper_runtime_integration.py
