@@ -89,7 +89,7 @@ def test_low_volatility_range_compression():
     for i in range(120):
         close=100*(1+(0.002 if i%2 else -0.002))
         rows.append(candle(100,close*1.004,close*0.996,close))
-    for i in range(80,120):
+    for i in range(100,120):
         close=100*(1+(0.00005 if i%2 else -0.00005))
         rows[i]=candle(100,close*1.0001,close*0.9999,close)
     result=regime_engine().analyze({"candles":rows})
