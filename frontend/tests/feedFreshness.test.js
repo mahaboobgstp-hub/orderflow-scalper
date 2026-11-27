@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState, normalizeFeedMonitorPayload } from "../src/feedFreshness.js";
+import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState, normalizeFeedMonitorPayload, normalizeDiagnosticCounter } from "../src/feedFreshness.js";
 
 test("fresh feed accepts finite nonnegative age inside the cutoff", () => {
   assert.equal(isFreshMessageFeed({ enabled: true, connected: true, last_message_age_seconds: 0.25 }, 3), true);
