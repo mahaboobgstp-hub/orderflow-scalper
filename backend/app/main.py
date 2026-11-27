@@ -374,7 +374,7 @@ async def market_data_observability():
         1 for book in books.values()
         if _is_fresh_synchronized_book(book, stale_after)
     )
-    feed_errors=_feed_diagnostics_error_count(exchanges)
+    feed_errors=_feed_diagnostics_error_count(exchanges_raw)
     return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
         "live_execution_enabled":False,"primary_binance_demo_stream":primary,
         "unified_market_data":unified,"exchange_connections":exchanges,
