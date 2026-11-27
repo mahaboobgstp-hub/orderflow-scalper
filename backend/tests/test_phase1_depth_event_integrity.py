@@ -1,4 +1,6 @@
+import asyncio
 import unittest
+from unittest.mock import patch
 
 from app.market_data.backend_stream import BinanceOrderBookStream
 
@@ -11,6 +13,42 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
             "bids": [["100", "2"], ["99", "3"]],
             "asks": [["101", "4"], ["102", "5"]],
         })
+
+    def test_valid_snapshot_establishes_book_freshness_timestamp(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        with patch("app.market_data.backend_stream.time.time", return_value=1000.0):
+            stream._load_snapshot({
+                "lastUpdateId": 100,
+                "bids": [["100", "2"]],
+                "asks": [["101", "3"]],
+            })
+        self.assertEqual(stream.last_book_update_at, 1000.0)
+
+    def test_snapshot_bridge_without_newer_update_uses_snapshot_freshness(self):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        snapshot = {
+            "lastUpdateId": 100,
+            "bids": [["100", "2"]],
+            "asks": [["101", "3"]],
+        }
+        bridge = {"U": 99, "u": 100, "pu": 98, "b": [], "a": []}
+        with patch("app.market_data.backend_stream.time.time", return_value=1000.0):
+            stream._record_connection_success()
+            stream._load_snapshot(snapshot)
+            self.assertTrue(stream._apply_snapshot_bridge(bridge))
+        self.assertTrue(stream.synchronized)
+        with patch("app.market_data.backend_stream.time.time", return_value=1002.0):
+            status = asyncio.run(stream.get_status())
+            book = asyncio.run(stream.get_order_book())
+        self.assertTrue(status["healthy"])
+        self.assertFalse(status["stale"])
+        self.assertEqual(status["last_book_update_age_seconds"], 2.0)
+        self.assertIsNotNone(book)
+        self.assertEqual(book["age_seconds"], 2.0)
+        with patch("app.market_data.backend_stream.time.time", return_value=1004.1):
+            expired = asyncio.run(stream.get_status())
+            self.assertTrue(expired["stale"])
+            self.assertIsNone(asyncio.run(stream.get_order_book()))
 
     def test_snapshot_limit_rejects_invalid_values(self):
         invalid_limits = (0, -1, 4, 25, 1001, True, False, 1000.0, "1000", None)

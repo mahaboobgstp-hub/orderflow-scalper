@@ -465,6 +465,10 @@ class BinanceOrderBookStream:
         self.bids = bids
         self.asks = asks
         self.last_update_id = update_id
+        # A validated REST snapshot is itself a fresh book observation. It
+        # establishes the freshness baseline even when the first bridge event
+        # overlaps the snapshot but carries no newer update ID.
+        self.last_book_update_at = time.time()
 
         self.synchronized = False
         self.snapshot_count += 1

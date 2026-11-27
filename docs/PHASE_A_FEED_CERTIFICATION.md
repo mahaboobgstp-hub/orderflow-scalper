@@ -11,8 +11,8 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | `stale_after_seconds` | Feed freshness cutoff (default 3 seconds). |
 | Primary Binance stream cutoff normalization | Invalid, non-finite, boolean, or nonpositive values fall back to 3 seconds; positive values below 0.1 seconds clamp to 0.1 seconds. |
 | `last_event_age_seconds` | Age of the most recently received WebSocket depth message (diagnostic only). |
-| `last_book_update_age_seconds` | Age of the most recent accepted event that advanced the order-book sequence. |
-| `stale` | True when disconnected, unsynchronized, no accepted sequence progress has occurred, or applied-book age exceeds the cutoff. |
+| `last_book_update_age_seconds` | Age of the most recent validated REST snapshot or accepted live depth event that advanced the order-book sequence; snapshot time is the freshness baseline until a progressing event arrives. |
+| `stale` | True when disconnected, unsynchronized, no validated snapshot/live freshness baseline exists, or baseline age exceeds the cutoff. |
 | `fresh` | Logical inverse of `stale`; freshness alone does not imply connectivity or book synchronization. |
 | `healthy` | True only while connected, synchronized, and the applied book is fresh. |
 | `connected_duration_seconds` | Time since the current successful WebSocket connection began; resets on reconnect. |
@@ -26,7 +26,7 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | `last_disconnect_reason` | Most recent observed connection end or recovery-triggering failure. |
 
 A snapshot is not considered synchronized merely because an event's IDs span the snapshot bridge. The bridge event must also be successfully applied. **For USD-M Futures, the first bridge event must satisfy `U <= snapshot.lastUpdateId <= u` (not the Spot `lastUpdateId + 1` rule). Its `pu` is not compared to the REST snapshot's `lastUpdateId`, because `pu` refers to the previous WebSocket event.** Subsequent events must contain `pu` and enforce `pu == previous event's u`; frames without `pu` are rejected (no fallback to U/u overlap for live continuity). A failed bridge application leaves the book unsynchronized and forces snapshot recovery.
-The read-only order-book endpoint must also refuse to return data when the stream is disconnected or when no accepted sequence-progress event has refreshed the book within the stale cutoff; raw message receipt or duplicate/old sequence events must not refresh usable-book freshness.
+The read-only order-book endpoint must refuse data when the stream is disconnected or unsynchronized, or when neither a validated REST snapshot nor an accepted sequence-progress event has established a freshness baseline within the stale cutoff. Raw message receipt and duplicate/old sequence events must not refresh usable-book freshness.
 
 ## Frontend and API contract
 
@@ -119,3 +119,7 @@ The freshness classifier accepts an omitted 'enabled' flag for older adapter pay
 ## Primary Binance depth-frame identity gate
 
 The raw BTCUSDT depth collector requires every JSON frame to identify itself as `e: depthUpdate` and include a symbol matching the configured symbol (case-insensitive). Frames with a missing/invalid symbol or unexpected event type are rejected before entering the snapshot buffer or live book consumer, increment the invalid-depth counter, and terminate the collector so the stream loop reconnects and re-synchronizes. This prevents a structurally valid depth payload for another instrument or event channel from mutating the configured book. Tests cover missing fields, unexpected event type, wrong symbol, and accepted symbol case normalization.
+
+## Snapshot-based freshness baseline for the primary depth stream
+
+A successfully validated REST snapshot establishes the primary order-book freshness timestamp immediately after validation and atomic replacement. This is a usable baseline even if the first WebSocket bridge event overlaps the snapshot without advancing the snapshot update ID. A later accepted depth event that advances sequence replaces the baseline with its arrival time. Invalid snapshots do not change the prior book or freshness timestamp. The book remains unavailable until the bridge is successfully applied and synchronization is confirmed; the snapshot alone does not mark the stream synchronized.
