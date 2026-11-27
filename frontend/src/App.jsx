@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState } from "./feedFreshness.js";
+import { getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState, normalizeFeedMonitorPayload } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -217,12 +217,7 @@ export default function App() {
     </>;
   }
   function renderMarketData() {
-    const payload=marketObs||{};
-    const summary=payload.summary||{};
-    const unified=payload.unified_market_data||{};
-    const adapterList=payload.exchange_connections?.exchanges||[];
-    const books=unified.books||{};
-    const primary=payload.primary_binance_demo_stream||{};
+    const {payload,summary,unified,adapterList,books,exchangeStats,primary}=normalizeFeedMonitorPayload(marketObs);
     const primaryBookState=getPrimaryBookState(primary);
     const primaryBookFresh=primaryBookState==="HEALTHY"||primaryBookState==="FRESH (LEGACY)";
     const messageState=(x)=>getMessageFeedState(x,unified.stale_after_seconds);
@@ -281,7 +276,7 @@ export default function App() {
         </div>;
         })}
       </div>
-      <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(unified.exchanges||{}).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
+      <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(exchangeStats).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
         <p className="subtle">This page refreshes with the existing polling cadence. Counts and timestamps are taken from backend diagnostics.</p>
       </div>
     </>;
