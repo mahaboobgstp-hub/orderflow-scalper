@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, effectiveFeedStaleCutoff } from "../src/feedFreshness.js";
+import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, effectiveFeedStaleCutoff, getUnifiedBookState } from "../src/feedFreshness.js";
 
 test("fresh feed accepts finite nonnegative age inside the cutoff", () => {
   assert.equal(isFreshMessageFeed({ enabled: true, connected: true, last_message_age_seconds: 0.25 }, 3), true);
@@ -89,4 +89,39 @@ test("explicit primary integrity errors outrank missing or malformed book age", 
     );
   }
   assert.equal(getPrimaryBookState({ ...base, last_book_update_age_seconds: null }), "AGE UNKNOWN");
+});
+
+test("unified book freshness requires valid age and non-crossed top of book", () => {
+  const base = {
+    synchronized: true,
+    stale: false,
+    integrity_error: null,
+    age_seconds: 0.2,
+    best_bid: 100,
+    best_ask: 101,
+  };
+  assert.equal(getUnifiedBookState(base, 3), "HEALTHY");
+  assert.equal(getUnifiedBookState({ ...base, age_seconds: 3.1 }, 3), "STALE");
+  assert.equal(getUnifiedBookState({ ...base, stale: true }, 3), "STALE");
+  assert.equal(getUnifiedBookState({ ...base, synchronized: false }, 3), "UNSYNCHRONIZED");
+  assert.equal(getUnifiedBookState({ ...base, integrity_error: "crossed book" }, 3), "UNHEALTHY");
+  assert.equal(getUnifiedBookState({ ...base, age_seconds: null }, 3), "AGE UNKNOWN");
+  assert.equal(getUnifiedBookState({ ...base, age_seconds: Number.NaN }, 3), "AGE UNKNOWN");
+  const invalidTopOfBook = [
+    { best_bid: null },
+    { best_ask: null },
+    { best_bid: true },
+    { best_ask: Number.POSITIVE_INFINITY },
+    { best_bid: 0 },
+    { best_bid: -1 },
+    { best_bid: 101, best_ask: 101 },
+    { best_bid: 102, best_ask: 101 },
+    { best_bid: "bad" },
+    { best_ask: "",
+  ];
+  for (const patch of invalidTopOfBook) {
+    assert.equal(getUnifiedBookState({ ...base, ...patch }, 3), "UNHEALTHY", JSON.stringify(patch));
+  }
+  assert.equal(getUnifiedBookState(null, 3), "UNKNOWN");
+  assert.equal(getUnifiedBookState([], 3), "UNKNOWN");
 });
