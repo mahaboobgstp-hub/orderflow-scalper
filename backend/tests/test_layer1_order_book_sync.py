@@ -174,6 +174,64 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(self.stream.last_update_id, before_id)
         self.assertEqual(self.stream.snapshot_count, before_snapshot_count)
 
+    def test_crossed_snapshot_rejected_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_id = self.stream.last_update_id
+        before_snapshot_count = self.stream.snapshot_count
+        with self.assertRaisesRegex(ValueError, "empty, locked, or crossed"):
+            self.stream._load_snapshot({
+                "lastUpdateId": 200,
+                "bids": [["101.0", "2.0"]],
+                "asks": [["100.0", "3.0"]],
+            })
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_id)
+        self.assertEqual(self.stream.snapshot_count, before_snapshot_count)
+
+    def test_empty_side_snapshot_rejected_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_id = self.stream.last_update_id
+        with self.assertRaisesRegex(ValueError, "empty, locked, or crossed"):
+            self.stream._load_snapshot({
+                "lastUpdateId": 200,
+                "bids": [["100.0", "2.0"]],
+                "asks": [],
+            })
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_id)
+
+    def test_crossed_live_update_rejected_without_mutation(self):
+        self.stream.last_update_id = 100
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        event = self.event(101, 101, bids=[["102.0", "1.0"]], previous=100)
+        self.assertFalse(self.stream._apply_event(event))
+        self.assertEqual(self.stream.last_update_id, 100)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
+    def test_live_update_that_removes_all_asks_rejected_atomically(self):
+        self.stream.last_update_id = 100
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        event = self.event(101, 101, asks=[["101.0", "0"], ["102.0", "0"]], previous=100)
+        self.assertFalse(self.stream._apply_event(event))
+        self.assertEqual(self.stream.last_update_id, 100)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
+    def test_api_fails_closed_if_book_is_crossed(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = time.time()
+        self.stream.bids = {102.0: 2.0}
+        self.stream.asks = {101.0: 3.0}
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
     def test_stale_book_is_not_returned(self):
         self.stream.connected = True
         self.stream.synchronized = True
