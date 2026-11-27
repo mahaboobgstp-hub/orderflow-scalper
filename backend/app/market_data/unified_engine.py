@@ -1,6 +1,7 @@
 """Phase 3 exchange-neutral market-data normalization with fail-closed book safety."""
 import math
 import time
+import zlib
 from dataclasses import dataclass, field
 
 
@@ -21,6 +22,9 @@ class Book:
     symbol: str
     bids: dict = field(default_factory=dict)
     asks: dict = field(default_factory=dict)
+    # Preserve Delta Exchange's raw numeric strings for checksum verification.
+    delta_raw_bids: dict = field(default_factory=dict)
+    delta_raw_asks: dict = field(default_factory=dict)
     sequence: int | None = None
     cross_sequence: int | None = None
     synchronized: bool = False
@@ -111,6 +115,41 @@ class UnifiedMarketDataEngine:
     def _valid_book(bids, asks):
         return bool(bids and asks and max(bids) < min(asks))
 
+    @staticmethod
+    def _raw_level_map(levels):
+        """Keep original numeric text so exchange CRC checks use exact formatting."""
+        result = {}
+        for raw_price, raw_quantity in levels:
+            price = float(raw_price)
+            quantity = float(raw_quantity)
+            if quantity > 0:
+                result[price] = (str(raw_price), str(raw_quantity))
+        return result
+
+    @staticmethod
+    def _apply_raw_levels(side, updates):
+        for raw_price, raw_quantity in updates:
+            price = float(raw_price)
+            quantity = float(raw_quantity)
+            if quantity == 0:
+                side.pop(price, None)
+            else:
+                side[price] = (str(raw_price), str(raw_quantity))
+
+    @staticmethod
+    def _delta_crc32(raw_bids, raw_asks):
+        asks = sorted(raw_asks.items(), key=lambda item: item[0])[:10]
+        bids = sorted(raw_bids.items(), key=lambda item: item[0], reverse=True)[:10]
+        asks_text = ",".join(f"{price}:{quantity}" for _, (price, quantity) in asks)
+        bids_text = ",".join(f"{price}:{quantity}" for _, (price, quantity) in bids)
+        return zlib.crc32((asks_text + "|" + bids_text).encode("utf-8")) & 0xffffffff
+
+    def _delta_checksum_matches(self, data, raw_bids, raw_asks):
+        expected = self.strict_int(data.get("cs"))
+        return expected is not None and expected <= 0xffffffff and self._delta_crc32(raw_bids, raw_asks) == expected
+
+
+
     def record_message(self, exchange):
         now = time.time()
         self.last_seen[exchange] = now
@@ -132,6 +171,8 @@ class UnifiedMarketDataEngine:
     def _invalidate(self, exchange, book, reason):
         book.bids.clear()
         book.asks.clear()
+        book.delta_raw_bids.clear()
+        book.delta_raw_asks.clear()
         book.synchronized = False
         book.stale = True
         book.error = reason
@@ -219,17 +260,22 @@ class UnifiedMarketDataEngine:
         is_update = action in ("update", "delta")
         if not (is_snapshot or is_update):
             return self._invalidate(exchange, book, "Unsupported Delta order-book message; resubscribe to ob_updates")
+        raw_bid_levels = data.get("buy", data.get("bids", data.get("b", [])))
+        raw_ask_levels = data.get("sell", data.get("asks", data.get("a", [])))
         try:
-            bid_levels = self._parse_levels(data.get("buy", data.get("bids", data.get("b", []))))
-            ask_levels = self._parse_levels(data.get("sell", data.get("asks", data.get("a", []))))
+            bid_levels = self._parse_levels(raw_bid_levels)
+            ask_levels = self._parse_levels(raw_ask_levels)
         except (TypeError, ValueError, OverflowError) as exc:
             return self._invalidate(exchange, book, "Invalid Delta order-book levels: " + str(exc))
         sequence = self.strict_int(data.get("seq"))
         if sequence is None:
             return self._invalidate(exchange, book, "Delta order-book sequence is missing or invalid")
+        checksum_channel = channel_type == "ob_updates"
         if is_snapshot:
             bids = self._side_from_levels(bid_levels)
             asks = self._side_from_levels(ask_levels)
+            raw_bids = self._raw_level_map(raw_bid_levels) if checksum_channel else {}
+            raw_asks = self._raw_level_map(raw_ask_levels) if checksum_channel else {}
         else:
             if not book.synchronized or book.sequence is None:
                 return self._invalidate(exchange, book, "Delta update arrived before a synchronized snapshot")
@@ -239,10 +285,19 @@ class UnifiedMarketDataEngine:
             asks = dict(book.asks)
             self._apply_levels(bids, bid_levels)
             self._apply_levels(asks, ask_levels)
+            raw_bids = dict(book.delta_raw_bids) if checksum_channel else {}
+            raw_asks = dict(book.delta_raw_asks) if checksum_channel else {}
+            if checksum_channel:
+                self._apply_raw_levels(raw_bids, raw_bid_levels)
+                self._apply_raw_levels(raw_asks, raw_ask_levels)
         if not self._valid_book(bids, asks):
             return self._invalidate(exchange, book, "Delta update produced an empty, locked, or crossed book")
+        if checksum_channel and not self._delta_checksum_matches(data, raw_bids, raw_asks):
+            return self._invalidate(exchange, book, "Delta order-book checksum missing, invalid, or mismatched")
         book.bids = bids
         book.asks = asks
+        book.delta_raw_bids = raw_bids
+        book.delta_raw_asks = raw_asks
         book.sequence = sequence
         book.synchronized = True
         book.stale = False
