@@ -441,7 +441,7 @@ class BinanceOrderBookStream:
         """Keep only the best configured depth levels, bounding retained book memory."""
         if len(levels) <= self.snapshot_limit:
             return levels
-        return dict(sorted(levels.items(), key=lambda item: item[0], reverse=highest_first)[:self.snapshot_limit]
+        return dict(sorted(levels.items(), key=lambda item: item[0], reverse=highest_first)[:self.snapshot_limit])
 
     def _load_snapshot(self, snapshot: dict[str, Any]):
         if not isinstance(snapshot, dict):
