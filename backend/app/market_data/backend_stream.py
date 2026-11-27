@@ -157,15 +157,19 @@ class BinanceOrderBookStream:
         self._record_synchronized()
         return True
 
-    @staticmethod
-    def _decode_depth_message(message: str | bytes) -> dict[str, Any]:
-        """Decode a Binance depth frame and reject malformed update-ID ranges."""
+    def _decode_depth_message(self, message: str | bytes) -> dict[str, Any]:
+        """Decode depth frames and reject wrong event type/symbol or update-ID ranges."""
         try:
             event = json.loads(message)
         except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
             raise ValueError("Malformed Binance depth JSON frame") from exc
         if not isinstance(event, dict):
             raise ValueError("Binance depth frame must be a JSON object")
+        if event.get("e") != "depthUpdate":
+            raise ValueError("Binance depth frame has unexpected event type")
+        event_symbol = event.get("s")
+        if not isinstance(event_symbol, str) or event_symbol.upper() != self.symbol:
+            raise ValueError("Binance depth frame symbol does not match configured symbol")
         try:
             first_raw, final_raw = event["U"], event["u"]
             if isinstance(first_raw, bool) or not isinstance(first_raw, int):
