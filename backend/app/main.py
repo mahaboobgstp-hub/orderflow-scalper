@@ -100,23 +100,28 @@ async def lifespan(app: FastAPI):
     ])
     app.state.exchange_manager=manager
     try:
-        await stream.start()
-        bridge_stop=asyncio.Event()
-        async def bridge_loop():
-            last_key=None
-            while not bridge_stop.is_set():
-                try:
-                    last_key=await _bridge_binance_book_once(stream,engine,last_key)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as bridge_exc:
-                    engine.invalidate_binance_bridge_book(stream.symbol, "Bridge polling error: "+type(bridge_exc).__name__)
-                    last_key=None
-                    logger.exception("Binance unified book bridge failed")
-                await asyncio.sleep(0.1)
-        bridge_task=asyncio.create_task(bridge_loop())
+        bridge_stop=None
+        bridge_task=None
+        if settings.binance_public_enabled:
+            await stream.start()
+            bridge_stop=asyncio.Event()
+            async def bridge_loop():
+                last_key=None
+                while not bridge_stop.is_set():
+                    try:
+                        last_key=await _bridge_binance_book_once(stream,engine,last_key)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as bridge_exc:
+                        engine.invalidate_binance_bridge_book(stream.symbol, "Bridge polling error: "+type(bridge_exc).__name__)
+                        last_key=None
+                        logger.exception("Binance unified book bridge failed")
+                    await asyncio.sleep(0.1)
+            bridge_task=asyncio.create_task(bridge_loop())
+        else:
+            engine.invalidate_binance_bridge_book(stream.symbol, "Binance public depth feed disabled by configuration")
         await manager.start()
-        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3,'binance_depth_bridge':True,'supabase_connected':database.connected})
+        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':int(settings.binance_public_enabled)+int(settings.bybit_public_enabled)+int(settings.delta_public_enabled),'binance_depth_bridge':settings.binance_public_enabled,'supabase_connected':database.connected})
         await repository.engine_state(mode='DEMO_PAPER_ONLY',status='running',execution_enabled=False,state={'autonomous_entry_enabled':False,'paper_only':True})
         await repository.system_log('INFO','Backend startup completed','lifecycle',{'database_connected':database.connected,'mode':'PAPER_ONLY'})
         yield
@@ -125,9 +130,9 @@ async def lifespan(app: FastAPI):
         logger.exception('Application lifecycle error')
         raise
     finally:
-        if 'bridge_stop' in locals():
+        if bridge_stop is not None:
             bridge_stop.set()
-        if 'bridge_task' in locals() and bridge_task:
+        if bridge_task is not None:
             try: await bridge_task
             except asyncio.CancelledError: pass
         try: await persistence_worker.stop()
