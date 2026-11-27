@@ -122,7 +122,7 @@ class Tests(unittest.TestCase):
                 self.assertTrue(self.e.process("bybit", bybit_snapshot(u=invalid))["resync_required"])
         for invalid_levels in ([["NaN", "1"]], [["100", "Infinity"]], [[True, "2"]]):
             with self.subTest(invalid_levels=invalid_levels):
-                bad = bybit_snapshot(u=10, bids=invalid_levels[0], asks=[["101", "1"]])
+                bad = bybit_snapshot(u=10, bids=invalid_levels, asks=[["101", "1"]])
                 self.assertTrue(self.e.process("bybit", bad)["resync_required"])
 
     def test_bybit_cross_sequence_regression_invalidates(self):
