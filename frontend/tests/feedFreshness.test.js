@@ -47,6 +47,16 @@ test("per-adapter state distinguishes disabled, disconnected, and unknown connec
   assert.equal(getMessageFeedState({ connected: "true", last_message_age_seconds: 0.1 }, 3), "UNKNOWN");
   assert.equal(getMessageFeedState(null, 3), "UNKNOWN");
   assert.equal(getMessageFeedState([], 3), "UNKNOWN");
+  // A missing flag is supported for legacy adapters; explicit malformed values
+  // must not be interpreted as enabled merely because they are truthy.
+  for (const enabled of [null, 0, 1, "true", "false", {}, []]) {
+    assert.equal(
+      getMessageFeedState({ enabled, connected: true, last_message_age_seconds: 0.1 }, 3),
+      "UNKNOWN",
+      `enabled ${String(enabled)}`,
+    );
+  }
+  assert.equal(getMessageFeedState({ connected: true, last_message_age_seconds: 0.1 }, 3), "FRESH");
 });
 
 test("primary book status requires explicit connectivity and synchronization", () => {
