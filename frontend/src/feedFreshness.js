@@ -8,9 +8,31 @@ export function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+export function normalizeDiagnosticCounter(rawValue) {
+  if (typeof rawValue !== "number" && typeof rawValue !== "string") return 0;
+  if (typeof rawValue === "string" && rawValue.trim() === "") return 0;
+  const count = Number(rawValue);
+  return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+}
+
 export function normalizeFeedMonitorPayload(rawPayload) {
   const payload = asRecord(rawPayload);
-  const summary = asRecord(payload.summary);
+  const summary = { ...asRecord(payload.summary) };
+  // Diagnostic counters must remain primitive, finite, nonnegative integers so
+  // malformed API values cannot crash React or produce misleading UI counts.
+  for (const field of [
+    "exchange_adapter_count",
+    "unified_book_count",
+    "synchronized_book_count",
+    "fresh_message_feed_count",
+    "healthy_feed_count",
+    "feed_errors",
+  ]) {
+    if (Object.hasOwn(summary, field)) summary[field] = normalizeDiagnosticCounter(summary[field]);
+  }
+  if (typeof summary.safety !== "string" || !summary.safety.trim()) {
+    summary.safety = "PUBLIC FEEDS ONLY";
+  }
   const unified = asRecord(payload.unified_market_data);
   const exchangeConnections = asRecord(payload.exchange_connections);
   const adapterList = asArray(exchangeConnections.exchanges).map(asRecord);
