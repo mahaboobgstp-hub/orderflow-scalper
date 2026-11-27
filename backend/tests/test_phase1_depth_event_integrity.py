@@ -193,6 +193,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         before_bids = dict(self.stream.bids)
         before_asks = dict(self.stream.asks)
         before_update_id = self.stream.last_update_id
+        before_book_update_at = self.stream.last_book_update_at
         with self.assertRaisesRegex(ValueError, "nonnumeric levels"):
             self.stream._load_snapshot({
                 "lastUpdateId": 200,
@@ -202,12 +203,14 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         self.assertEqual(self.stream.bids, before_bids)
         self.assertEqual(self.stream.asks, before_asks)
         self.assertEqual(self.stream.last_update_id, before_update_id)
+        self.assertEqual(self.stream.last_book_update_at, before_book_update_at)
         self.assertEqual(self.stream.snapshot_count, 1)
 
     def test_live_large_integer_overflow_is_rejected_and_counted(self):
         before_bids = dict(self.stream.bids)
         before_asks = dict(self.stream.asks)
         before_update_id = self.stream.last_update_id
+        before_book_update_at = self.stream.last_book_update_at
         with self.assertRaisesRegex(ValueError, "nonnumeric levels"):
             self.stream._apply_event({
                 "U": 101, "u": 102, "pu": 100,
