@@ -203,19 +203,31 @@ class UnifiedMarketDataEngine:
         return {"type": "book_delta", "synchronized": True, "resync_required": False}
 
     def _process_delta_exchange_book(self, exchange, book, raw, data, exchange_ts):
-        typ = str(raw.get("type", raw.get("channel", data.get("action", "")))).lower()
-        is_snapshot = typ in ("snapshot", "initial")
+        channel_type = str(raw.get("type", raw.get("channel", data.get("type", "")))).lower()
+        action = str(data.get("action") or raw.get("action") or channel_type).lower()
+        if action == "error":
+            message = data.get("msg") or data.get("message") or raw.get("msg") or "Delta order-book stream error"
+            return self._invalidate(exchange, book, "Delta order-book stream error: " + str(message))
+        is_snapshot = action in ("snapshot", "initial")
+        is_update = action in ("update", "delta")
+        if not (is_snapshot or is_update):
+            return self._invalidate(exchange, book, "Unsupported Delta order-book message; resubscribe to ob_updates")
         try:
-            bid_levels = self._parse_levels(data.get("buy", data.get("bids", [])))
-            ask_levels = self._parse_levels(data.get("sell", data.get("asks", [])))
+            bid_levels = self._parse_levels(data.get("buy", data.get("bids", data.get("b", []))))
+            ask_levels = self._parse_levels(data.get("sell", data.get("asks", data.get("a", []))))
         except (TypeError, ValueError, OverflowError) as exc:
             return self._invalidate(exchange, book, "Invalid Delta order-book levels: " + str(exc))
+        sequence = self.strict_int(data.get("seq"))
+        if sequence is None:
+            return self._invalidate(exchange, book, "Delta order-book sequence is missing or invalid")
         if is_snapshot:
             bids = self._side_from_levels(bid_levels)
             asks = self._side_from_levels(ask_levels)
         else:
-            if not book.synchronized:
+            if not book.synchronized or book.sequence is None:
                 return self._invalidate(exchange, book, "Delta update arrived before a synchronized snapshot")
+            if sequence != book.sequence + 1:
+                return self._invalidate(exchange, book, "Delta order-book sequence gap; reconnect for snapshot recovery")
             bids = dict(book.bids)
             asks = dict(book.asks)
             self._apply_levels(bids, bid_levels)
@@ -224,8 +236,7 @@ class UnifiedMarketDataEngine:
             return self._invalidate(exchange, book, "Delta update produced an empty, locked, or crossed book")
         book.bids = bids
         book.asks = asks
-        if is_snapshot:
-            book.sequence = self.strict_int(data.get("u"))
+        book.sequence = sequence
         book.synchronized = True
         book.stale = False
         book.error = None
@@ -247,8 +258,11 @@ class UnifiedMarketDataEngine:
             return result
         if not isinstance(data, dict):
             return None
-        symbol = str(data.get("s") or data.get("symbol") or default_symbol).upper()
-        ts = self.as_int(raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts"))
+        symbol = str(data.get("s") or data.get("sy") or data.get("symbol") or default_symbol).upper()
+        raw_timestamp = raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts")
+        ts = self.as_int(raw_timestamp)
+        if ex == "delta" and ts is not None and ts > 10**13:
+            ts //= 1000
         book = self.book(ex, symbol)
         try:
             # Binance public depth diffs do not have a REST bridge in this
@@ -272,7 +286,12 @@ class UnifiedMarketDataEngine:
                 if typ == "delta":
                     return self._apply_bybit_delta(ex, book, data, ts)
                 return None
-            if ex == "delta" and any(k in data for k in ("buy", "sell", "bids", "asks")):
+            if ex == "delta" and (
+                raw.get("type") in ("ob_updates", "ob_l2")
+                or data.get("type") in ("ob_updates", "ob_l2")
+                or data.get("action") in ("snapshot", "update", "error")
+                or any(k in data for k in ("buy", "sell", "bids", "asks"))
+            ):
                 return self._process_delta_exchange_book(ex, book, raw, data, ts)
 
             tape = []
@@ -280,11 +299,11 @@ class UnifiedMarketDataEngine:
                 tape = [data]
             elif topic.startswith("publicTrade"):
                 tape = data if isinstance(data, list) else [data]
-            elif ex == "delta" and "price" in data and ("size" in data or "quantity" in data):
+            elif ex == "delta" and data.get("type") in ("trades", "trade") and ("p" in data or "price" in data) and ("s" in data or "size" in data or "quantity" in data):
                 tape = [data]
             for trade_data in tape:
                 raw_price = trade_data.get("p", trade_data.get("price", 0))
-                raw_quantity = trade_data.get("q", trade_data.get("v", trade_data.get("size", trade_data.get("quantity", 0))))
+                raw_quantity = trade_data.get("q", trade_data.get("v", trade_data.get("size", trade_data.get("quantity", trade_data.get("s", 0)))))
                 if isinstance(raw_price, bool) or isinstance(raw_quantity, bool):
                     self.record_message(ex)
                     continue
@@ -298,10 +317,19 @@ class UnifiedMarketDataEngine:
                     self.record_message(ex)
                     continue
                 maker = trade_data.get("m")
-                side = ("sell" if maker else "buy") if isinstance(maker, bool) else str(trade_data.get("S", trade_data.get("side", trade_data.get("takerSide", "")))).lower() or None
+                buyer_role = str(trade_data.get("r", "")).lower()
+                if isinstance(maker, bool):
+                    side = "sell" if maker else "buy"
+                elif ex == "delta" and buyer_role in ("m", "t"):
+                    side = "sell" if buyer_role == "m" else "buy"
+                else:
+                    side = str(trade_data.get("S", trade_data.get("side", trade_data.get("takerSide", "")))).lower() or None
                 if side not in ("buy", "sell"):
                     side = None
-                trade = Trade(ex, symbol, price, quantity, side, self.as_int(trade_data.get("T") or trade_data.get("timestamp") or ts), int(time.time() * 1000))
+                trade_timestamp = self.as_int(trade_data.get("T") or trade_data.get("t") or trade_data.get("timestamp") or ts)
+                if ex == "delta" and trade_timestamp is not None and trade_timestamp > 10**13:
+                    trade_timestamp //= 1000
+                trade = Trade(ex, symbol, price, quantity, side, trade_timestamp, int(time.time() * 1000))
                 key = self.key(ex, symbol)
                 self.trades.setdefault(key, []).append(trade)
                 self.trades[key] = self.trades[key][-5000:]
