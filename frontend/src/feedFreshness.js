@@ -8,7 +8,9 @@ export function isFreshMessageFeed(adapter, staleAfterSeconds) {
   const rawCutoff = staleAfterSeconds == null || typeof staleAfterSeconds === "boolean"
     ? Number.NaN
     : Number(staleAfterSeconds);
-  const cutoff = Number.isFinite(rawCutoff) && rawCutoff > 0 ? rawCutoff : DEFAULT_FEED_STALE_AFTER_SECONDS;
+  const cutoff = Number.isFinite(rawCutoff) && rawCutoff > 0
+    ? Math.max(0.1, rawCutoff)
+    : DEFAULT_FEED_STALE_AFTER_SECONDS;
   return Number.isFinite(age) && age >= 0 && age <= cutoff;
 }
 
