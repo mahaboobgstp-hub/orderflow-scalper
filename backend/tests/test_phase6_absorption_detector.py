@@ -16,10 +16,11 @@ def trades(side="buy",qty=1.0,count=8,price=100.05):
 
 
 class Phase6DetectorTests(unittest.TestCase):
-    def _fixed_movement_result(self, side, movement_pct):
+    def _fixed_movement_result(self, side, movement_pct, elapsed_ms=1000):
         baseline_mid = 100.05
         current_mid = baseline_mid * (1.0 + movement_pct / 100.0)
         timestamp_ms = 1_000_000
+        elapsed_ms = int(elapsed_ms)
         detector = AbsorptionLiquidityDetector()
         tape = [
             {"side": side, "quantity": 1.0, "price": 100.05,
@@ -33,7 +34,8 @@ class Phase6DetectorTests(unittest.TestCase):
                 asks=[[mid + 0.05, 10.0], [mid + 0.15, 8.0]],
             )
 
-        with patch("app.services.absorption_detector.time.time", return_value=timestamp_ms / 1000.0):
+        with patch("app.services.absorption_detector.time.time", side_effect=[timestamp_ms / 1000.0, (timestamp_ms + elapsed_ms) / 1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic", side_effect=[500.0, 500.0 + elapsed_ms / 1000.0]):
             detector.analyze(book_at(baseline_mid), tape, 15)
             return detector.analyze(book_at(current_mid), tape, 15)
 
@@ -73,16 +75,24 @@ class Phase6DetectorTests(unittest.TestCase):
 
     def test_high_aggressive_buy_with_limited_progress_is_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("buy"),15)
-        result=detector.analyze(book(),trades("buy"),15)
+        tape=trades("buy")
+        now_ms=int(time.time()*1000); mono=time.monotonic()
+        with patch("app.services.absorption_detector.time.time",side_effect=[now_ms/1000.0,(now_ms+1000)/1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=[mono,mono+1.0]):
+            detector.analyze(book(),tape,15)
+            result=detector.analyze(book(),tape,15)
         self.assertEqual(result["classification"],"POSSIBLE_BUY_ABSORPTION")
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],8.0)
 
     def test_sell_side_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("sell"),15)
-        result=detector.analyze(book(),trades("sell"),15)
+        tape=trades("sell")
+        now_ms=int(time.time()*1000); mono=time.monotonic()
+        with patch("app.services.absorption_detector.time.time",side_effect=[now_ms/1000.0,(now_ms+1000)/1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=[mono,mono+1.0]):
+            detector.analyze(book(),tape,15)
+            result=detector.analyze(book(),tape,15)
         self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
         self.assertTrue(result["metrics"]["sell_absorption_candidate"])
 
@@ -93,13 +103,17 @@ class Phase6DetectorTests(unittest.TestCase):
 
     def test_buy_and_sell_progress_are_temporal_and_directional(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("buy"),15)
-        up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),trades("buy"),15)
-        self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
-        self.assertLess(up["metrics"]["sell_price_progress_pct"],0.0)
-        down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),trades("sell"),15)
-        self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
-        self.assertLess(down["metrics"]["buy_price_progress_pct"],0.0)
+        tape=trades("buy")
+        now_ms=int(time.time()*1000); mono=time.monotonic()
+        with patch("app.services.absorption_detector.time.time",side_effect=[now_ms/1000.0,(now_ms+1000)/1000.0,(now_ms+2000)/1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=[mono,mono+1.0,mono+2.0]):
+            detector.analyze(book(),tape,15)
+            up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),tape,15)
+            self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
+            self.assertLess(up["metrics"]["sell_price_progress_pct"],0.0)
+            down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),tape,15)
+            self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
+            self.assertLess(down["metrics"]["buy_price_progress_pct"],0.0)
 
     def test_no_clear_absorption_when_tape_below_minimum(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)
@@ -244,9 +258,11 @@ class Phase6DetectorTests(unittest.TestCase):
     def test_absorption_requires_baseline_within_lookback(self):
         detector=AbsorptionLiquidityDetector()
         detector.analyze(book(),trades("buy"),lookback_seconds=1)
-        # Simulate a previous observation older than the requested lookback.
-        detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=2000
+        # Simulate the temporal baseline older than the requested lookback.
+        detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"]-=2000
+        detector._price_progress_baselines["bybit:BTCUSDT"]["monotonic_timestamp"]-=2000
         result=detector.analyze(book(),trades("buy"),lookback_seconds=1)
+        self.assertFalse(result["metrics"]["price_progress_baseline_valid"])
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
 
@@ -261,6 +277,39 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertTrue(buy["metrics"]["buy_absorption_candidate"])
         self.assertTrue(sell["metrics"]["sell_absorption_candidate"])
 
+
+    def test_minimum_temporal_baseline_interval_is_enforced_at_999_and_1000_ms(self):
+        below=self._fixed_movement_result("buy",0.0,elapsed_ms=999)
+        exact=self._fixed_movement_result("buy",0.0,elapsed_ms=1000)
+        self.assertEqual(below["metrics"]["price_progress_baseline_age_ms"],999)
+        self.assertFalse(below["metrics"]["price_progress_baseline_valid"])
+        self.assertEqual(below["metrics"]["buy_absorption_score"],0.0)
+        self.assertEqual(exact["metrics"]["price_progress_baseline_age_ms"],1000)
+        self.assertTrue(exact["metrics"]["price_progress_baseline_valid"])
+        self.assertEqual(exact["metrics"]["buy_absorption_score"],1.0)
+
+    def test_rapid_polls_do_not_replace_temporal_baseline_before_minimum_interval(self):
+        detector=AbsorptionLiquidityDetector()
+        now_ms=1_000_000
+        mono=100.0
+        tape=[{"side":"buy","quantity":1.0,"price":100.05,"received_timestamp_ms":now_ms} for _ in range(8)]
+        times=[now_ms/1000.0,(now_ms+500)/1000.0,(now_ms+999)/1000.0,(now_ms+1000)/1000.0]
+        monotonic_times=[mono,mono+0.5,mono+0.999,mono+1.0]
+        results=[]
+        with patch("app.services.absorption_detector.time.time",side_effect=times), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=monotonic_times):
+            results.append(detector.analyze(book(),tape,15))
+            results.append(detector.analyze(book(),tape,15))
+            results.append(detector.analyze(book(),tape,15))
+            self.assertEqual(detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"],now_ms)
+            results.append(detector.analyze(book(),tape,15))
+        ages=[r["metrics"]["price_progress_baseline_age_ms"] for r in results]
+        valid=[r["metrics"]["price_progress_baseline_valid"] for r in results]
+        scores=[r["metrics"]["buy_absorption_score"] for r in results]
+        self.assertEqual(ages,[None,500,999,1000])
+        self.assertEqual(valid,[False,False,False,True])
+        self.assertEqual(scores,[0.0,0.0,0.0,1.0])
+        self.assertEqual(detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"],now_ms+1000)
 
 class Phase6SpatialVwapAndApiTests(unittest.TestCase):
     def test_vwap_vs_mid_sign_is_aggressor_side_normalized_not_temporal_progress(self):
@@ -301,22 +350,18 @@ class Phase6SpatialVwapAndApiTests(unittest.TestCase):
              "received_timestamp_ms": now_ms}
             for _ in range(8)
         ]
-        thin_book = book(
-            bids=[[100.00, 1e-8]],
-            asks=[[100.10, 1e-8]],
-        )
+        thin_book = book(bids=[[100.00, 1e-8]], asks=[[100.10, 1e-8]])
         class MarketStub:
-            def get_book(self, exchange, symbol):
-                return thin_book
-            def get_recent_trades(self, exchange, symbol, limit):
-                return tiny_tape[:limit]
+            def get_book(self, exchange, symbol): return thin_book
+            def get_recent_trades(self, exchange, symbol, limit): return tiny_tape[:limit]
 
         detector = AbsorptionLiquidityDetector()
         with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0), \
              patch.object(main.app.state, "unified_market_data", MarketStub(), create=True), \
              patch.object(main.app.state, "absorption_detector", detector, create=True):
-            # First request establishes temporal baseline; second returns API metrics.
             asyncio.run(main.analyze_absorption("bybit", "BTCUSDT", 15, 500))
+            detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"]-=1000
+            detector._price_progress_baselines["bybit:BTCUSDT"]["monotonic_timestamp"]-=1000
             result = asyncio.run(main.analyze_absorption("bybit", "BTCUSDT", 15, 500))
 
         metrics = result["metrics"]
@@ -326,12 +371,43 @@ class Phase6SpatialVwapAndApiTests(unittest.TestCase):
         self.assertIn("sell_price_progress_pct", metrics)
         self.assertLess(metrics["buy_vwap_vs_mid_pct"], 0.0)
         self.assertAlmostEqual(metrics["buy_vwap_vs_mid_pct"], -0.049975, places=6)
+        self.assertGreaterEqual(metrics["price_progress_baseline_age_ms"],1000)
+        self.assertTrue(metrics["price_progress_baseline_valid"])
+        self.assertEqual(metrics["price_progress_min_interval_ms"],1000)
         self.assertEqual(metrics["buy_price_progress_pct"], 0.0)
         self.assertEqual(metrics["buy_absorption_score"], 1.0)
         self.assertTrue(metrics["buy_absorption_candidate"])
         self.assertEqual(metrics["top5_bid_depth"], 1e-8)
         self.assertEqual(metrics["top5_ask_depth"], 1e-8)
         self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
+
+    def test_api_same_timestamp_poll_does_not_score_zero_progress_absorption(self):
+        import asyncio
+        from app import main
+
+        now_ms=int(time.time()*1000)
+        tiny_tape=[{"side":"buy","quantity":1e-9,"price":100.10,"received_timestamp_ms":now_ms} for _ in range(8)]
+        thin_book=book(bids=[[100.00,1e-8]],asks=[[100.10,1e-8]])
+        class MarketStub:
+            def get_book(self,exchange,symbol): return thin_book
+            def get_recent_trades(self,exchange,symbol,limit): return tiny_tape[:limit]
+
+        detector=AbsorptionLiquidityDetector()
+        with patch("app.services.absorption_detector.time.time",return_value=now_ms/1000.0), \
+             patch.object(main.app.state,"unified_market_data",MarketStub(),create=True), \
+             patch.object(main.app.state,"absorption_detector",detector,create=True):
+            asyncio.run(main.analyze_absorption("bybit","BTCUSDT",15,500))
+            detector._price_progress_baselines["bybit:BTCUSDT"]["monotonic_timestamp"]=700000
+            with patch("app.services.absorption_detector.time.monotonic",return_value=700.0):
+                result=asyncio.run(main.analyze_absorption("bybit","BTCUSDT",15,500))
+
+        metrics=result["metrics"]
+        self.assertEqual(metrics["price_progress_baseline_age_ms"],0)
+        self.assertFalse(metrics["price_progress_baseline_valid"])
+        self.assertEqual(metrics["buy_price_progress_pct"],0.0)
+        self.assertEqual(metrics["buy_absorption_score"],0.0)
+        self.assertFalse(metrics["buy_absorption_candidate"])
+        self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
 
 class Phase6NumericOverflowTests(unittest.TestCase):
     def test_absorption_api_refuses_binance_book_without_snapshot_bridge(self):
