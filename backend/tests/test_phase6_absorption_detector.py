@@ -1,5 +1,6 @@
 import unittest
 import time
+import json
 from unittest.mock import patch
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 
@@ -331,6 +332,37 @@ class Phase6SpatialVwapAndApiTests(unittest.TestCase):
         self.assertEqual(metrics["top5_bid_depth"], 1e-8)
         self.assertEqual(metrics["top5_ask_depth"], 1e-8)
         self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
+
+class Phase6NumericOverflowTests(unittest.TestCase):
+    def test_large_finite_book_prices_use_overflow_safe_midpoint_and_json(self):
+        detector = AbsorptionLiquidityDetector()
+        extreme_book = book(bids=[[1.6e308, 10.0]], asks=[[1.7e308, 10.0]])
+        now_ms = 1_000_000
+        tape = [
+            {"side": "buy", "quantity": 1.0, "price": 1e100,
+             "received_timestamp_ms": now_ms}
+            for _ in range(8)
+        ]
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0):
+            detector.analyze(extreme_book, tape, 15)
+            result = detector.analyze(extreme_book, tape, 15)
+        mid = result["metrics"]["mid_price"]
+        self.assertAlmostEqual(mid / 1e308, 1.65, places=10)
+        json.dumps(result, allow_nan=False)
+
+    def test_finite_trade_inputs_that_overflow_notional_aggregate_are_rejected_without_history(self):
+        detector = AbsorptionLiquidityDetector()
+        now_ms = 1_000_000
+        tape = [
+            {"side": "buy", "quantity": 1.0, "price": 1.2e308,
+             "received_timestamp_ms": now_ms}
+            for _ in range(2)
+        ]
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0):
+            with self.assertRaisesRegex(ValueError, "non-finite"):
+                detector.analyze(book(), tape, 15)
+        self.assertEqual(detector._history, {})
+
 
 if __name__=="__main__":
     unittest.main()
