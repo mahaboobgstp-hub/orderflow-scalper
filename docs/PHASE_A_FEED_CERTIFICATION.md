@@ -82,3 +82,8 @@ The primary Binance depth collector buffers WebSocket depth frames while the RES
 ## Primary Binance retained-depth bound
 
 The primary demo-stream snapshot_limit accepts only Binance USD-M Futures depth limits 5, 10, 20, 50, 100, 500, or 1000. Invalid values are rejected during stream construction rather than sent to REST. The initial snapshot and accepted depth updates retain the highest bid levels and lowest ask levels up to this limit, bounding in-memory book size per side. The API exposes snapshot_limit, and Feed Monitor displays the cap. Levels outside the retained cap are not tracked; the book is a bounded-depth view, not a claim of a full exchange book.
+
+
+## Primary Feed Monitor frontend age gate
+
+The frontend primary-book classification must not infer freshness from `healthy: true` or the legacy `stale: false` flag alone. It requires explicit connectivity and synchronization, an explicit non-stale flag, and a finite nonnegative `last_book_update_age_seconds` within the normalized stale cutoff. Missing or malformed age is displayed as `AGE UNKNOWN` and must not be counted as fresh. The legacy classification is retained only when valid book-age evidence is present. This is a UI defense-in-depth gate; the backend remains authoritative for book integrity.
