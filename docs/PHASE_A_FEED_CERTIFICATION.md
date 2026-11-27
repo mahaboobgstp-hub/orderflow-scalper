@@ -114,3 +114,8 @@ A normalized unified order book is counted as fresh/synchronized only when the A
 ## Explicit adapter enabled-flag validation
 
 The freshness classifier accepts an omitted 'enabled' flag for older adapter payloads (legacy default enabled), accepts only literal boolean true as explicitly enabled, and reports literal false as DISABLED. Any other explicit value (null, numeric, string, object, or array) is classified UNKNOWN and excluded from fresh-message counts. Backend and frontend apply the same rule so malformed adapter configuration cannot produce a false fresh-feed signal.
+
+
+## Primary Binance depth-frame identity gate
+
+The raw BTCUSDT depth collector requires every JSON frame to identify itself as `e: depthUpdate` and include a symbol matching the configured symbol (case-insensitive). Frames with a missing/invalid symbol or unexpected event type are rejected before entering the snapshot buffer or live book consumer, increment the invalid-depth counter, and terminate the collector so the stream loop reconnects and re-synchronizes. This prevents a structurally valid depth payload for another instrument or event channel from mutating the configured book. Tests cover missing fields, unexpected event type, wrong symbol, and accepted symbol case normalization.
