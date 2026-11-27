@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getMessageFeedState, getPrimaryBookState } from "./feedFreshness.js";
+import { getMessageFeedState, getPrimaryBookState, getUnifiedBookState } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -269,12 +269,17 @@ export default function App() {
         })}
       </div>
       <div className="panel"><div className="panel-title"><h2>Unified Order Books</h2></div>
-        {Object.keys(books).length===0?<div className="empty-state">No normalized books received yet. This is a live status, not simulated sample data.</div>:Object.entries(books).map(([key,b])=><div className="decision-card" key={key}>
-          <div className="decision-head"><b>{key}</b><span className={"status-chip "+(b.synchronized&&!b.stale?"paper":"")}>{b.synchronized&&!b.stale?"SYNCED & FRESH":b.stale?"STALE":"UNSYNCHRONIZED"}</span></div>
+        {Object.keys(books).length===0?<div className="empty-state">No normalized books received yet. This is a live status, not simulated sample data.</div>:Object.entries(books).map(([key,b])=>{
+          const bookState=getUnifiedBookState(b,unified.stale_after_seconds);
+          const statusLabel=bookState==="HEALTHY"?"SYNCED & FRESH":bookState;
+          const statusClass="status-chip "+(bookState==="HEALTHY"?"paper":bookState==="STALE"||bookState==="UNHEALTHY"?"bad":"");
+          return <div className="decision-card" key={key}>
+          <div className="decision-head"><b>{key}</b><span className={statusClass}>{statusLabel}</span></div>
           <div className="decision-metrics"><span>Sequence <b>{value(b.sequence)}</b></span><span>Age <b>{b.age_seconds==null?"--":b.age_seconds+"s"}</b></span><span>Spread <b>{b.spread==null?"--":b.spread}</b></span><span>Top-10 Imbalance <b>{b.imbalance_top10==null?"--":(b.imbalance_top10*100).toFixed(1)+"%"}</b></span></div>
           <div className="decision-metrics"><span>Best Bid <b>{value(b.best_bid)}</b></span><span>Best Ask <b>{value(b.best_ask)}</b></span><span>Bid Depth <b>{b.bid_depth_top10??"--"}</b></span><span>Ask Depth <b>{b.ask_depth_top10??"--"}</b></span></div>
           <div className="decision-outcome">Integrity: {b.integrity_error||"No error reported"}</div>
-        </div>)}
+        </div>;
+        })}
       </div>
       <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(unified.exchanges||{}).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
         <p className="subtle">This page refreshes with the existing polling cadence. Counts and timestamps are taken from backend diagnostics.</p>
