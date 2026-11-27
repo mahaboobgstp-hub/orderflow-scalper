@@ -185,7 +185,7 @@ test("monitor payload safely normalizes malformed containers", () => {
   assert.deepEqual(malformed.exchangeStats, {});
   assert.deepEqual(malformed.primary, {});
   assert.deepEqual(malformed.payload.summary, {});
-  assert.deepEqual(malformed.payload.unified_market_data, {});
+  assert.deepEqual(malformed.payload.unified_market_data, { books: {}, exchanges: {} });
   assert.deepEqual(malformed.payload.exchange_connections, { exchanges: [] });
   assert.deepEqual(malformed.payload.primary_binance_demo_stream, {});
 });
