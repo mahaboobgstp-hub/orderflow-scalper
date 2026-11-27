@@ -52,3 +52,35 @@ export function getPrimaryBookState(primary, staleAfterSeconds) {
   if (primary.healthy === false) return "UNHEALTHY";
   return "FRESH (LEGACY)";
 }
+
+export function getUnifiedBookState(book, staleAfterSeconds) {
+  if (!book || typeof book !== "object" || Array.isArray(book)) return "UNKNOWN";
+  if (book.integrity_error) return "UNHEALTHY";
+  if (book.synchronized !== true) return "UNSYNCHRONIZED";
+  if (book.stale === true) return "STALE";
+  if (book.stale !== false) return "UNKNOWN";
+
+  const rawAge = book.age_seconds;
+  if (rawAge == null || typeof rawAge === "boolean" || (typeof rawAge === "string" && rawAge.trim() === "")) {
+    return "AGE UNKNOWN";
+  }
+  const age = Number(rawAge);
+  const cutoff = effectiveFeedStaleCutoff(staleAfterSeconds);
+  if (!Number.isFinite(age) || age < 0) return "AGE UNKNOWN";
+  if (age > cutoff) return "STALE";
+
+  const rawBid = book.best_bid;
+  const rawAsk = book.best_ask;
+  if (
+    rawBid == null || rawAsk == null
+    || typeof rawBid === "boolean" || typeof rawAsk === "boolean"
+    || (typeof rawBid === "string" && rawBid.trim() === "")
+    || (typeof rawAsk === "string" && rawAsk.trim() === "")
+  ) return "UNHEALTHY";
+  const bid = Number(rawBid);
+  const ask = Number(rawAsk);
+  if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0 || bid >= ask) {
+    return "UNHEALTHY";
+  }
+  return "HEALTHY";
+}
