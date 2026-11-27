@@ -256,7 +256,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
         self.assertEqual(payload["summary"]["fresh_message_feed_count"], 1)
         self.assertEqual(payload["summary"]["exchange_adapter_count"], 3)
-        self.assertEqual(payload["summary"]["feed_errors"], 1)
+        self.assertEqual(payload["summary"]["feed_errors"], 2)
 
     def test_healthy_feed_count_requires_fresh_synchronized_book(self):
         class FakeUnified:
@@ -589,6 +589,23 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(payload["heartbeat_write_verified"])
         self.assertTrue(payload["connected"])
 
+
+    def test_feed_diagnostics_error_count_counts_status_schema_issues_once(self):
+        adapters = [
+            {"exchange": "valid", "connected": True, "enabled": True, "last_error": None},
+            {"exchange": "legacy", "connected": False, "last_error": None},
+            {"exchange": "bad_connected", "connected": "true", "enabled": True},
+            {"exchange": "bad_enabled", "connected": True, "enabled": 1},
+            {"exchange": "missing_connected", "enabled": True},
+            {"exchange": "reported_error", "connected": True, "last_error": "timeout"},
+            None,
+        ]
+        self.assertEqual(main._feed_diagnostics_error_count({"exchanges": adapters}), 5)
+
+    def test_feed_diagnostics_error_count_flags_malformed_containers(self):
+        for status in (None, "invalid", {"exchanges": "not-a-list"}):
+            with self.subTest(status=status):
+                self.assertEqual(main._feed_diagnostics_error_count(status), 1)
 
     def test_feed_health_counts_require_boolean_connection_and_skip_malformed_records(self):
         adapters = [
