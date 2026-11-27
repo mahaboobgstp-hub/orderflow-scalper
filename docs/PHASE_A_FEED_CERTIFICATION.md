@@ -62,6 +62,8 @@ Incoming depth diffs validate both bid and ask update arrays before changing the
 
 ## Unified-engine depth integrity and freshness guard
 
+The unified engine normalizes its stale cutoff at construction using the same safe defaults as the primary stream: invalid, boolean, non-finite, or nonpositive values fall back to 3 seconds; positive values below 0.1 seconds clamp to 0.1 seconds. This prevents NaN or infinity from disabling book-staleness checks and keeps the effective threshold explicit for API/frontend classification.
+
 The exchange-neutral unified market-data engine must not mark an order book fresh from malformed, non-finite, empty, crossed, locked, or non-progressing depth data. Snapshot and delta levels are validated as exact two-value rows containing finite positive prices and finite nonnegative quantities. Updates are applied to copies of both sides and committed together only when both sides remain populated and the best bid is strictly below the best ask. Rejected payloads preserve the last accepted arrays and book timestamp, set the book unsynchronized/stale with an integrity error, and increment message activity without refreshing usable-book freshness. Bybit deltas are accepted only after a valid snapshot and a strictly increasing update ID; this engine does not claim gap-free sequence continuity from Bybit's update ID alone. Unbridged Binance depth diffs are not applied by this exchange-neutral engine and cannot refresh book freshness. Trade prices and quantities must be finite and positive; malformed trade fields are discarded without invalidating or refreshing the order book.
 
 ## Unified-engine retained-depth bound
