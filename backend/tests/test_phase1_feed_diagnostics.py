@@ -341,7 +341,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
     def test_feed_health_summary_rejects_missing_and_invalid_book_ages(self):
         adapter = {"exchange": "bybit", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2}
-        invalid_ages = (None, True, False, -0.01, float("nan"), float("inf"), 3.01, "invalid")
+        invalid_ages = (None, True, False, -0.01, float("nan"), float("inf"), 3.01, 10**1000, "invalid")
         for age in invalid_ages:
             with self.subTest(age=age):
                 book = {"synchronized": True, "stale": False, "integrity_error": None}
@@ -378,7 +378,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         books = {
             "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2},
         }
-        for threshold in (float("nan"), float("inf"), -1.0, "invalid", True, False):
+        for threshold in (float("nan"), float("inf"), -1.0, 10**1000, "invalid", True, False):
             with self.subTest(threshold=threshold):
                 result = main._feed_health_counts(
                     {"exchanges": adapters},
