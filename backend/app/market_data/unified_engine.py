@@ -20,7 +20,14 @@ class UnifiedMarketDataEngine:
     def __init__(self, stale_after_seconds=3.0, max_levels=200):
         if isinstance(max_levels, bool) or not isinstance(max_levels, int) or max_levels < 1:
             raise ValueError("max_levels must be a positive integer")
-        self.stale_after_seconds=stale_after_seconds; self.max_levels=max_levels
+        try:
+            stale_cutoff = float(stale_after_seconds)
+        except (TypeError, ValueError, OverflowError):
+            stale_cutoff = 3.0
+        if isinstance(stale_after_seconds, bool) or not math.isfinite(stale_cutoff) or stale_cutoff <= 0:
+            stale_cutoff = 3.0
+        self.stale_after_seconds = max(0.1, stale_cutoff)
+        self.max_levels=max_levels
         self.books={}; self.trades={}; self.counts={}; self.last_seen={}; self.errors={}
     @staticmethod
     def key(exchange,symbol): return exchange.lower()+":"+symbol.upper()
