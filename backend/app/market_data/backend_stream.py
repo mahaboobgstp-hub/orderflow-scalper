@@ -10,6 +10,7 @@ Market data only:
 import asyncio
 import json
 import logging
+import math
 import time
 from collections import deque
 from typing import Any
