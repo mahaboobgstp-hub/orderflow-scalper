@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { isFreshMessageFeed, getPrimaryBookState } from "./feedFreshness.js";
+import { getMessageFeedState, getPrimaryBookState } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -225,10 +225,10 @@ export default function App() {
     const primary=payload.primary_binance_demo_stream||{};
     const primaryBookState=getPrimaryBookState(primary);
     const primaryBookFresh=primaryBookState==="HEALTHY"||primaryBookState==="FRESH (LEGACY)";
-    const freshMessages=(x)=>isFreshMessageFeed(x,unified.stale_after_seconds);
+    const messageState=(x)=>getMessageFeedState(x,unified.stale_after_seconds);
     return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
       <div className="stats-grid">
-        {stat("Connected Feeds",summary.fresh_message_feed_count??summary.healthy_feed_count??0,"Fresh messages within stale threshold")}
+        {stat("Fresh Message Feeds",summary.fresh_message_feed_count??summary.healthy_feed_count??0,"Enabled/connected feeds with recent messages")}
         {stat("Healthy Feeds",summary.healthy_feed_count??0,"Fresh synchronized book per feed")}
         {stat("Synchronized Books",summary.synchronized_book_count??0,"Fresh synchronized books")}
         {stat("Unified Books",summary.unified_book_count??0,"Book entries currently tracked")}
@@ -258,11 +258,15 @@ export default function App() {
         <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
       </div>
       <div className="panel"><div className="panel-title"><h2>Exchange Feed Connections</h2></div>
-        {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=><div className="event-row full" key={x.exchange}>
-          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+(freshMessages(x)?"paper":"")}>{x.enabled===false?"DISABLED":x.connected?"CONNECTED":"DISCONNECTED"}</span>
+        {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=>{
+          const state=messageState(x);
+          const stateClass=state==="FRESH"?"paper":["STALE","DISCONNECTED"].includes(state)?"bad":"";
+          return <div className="event-row full" key={x.exchange}>
+          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+stateClass}>{state}</span>
           <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??0}</small>
           <small>Error: {x.last_error||"None"}</small>
-        </div>)}
+        </div>;
+        })}
       </div>
       <div className="panel"><div className="panel-title"><h2>Unified Order Books</h2></div>
         {Object.keys(books).length===0?<div className="empty-state">No normalized books received yet. This is a live status, not simulated sample data.</div>:Object.entries(books).map(([key,b])=><div className="decision-card" key={key}>
