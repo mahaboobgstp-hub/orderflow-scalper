@@ -511,12 +511,6 @@ class BinanceOrderBookStream:
 
         if self.last_update_id is None:
             return False
-        # Live deltas must not mutate a book after collector termination has
-        # invalidated synchronization. Snapshot bridge application explicitly
-        # bypasses this guard via validate_previous_sequence=False.
-        if validate_previous_sequence and not self.synchronized:
-            return False
-
         first_update_id = int(event["U"])
         final_update_id = int(event["u"])
 
@@ -540,6 +534,11 @@ class BinanceOrderBookStream:
         """
 
         if self.last_update_id is None:
+            return False
+        # Live deltas must not mutate a book after collector termination has
+        # invalidated synchronization. Snapshot bridge application explicitly
+        # bypasses this guard via validate_previous_sequence=False.
+        if validate_previous_sequence and not self.synchronized:
             return False
 
         first_update_id = int(event["U"])
