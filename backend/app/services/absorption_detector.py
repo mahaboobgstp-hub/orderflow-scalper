@@ -11,6 +11,9 @@ from typing import Any
 from numbers import Integral, Real
 
 
+MIN_PRICE_PROGRESS_INTERVAL_MS = 1000  # Structural anti-polling guard; calibration is pending.
+
+
 class AbsorptionLiquidityDetector:
     def __init__(self, history_size: int = 30, max_book_age_seconds: float = 3.0,
                  min_trades: int = 5, absorption_threshold: float = 0.60):
@@ -31,6 +34,8 @@ class AbsorptionLiquidityDetector:
         self.min_trades=max(3,min(int(min_trades),500))
         self.absorption_threshold=max(0.1,min(threshold,0.95))
         self._history: dict[str,deque[dict[str,Any]]]={}
+        # Separate temporal baseline so rapid API polling cannot replace it.
+        self._price_progress_baselines: dict[str,dict[str,Any]]={}
 
     @staticmethod
     def _valid_levels(raw):
@@ -76,7 +81,7 @@ class AbsorptionLiquidityDetector:
         except (TypeError,ValueError,OverflowError): raise ValueError("Lookback must be a finite number.")
         if not math.isfinite(lookback): raise ValueError("Lookback must be a finite number.")
         lookback=max(1.0,min(lookback,120.0))
-        now_ms=int(time.time()*1000); cutoff=now_ms-lookback*1000
+        now_ms=int(time.time()*1000); now_monotonic_ms=int(time.monotonic()*1000); cutoff=now_ms-lookback*1000
         normalized=[]
         for t in trades or []:
             if not isinstance(t,dict): continue
@@ -145,26 +150,33 @@ class AbsorptionLiquidityDetector:
             raise ValueError("Liquidity observation calculations produced non-finite values; analysis refused.")
         buy_absorption_score=0.0; sell_absorption_score=0.0
         buy_progress_pct=0.0; sell_progress_pct=0.0
-        prior_sample_age_ms=(now_ms-prior["timestamp"]) if prior else None
-        # Temporal progress requires a recent prior midpoint sample.
-        has_recent_baseline=prior is not None and 0 <= prior_sample_age_ms <= lookback*1000
-        if has_recent_baseline and prior["mid"]>0:
-            # Signed direction-aware temporal progress; both sides use the
-            # prior midpoint as the common baseline.
-            buy_progress_pct=(mid-prior["mid"])/prior["mid"]*100
-            sell_progress_pct=(prior["mid"]-mid)/prior["mid"]*100
-        # Without a temporal baseline, scores remain zero to avoid false absorption.
+        baseline=self._price_progress_baselines.get(key)
+        baseline_wall_age_ms=(now_ms-baseline["timestamp"]) if baseline else None
+        baseline_elapsed_ms=(now_monotonic_ms-baseline["monotonic_timestamp"]) if baseline else None
+        baseline_in_lookback=(baseline is not None and baseline_wall_age_ms is not None and
+            baseline_elapsed_ms is not None and 0 <= baseline_wall_age_ms <= lookback*1000 and
+            0 <= baseline_elapsed_ms <= lookback*1000)
+        has_recent_baseline=(baseline_in_lookback and
+            baseline_elapsed_ms >= MIN_PRICE_PROGRESS_INTERVAL_MS)
+        baseline_invalid=(baseline is not None and (baseline_wall_age_ms is None or baseline_elapsed_ms is None or
+            baseline_wall_age_ms < 0 or baseline_elapsed_ms < 0 or
+            baseline_wall_age_ms > lookback*1000 or baseline_elapsed_ms > lookback*1000))
+        baseline_needs_reset=(baseline is None or baseline_invalid)
+        # Temporal progress uses a stable, separate baseline. Repeated API polls
+        # inside the minimum interval never replace it or produce zero-duration scores.
+        if has_recent_baseline and baseline["mid"]>0:
+            buy_progress_pct=(mid-baseline["mid"])/baseline["mid"]*100
+            sell_progress_pct=(baseline["mid"]-mid)/baseline["mid"]*100
         if has_recent_baseline and len(normalized)>=self.min_trades and total_qty>0:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
-            # Absorption is a stall hypothesis: movement away from the prior mid
-            # in either direction weakens the score. Adverse movement can reflect
-            # opposing pressure, not passive liquidity absorbing aggressor flow.
+            # Both favorable and adverse movement weaken the stall hypothesis.
             buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
-            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
-        calculated=(buy_progress_pct,sell_progress_pct,buy_absorption_score,sell_absorption_score)
+            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))        calculated=(buy_progress_pct,sell_progress_pct,buy_absorption_score,sell_absorption_score)
         if any(not math.isfinite(value) for value in calculated):
             raise ValueError("Temporal absorption calculations produced non-finite values; analysis refused.")
-        # Only record a sample after all numerical calculations are valid.
+        # Only record observations/baselines after numerical validation succeeds.
+        if baseline_needs_reset or has_recent_baseline:
+            self._price_progress_baselines[key]={"timestamp":now_ms,"monotonic_timestamp":now_monotonic_ms,"mid":mid}
         history.append({"timestamp":now_ms,"mid":mid,"bid5":bid_depth,"ask5":ask_depth,"buy_qty":buy_qty,"sell_qty":sell_qty})
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
         sell_absorbed=sell_absorption_score>=self.absorption_threshold
@@ -186,14 +198,17 @@ class AbsorptionLiquidityDetector:
             "aggressive_delta_ratio":round(delta/total_qty,6) if total_qty else 0.0,"absolute_flow_imbalance":round(flow_ratio,6),
             "buy_vwap":round(buy_avg,8) if buy_qty else None,"sell_vwap":round(sell_avg,8) if sell_qty else None,
             "mid_price":round(mid,8),"buy_price_progress_pct":round(buy_progress_pct,6),"sell_price_progress_pct":round(sell_progress_pct,6),
+            "price_progress_baseline_age_ms":baseline_elapsed_ms if baseline_elapsed_ms is not None and baseline_elapsed_ms>=0 else None,
+            "price_progress_baseline_valid":bool(has_recent_baseline),"price_progress_min_interval_ms":MIN_PRICE_PROGRESS_INTERVAL_MS,
             "buy_vwap_vs_mid_pct":round(buy_vwap_vs_mid_pct,6),"sell_vwap_vs_mid_pct":round(sell_vwap_vs_mid_pct,6),
             "buy_absorption_score":round(buy_absorption_score,6),"sell_absorption_score":round(sell_absorption_score,6),
             "buy_absorption_candidate":buy_absorbed,"sell_absorption_candidate":sell_absorbed,
             "top5_bid_depth":round(bid_depth,8),"top5_ask_depth":round(ask_depth,8)},
             "liquidity_observation":{"previous_sample_available":prior is not None,"replenishment":replenishment,"depletion":depletion},
             "flow_exhaustion":exhaustion,"quality":{"score":confidence_quality,"note":"Evidence-quality heuristic, not a prediction or win probability."},
-            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a recent prior midpoint baseline; without it scores remain zero.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
+            "diagnostics":["Absorption is a hypothesis based on aggressive flow and sampled temporal midpoint progress.","VWAP-versus-mid metrics are spatial context, not temporal price progress.","Absorption candidates require a prior midpoint baseline at least 1000ms old; rapid polls cannot refresh it or create zero-duration progress.","Liquidity changes are sampled on API requests; not continuous order-level tracking.","This detector is not an entry or reversal signal.","Trade-side interpretation depends on exchange feed correctness."]}
     def status(self):
         return {"phase":6,"engine":"absorption_liquidity_behavior_detector","tracked_symbols":len(self._history),
                 "min_trades":self.min_trades,"absorption_threshold":self.absorption_threshold,
-                "max_book_age_seconds":self.max_book_age_seconds,"history_size":self.history_size}
+                "max_book_age_seconds":self.max_book_age_seconds,"history_size":self.history_size,
+                "price_progress_min_interval_ms":MIN_PRICE_PROGRESS_INTERVAL_MS}
