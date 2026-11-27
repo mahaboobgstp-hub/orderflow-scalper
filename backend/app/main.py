@@ -472,9 +472,10 @@ async def paper_submit_order(request:PaperOrderRequest):
     actual_risk=abs(request.price-request.stop_loss_price)*request.quantity+request.quantity*(request.price+request.stop_loss_price)*paper_engine.fee_rate
     notional=request.price*request.quantity
     account=paper_engine.account()
-    unified_market_data=app.state.unified_market_data
-    book=unified_market_data.get_book("binance",request.symbol)
-    synchronized_book=risk_engine.is_synchronized_fresh_book(book,unified_market_data.stale_after_seconds)
+    unified_market_data=getattr(app.state,"unified_market_data",None)
+    book=unified_market_data.get_book("binance",request.symbol) if unified_market_data is not None else None
+    max_age_seconds=getattr(unified_market_data,"stale_after_seconds",None)
+    synchronized_book=risk_engine.is_synchronized_fresh_book(book,max_age_seconds)
     gate=risk_engine.evaluate_runtime_gate(account_equity=account["equity"],closed_trades=paper_engine.closed_trades,
         orders=paper_engine.orders,positions=paper_engine.positions,symbol=request.symbol.upper(),config=config,
         synchronized_book=synchronized_book,proposed_trade_risk_cash=actual_risk,proposed_notional=notional,proposed_leverage=request.leverage,risk_limit_basis_equity=account.get("initial_equity",account.get("equity",0)),fee_rate=paper_engine.fee_rate)

@@ -74,6 +74,23 @@ class FakePaperEngine:
         return {"paper_submission": "accepted"}
 
 
+def test_manual_paper_order_fails_closed_if_market_data_state_is_missing():
+    risk = RiskManagementEngine()
+    paper = FakePaperEngine()
+    request = PaperOrderRequest(
+        symbol="BTCUSDT", side="long", quantity=0.001, price=60000.0,
+        leverage=1.0, stop_loss_price=59000.0,
+    )
+    with patch.object(app.state, "risk_management_engine", risk, create=True), \
+         patch.object(app.state, "paper_trading_engine", paper, create=True), \
+         patch.object(app.state, "unified_market_data", None, create=True), \
+         patch.dict(operator_control_state, {"config": {}}, clear=False):
+        with pytest.raises(HTTPException) as missing_market:
+            asyncio.run(paper_submit_order(request))
+        assert missing_market.value.status_code == 409
+        assert "SYNCHRONIZED_BOOK_UNAVAILABLE" in missing_market.value.detail["blockers"]
+        assert paper.submitted == []
+
 def test_manual_paper_order_uses_real_book_synchronization_state():
     risk = RiskManagementEngine()
     paper = FakePaperEngine()

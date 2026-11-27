@@ -5,10 +5,31 @@ from app.main import app, paper_submit_order, PaperOrderRequest, risk_engine_sta
 from app.services.risk_management import RiskManagementEngine
 from app.services.paper_trading import PaperTradingEngine
 
+def _install_paper_book():
+    old_market=getattr(app.state,"unified_market_data",None)
+    app.state.unified_market_data=PaperBookStub()
+    return old_market
+
+def _restore_paper_book(old_market):
+    if old_market is None:
+        if hasattr(app.state,"unified_market_data"): delattr(app.state,"unified_market_data")
+    else:
+        app.state.unified_market_data=old_market
+
+class PaperBookStub:
+    stale_after_seconds=3.0
+    def get_book(self,exchange,symbol):
+        assert exchange=="binance"
+        assert symbol=="BTCUSDT"
+        return {"exchange":"binance","symbol":"BTCUSDT","synchronized":True,"stale":False,
+                "integrity_error":None,"age_seconds":0.1,"best_bid":49999.9,"best_ask":50000.1}
+
+
 @pytest.mark.anyio
 async def test_phase_e_emergency_halt_blocks_manual_paper_order():
     old_risk=getattr(app.state,"risk_management_engine",None)
     old_paper=getattr(app.state,"paper_trading_engine",None)
+    old_market=_install_paper_book()
     risk=RiskManagementEngine(); risk.set_kill_switch(True,"test halt")
     app.state.risk_management_engine=risk
     app.state.paper_trading_engine=PaperTradingEngine(10000)
@@ -23,11 +44,13 @@ async def test_phase_e_emergency_halt_blocks_manual_paper_order():
         else: app.state.risk_management_engine=old_risk
         if old_paper is None: delattr(app.state,"paper_trading_engine")
         else: app.state.paper_trading_engine=old_paper
+        _restore_paper_book(old_market)
 
 @pytest.mark.anyio
 async def test_phase_e_manual_paper_order_allowed_when_halt_clear():
     old_risk=getattr(app.state,"risk_management_engine",None)
     old_paper=getattr(app.state,"paper_trading_engine",None)
+    old_market=_install_paper_book()
     app.state.risk_management_engine=RiskManagementEngine()
     app.state.paper_trading_engine=PaperTradingEngine(10000)
     try:
@@ -40,10 +63,12 @@ async def test_phase_e_manual_paper_order_allowed_when_halt_clear():
         else: app.state.risk_management_engine=old_risk
         if old_paper is None: delattr(app.state,"paper_trading_engine")
         else: app.state.paper_trading_engine=old_paper
+        _restore_paper_book(old_market)
 
 @pytest.mark.anyio
 async def test_phase_e_manual_entry_requires_stop_loss():
     old_risk=getattr(app.state,"risk_management_engine",None); old_paper=getattr(app.state,"paper_trading_engine",None)
+    old_market=_install_paper_book()
     app.state.risk_management_engine=RiskManagementEngine(); app.state.paper_trading_engine=PaperTradingEngine(10000)
     try:
         request=PaperOrderRequest(symbol="BTCUSDT",side="long",quantity=0.01,price=50000)
@@ -54,10 +79,12 @@ async def test_phase_e_manual_entry_requires_stop_loss():
         else: app.state.risk_management_engine=old_risk
         if old_paper is None: delattr(app.state,"paper_trading_engine")
         else: app.state.paper_trading_engine=old_paper
+        _restore_paper_book(old_market)
 
 @pytest.mark.anyio
 async def test_phase_e_manual_entry_rejects_excess_trade_risk():
     old_risk=getattr(app.state,"risk_management_engine",None); old_paper=getattr(app.state,"paper_trading_engine",None)
+    old_market=_install_paper_book()
     app.state.risk_management_engine=RiskManagementEngine(); app.state.paper_trading_engine=PaperTradingEngine(10000)
     try:
         request=PaperOrderRequest(symbol="BTCUSDT",side="long",quantity=0.01,price=50000,stop_loss_price=40000)
@@ -69,10 +96,12 @@ async def test_phase_e_manual_entry_rejects_excess_trade_risk():
         else: app.state.risk_management_engine=old_risk
         if old_paper is None: delattr(app.state,"paper_trading_engine")
         else: app.state.paper_trading_engine=old_paper
+        _restore_paper_book(old_market)
 
 @pytest.mark.anyio
 async def test_phase_e_manual_entry_rejects_portfolio_exposure_over_cap():
     old_risk=getattr(app.state,"risk_management_engine",None); old_paper=getattr(app.state,"paper_trading_engine",None)
+    old_market=_install_paper_book()
     app.state.risk_management_engine=RiskManagementEngine(); app.state.paper_trading_engine=PaperTradingEngine(10000)
     try:
         request=PaperOrderRequest(symbol="BTCUSDT",side="long",quantity=0.06,price=50000,stop_loss_price=49900)
@@ -84,6 +113,7 @@ async def test_phase_e_manual_entry_rejects_portfolio_exposure_over_cap():
         else: app.state.risk_management_engine=old_risk
         if old_paper is None: delattr(app.state,"paper_trading_engine")
         else: app.state.paper_trading_engine=old_paper
+        _restore_paper_book(old_market)
 
 @pytest.mark.anyio
 async def test_phase_e_emergency_halt_keeps_runtime_running_for_position_management(monkeypatch):

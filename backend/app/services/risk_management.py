@@ -27,7 +27,7 @@ class RiskManagementEngine:
         except (TypeError,ValueError): return None
 
     @staticmethod
-    def is_synchronized_fresh_book(book: dict[str, Any] | None, max_age_seconds: float) -> bool:
+    def is_synchronized_fresh_book(book: dict[str, Any] | None, max_age_seconds: float | None) -> bool:
         """Fail closed unless the book is synchronized, fresh, finite, and uncrossed."""
         if not isinstance(book, dict):
             return False
