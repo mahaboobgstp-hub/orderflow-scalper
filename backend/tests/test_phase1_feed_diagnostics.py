@@ -206,7 +206,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 else:
                     setattr(state, name, originals[name])
 
-        primary = payload["primary_binance_demo_stream"]
+        primary = payload["primary_binance_live_stream"]
         for field in (
             "stale", "fresh", "healthy", "stale_after_seconds",
             "connected_duration_seconds", "synchronized_duration_seconds",
@@ -220,6 +220,8 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "PUBLIC_MARKET_DATA_PAPER_ONLY")
         self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
         self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
+        self.assertTrue(payload["summary"]["binance_depth_bridge_healthy"])
+        self.assertFalse(payload["summary"]["binance_unified_book_synchronized"])
 
     def test_database_status_endpoint_is_read_only(self):
         check_connection = AsyncMock(return_value=True)

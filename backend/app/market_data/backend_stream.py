@@ -1,5 +1,5 @@
 """
-Binance USDⓈ-M Futures demo order-book stream.
+Binance USDⓈ-M Futures read-only public order-book stream.
 
 Market data only:
 - No API key required
@@ -21,8 +21,8 @@ import websockets
 
 logger = logging.getLogger(__name__)
 
-REST_BASE_URL = "https://demo-fapi.binance.com"
-WEBSOCKET_BASE_URL = "wss://demo-fstream.binance.com"
+REST_BASE_URL = "https://fapi.binance.com"
+WEBSOCKET_BASE_URL = "wss://fstream.binance.com/public"
 
 
 class BinanceOrderBookStream:
@@ -390,6 +390,8 @@ class BinanceOrderBookStream:
         self.asks = new_asks
 
         self.last_update_id = raw_update_id
+        # A REST snapshot is fresh even if the first bridging event has u == lastUpdateId.
+        self.last_book_update_at = time.time()
 
         self.synchronized = False
         self.snapshot_count += 1

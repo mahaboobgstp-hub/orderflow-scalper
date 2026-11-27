@@ -166,6 +166,40 @@ class Tests(unittest.TestCase):
         self.assertTrue(book["stale"])
         self.assertEqual(book["age_seconds"], 4.0)
 
+    def test_binance_bridge_snapshot_is_synchronized_and_stale_or_crossed_books_fail_closed(self):
+        valid = {
+            "exchange": "binance", "symbol": "BTCUSDT", "last_update_id": 120,
+            "age_seconds": 0.1, "synchronized": True, "stale": False,
+            "bids": [[100.0, 2.0], [99.5, 1.0]], "asks": [[100.1, 3.0]],
+        }
+        self.assertTrue(self.e.apply_binance_bridge_book(valid))
+        book = self.e.get_book("binance", "BTCUSDT")
+        self.assertTrue(book["synchronized"])
+        self.assertEqual(book["sequence"], 120)
+        self.assertEqual(book["best_bid"], 100.0)
+        stale = {**valid, "stale": True, "synchronized": False, "error": "test disconnect"}
+        self.assertTrue(self.e.apply_binance_bridge_book(stale))
+        self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized"])
+        self.assertEqual(self.e.get_book("binance", "BTCUSDT")["bids"], [])
+        crossed = {**valid, "last_update_id": 121, "bids": [[101.0, 2.0]], "asks": [[100.5, 3.0]]}
+        self.assertFalse(self.e.apply_binance_bridge_book(crossed))
+        self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized"])
+
+    def test_binance_bridge_age_boundary_and_invalid_metadata_rejected(self):
+        valid = {
+            "symbol": "BTCUSDT", "last_update_id": 120, "age_seconds": 3.0,
+            "synchronized": True, "stale": False,
+            "bids": [[100.0, 2.0]], "asks": [[101.0, 3.0]],
+        }
+        self.assertTrue(self.e.apply_binance_bridge_book(valid))
+        for bad_age in (True, float("nan"), float("inf"), 3.01):
+            with self.subTest(age=bad_age):
+                self.assertFalse(self.e.apply_binance_bridge_book({**valid, "age_seconds": bad_age}))
+                self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized"])
+        bad_levels = {**valid, "age_seconds": 0.1, "bids": [["NaN", "2.0"]]}
+        self.assertFalse(self.e.apply_binance_bridge_book(bad_levels))
+        self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized")
+
     def test_binance_raw_diff_is_never_exposed_as_synchronized_book(self):
         result = self.e.process("binance", {"e": "depthUpdate", "s": "BTCUSDT", "U": 1, "u": 2, "b": [["10", "1"]], "a": [["11", "2"]]})
         book = self.e.get_book("binance", "BTCUSDT")

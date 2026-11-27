@@ -186,6 +186,59 @@ class UnifiedMarketDataEngine:
             "error": reason,
         }
 
+    def apply_binance_bridge_book(self, payload):
+        """Apply a full book published by the separately sequence-validated Binance bridge."""
+        if not isinstance(payload, dict):
+            return False
+        symbol = str(payload.get("symbol") or "").upper()
+        if not symbol:
+            return False
+        book = self.book("binance", symbol)
+        if payload.get("synchronized") is not True or payload.get("stale") is True:
+            reason = str(payload.get("error") or "Binance depth bridge is unsynchronized or stale")
+            self._invalidate("binance", book, reason)
+            return True
+        sequence = self.strict_int(payload.get("last_update_id"))
+        age = payload.get("age_seconds")
+        if isinstance(age, bool):
+            age = None
+        try:
+            age_value = float(age)
+        except (TypeError, ValueError, OverflowError):
+            age_value = float("nan")
+        if sequence is None or not math.isfinite(age_value) or age_value < 0 or age_value > self.stale_after_seconds:
+            self._invalidate("binance", book, "Invalid or stale Binance bridged snapshot metadata")
+            return False
+        try:
+            bids = self._side_from_levels(self._parse_levels(payload.get("bids", [])))
+            asks = self._side_from_levels(self._parse_levels(payload.get("asks", [])))
+        except (TypeError, ValueError, OverflowError) as exc:
+            self._invalidate("binance", book, "Invalid Binance bridged snapshot levels: " + str(exc))
+            return False
+        if not self._valid_book(bids, asks):
+            self._invalidate("binance", book, "Empty, locked, or crossed Binance bridged snapshot")
+            return False
+        book.bids = bids
+        book.asks = asks
+        book.sequence = sequence
+        book.cross_sequence = None
+        book.synchronized = True
+        book.stale = False
+        book.error = None
+        book.exchange_ts = None
+        book.received_ts = int(time.time() * 1000)
+        self.record_message("binance")
+        self.errors.pop(self.key("binance", symbol), None)
+        return True
+
+    def invalidate_binance_bridge_book(self, symbol, reason):
+        """Fail closed when the Binance bridge is disconnected or cannot supply a fresh book."""
+        book = self.book("binance", symbol)
+        if not book.synchronized and book.error == reason:
+            return True
+        self._invalidate("binance", book, reason)
+        return True
+
     def _apply_bybit_snapshot(self, exchange, book, data, exchange_ts):
         update_id = self.strict_int(data.get("u"))
         cross_seq = self.strict_int(data.get("seq")) if data.get("seq") is not None else None

@@ -4,7 +4,8 @@ import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.market_data.backend_stream import BinanceOrderBookStream
+from app.market_data.backend_stream import BinanceOrderBookStream, REST_BASE_URL, WEBSOCKET_BASE_URL
+from app.market_data.unified_engine import UnifiedMarketDataEngine
 
 
 class BinanceOrderBookSynchronizationTests(unittest.TestCase):
@@ -401,6 +402,62 @@ def test_layer1_api_invalid_book_returns_422(monkeypatch):
         asyncio.run(main.analyze_imbalance("bybit", "BTCUSDT", 10))
     assert exc.value.status_code == 422
 
+
+def test_binance_bridge_snapshot_updates_unified_book_and_disconnect_invalidates():
+    engine = UnifiedMarketDataEngine()
+    stream = BinanceOrderBookStream("BTCUSDT")
+    stream.connected = True
+    stream._load_snapshot({
+        "lastUpdateId": 100,
+        "bids": [["100.0", "2.0"], ["99.0", "3.0"]],
+        "asks": [["101.0", "4.0"], ["102.0", "5.0"]],
+    })
+    bridge = {"U": 100, "u": 101, "b": [["100.0", "0"], ["99.5", "7.0"]], "a": [["101.0", "6.0"]]}
+    assert stream._apply_snapshot_bridge(bridge)
+    key = asyncio.run(main._bridge_binance_book_once(stream, engine, None))
+    book = engine.get_book("binance", "BTCUSDT")
+    assert key == (101, 1)
+    assert book["synchronized"] is True
+    assert book["best_bid"] == 99.5
+    assert book["best_ask"] == 101.0
+    first_received = book["received_ts"]
+    with patch("app.market_data.unified_engine.time.time", return_value=time.time() + 2.0):
+        key2 = asyncio.run(main._bridge_binance_book_once(stream, engine, key))
+        book2 = engine.get_book("binance", "BTCUSDT")
+        assert key2 == key
+        assert book2["received_ts"] == first_received
+        assert book2["age_seconds"] >= 1.9
+    live = {"U": 102, "u": 102, "pu": 101, "b": [["99.5", "0"], ["99.4", "8.0"]], "a": []}
+    assert stream._apply_event(live)
+    key = asyncio.run(main._bridge_binance_book_once(stream, engine, key))
+    assert key == (102, 1)
+    assert engine.get_book("binance", "BTCUSDT")["best_bid"] == 99.4
+    stream.connected = False
+    stream.synchronized = False
+    key = asyncio.run(main._bridge_binance_book_once(stream, engine, key))
+    book = engine.get_book("binance", "BTCUSDT")
+    assert key is None
+    assert book["synchronized"] is False
+    assert book["bids"] == []
+
+
+def test_snapshot_timestamp_is_fresh_even_without_bridge_delta():
+    stream = BinanceOrderBookStream("BTCUSDT")
+    stream.connected = True
+    stream._load_snapshot({
+        "lastUpdateId": 100,
+        "bids": [["100.0", "2.0"]],
+        "asks": [["101.0", "4.0"]],
+    })
+    event = {"U": 100, "u": 100, "b": [], "a": []}
+    assert stream._apply_snapshot_bridge(event)
+    book = asyncio.run(stream.get_order_book())
+    assert book is not None
+    assert book["last_update_id"] == 100
+
+def test_binance_depth_bridge_uses_read_only_live_public_endpoints():
+    assert REST_BASE_URL == "https://fapi.binance.com"
+    assert WEBSOCKET_BASE_URL == "wss://fstream.binance.com/public"
 
 def test_layer1_api_unsupported_exchange_returns_400(monkeypatch):
     setup_layer1_api(monkeypatch, valid_normalized_book())
