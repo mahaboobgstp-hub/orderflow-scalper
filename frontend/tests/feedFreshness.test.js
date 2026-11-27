@@ -117,7 +117,7 @@ test("unified book freshness requires valid age and non-crossed top of book", ()
     { best_bid: 101, best_ask: 101 },
     { best_bid: 102, best_ask: 101 },
     { best_bid: "bad" },
-    { best_ask: "",
+    { best_ask: "" },
   ];
   for (const patch of invalidTopOfBook) {
     assert.equal(getUnifiedBookState({ ...base, ...patch }, 3), "UNHEALTHY", JSON.stringify(patch));
