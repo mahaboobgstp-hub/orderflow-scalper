@@ -334,6 +334,17 @@ class Phase6SpatialVwapAndApiTests(unittest.TestCase):
         self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
 
 class Phase6NumericOverflowTests(unittest.TestCase):
+    def test_finite_depth_change_that_overflows_percentage_is_refused_without_mutating_history(self):
+        detector = AbsorptionLiquidityDetector()
+        now_ms = 1_000_000
+        thin = book(bids=[[100.0, 1e-308]], asks=[[100.1, 1e-308]])
+        extreme = book(bids=[[100.0, 1e308]], asks=[[100.1, 1e308]])
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0):
+            detector.analyze(thin, [], 15)
+            with self.assertRaisesRegex(ValueError, "Liquidity observation"):
+                detector.analyze(extreme, [], 15)
+        self.assertEqual(len(detector._history["bybit:BTCUSDT"]), 1)
+
     def test_large_finite_book_prices_use_overflow_safe_midpoint_and_json(self):
         detector = AbsorptionLiquidityDetector()
         extreme_book = book(bids=[[1.6e308, 10.0]], asks=[[1.7e308, 10.0]])
