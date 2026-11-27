@@ -1,5 +1,29 @@
 export const DEFAULT_FEED_STALE_AFTER_SECONDS = 3;
 
+export function asRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+export function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+export function normalizeFeedMonitorPayload(rawPayload) {
+  const payload = asRecord(rawPayload);
+  const summary = asRecord(payload.summary);
+  const unified = asRecord(payload.unified_market_data);
+  const exchangeConnections = asRecord(payload.exchange_connections);
+  const adapterList = asArray(exchangeConnections.exchanges).map(asRecord);
+  const books = Object.fromEntries(
+    Object.entries(asRecord(unified.books)).map(([key, book]) => [key, asRecord(book)]),
+  );
+  const exchangeStats = Object.fromEntries(
+    Object.entries(asRecord(unified.exchanges)).map(([key, stats]) => [key, asRecord(stats)]),
+  );
+  const primary = asRecord(payload.primary_binance_demo_stream);
+  return { payload, summary, unified, adapterList, books, exchangeStats, primary };
+}
+
 export function effectiveFeedStaleCutoff(rawCutoff) {
   if (rawCutoff == null || typeof rawCutoff === "boolean" || (typeof rawCutoff === "string" && rawCutoff.trim() === "")) {
     return DEFAULT_FEED_STALE_AFTER_SECONDS;
