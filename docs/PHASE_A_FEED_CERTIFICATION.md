@@ -147,3 +147,8 @@ The Feed Monitor normalizes the consolidated diagnostics payload before renderin
 ## Feed Monitor summary counter normalization
 
 The frontend normalizes optional summary counters before rendering. Present counters must be finite, safe, nonnegative integers; malformed values (including booleans, arrays/objects, negative values, fractions, and non-finite numbers) display as zero rather than being rendered as arbitrary objects or misleading counts. Numeric strings remain supported for legacy payload compatibility when they represent safe nonnegative integers. The optional `fresh_message_feed_count` field is preserved as absent when older payloads omit it so the UI can fall back to `healthy_feed_count`. Non-string `mode` and `safety` labels use safe text fallbacks.
+
+
+## Live delta guard after synchronization invalidation
+
+The live Binance depth consumer must re-check that the book remains synchronized before applying queued depth events. The collector invalidates synchronization in its termination handler before signaling the queue consumer; this ordering prevents a race where buffered events are consumed during the brief period before the collector task reports completion. Live event application also refuses to mutate the book while synchronization is invalidated. The snapshot bridge path is the only intentional exception and uses the separate overlap validation. This guard is not counted as a sequence gap or malformed payload because the session has already been invalidated and must reconnect for a fresh snapshot.
