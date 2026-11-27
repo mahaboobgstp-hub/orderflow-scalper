@@ -26,6 +26,8 @@ export function getPrimaryBookState(primary, staleAfterSeconds) {
   if (primary.synchronized !== true) return "UNSYNCHRONIZED";
   if (primary.stale === true) return "STALE";
   if (primary.stale !== false) return "UNKNOWN";
+  // An explicit integrity/runtime error takes precedence over missing age data.
+  if (primary.integrity_error || primary.last_error) return "UNHEALTHY";
 
   const rawAge = primary.last_book_update_age_seconds;
   if (rawAge == null || typeof rawAge === "boolean" || (typeof rawAge === "string" && rawAge.trim() === "")) {
@@ -35,7 +37,6 @@ export function getPrimaryBookState(primary, staleAfterSeconds) {
   const cutoff = effectiveFeedStaleCutoff(staleAfterSeconds ?? primary.stale_after_seconds);
   if (!Number.isFinite(age) || age < 0) return "AGE UNKNOWN";
   if (age > cutoff) return "STALE";
-  if (primary.integrity_error || primary.last_error) return "UNHEALTHY";
   if (primary.healthy === true) return "HEALTHY";
   if (primary.healthy === false) return "UNHEALTHY";
   return "FRESH (LEGACY)";
