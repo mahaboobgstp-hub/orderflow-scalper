@@ -11,7 +11,7 @@ from app.services.binance_connectivity_diagnostics import run_binance_diagnostic
 from app.execution.order_service import DemoOrderService, OrderRejected
 from app.market_data.backend_stream import BinanceOrderBookStream
 from app.market_data.unified_engine import UnifiedMarketDataEngine
-from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BybitPublicAdapter, DeltaPublicAdapter
+from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BinanceMarketAdapter, BybitPublicAdapter, DeltaPublicAdapter
 from app.services.coin_scanner import CoinMarketScanner
 from app.services.opportunity_ranker import OpportunityRanker
 from app.services.imbalance_detector import OrderBookImbalanceDetector
@@ -72,13 +72,14 @@ async def lifespan(app: FastAPI):
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
         BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
+        BinanceMarketAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
         BybitPublicAdapter(enabled=settings.bybit_public_enabled,symbol=settings.bybit_public_symbol,on_message=callback),
         DeltaPublicAdapter(enabled=settings.delta_public_enabled,symbol=settings.delta_public_symbol,on_message=callback),
     ])
     app.state.exchange_manager=manager
     try:
         await stream.start(); await manager.start()
-        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3,'supabase_connected':database.connected})
+        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':4,'supabase_connected':database.connected})
         await repository.engine_state(mode='DEMO_PAPER_ONLY',status='running',execution_enabled=False,state={'autonomous_entry_enabled':False,'paper_only':True})
         await repository.system_log('INFO','Backend startup completed','lifecycle',{'database_connected':database.connected,'mode':'PAPER_ONLY'})
         yield
