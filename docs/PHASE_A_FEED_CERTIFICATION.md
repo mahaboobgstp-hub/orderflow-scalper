@@ -109,3 +109,7 @@ The top summary tile is labeled **Fresh Message Feeds**, because its count measu
 ## Unified-book health display integrity gate
 
 A normalized unified order book is counted as fresh/synchronized only when the API includes a finite nonnegative age within the effective cutoff and a valid two-sided top of book: finite positive best bid and best ask with best bid strictly below best ask. Missing or malformed top-of-book fields, a locked/crossed spread, or an explicit integrity error must not be counted as healthy. The Feed Monitor UI applies the same conservative classification and shows malformed top-of-book data as `UNHEALTHY`, instead of trusting `synchronized`/`stale` flags alone.
+
+## Explicit adapter enabled-flag validation
+
+The freshness classifier accepts an omitted 'enabled' flag for older adapter payloads (legacy default enabled), accepts only literal boolean true as explicitly enabled, and reports literal false as DISABLED. Any other explicit value (null, numeric, string, object, or array) is classified UNKNOWN and excluded from fresh-message counts. Backend and frontend apply the same rule so malformed adapter configuration cannot produce a false fresh-feed signal.
