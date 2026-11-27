@@ -10,13 +10,24 @@ export function effectiveFeedStaleCutoff(rawCutoff) {
     : DEFAULT_FEED_STALE_AFTER_SECONDS;
 }
 
-export function isFreshMessageFeed(adapter, staleAfterSeconds) {
-  if (!adapter || adapter.enabled === false || !adapter.connected || adapter.last_message_age_seconds == null) return false;
+export function getMessageFeedState(adapter, staleAfterSeconds) {
+  if (!adapter || typeof adapter !== "object" || Array.isArray(adapter)) return "UNKNOWN";
+  if (adapter.enabled === false) return "DISABLED";
+  if (adapter.connected === false) return "DISCONNECTED";
+  if (adapter.connected !== true) return "UNKNOWN";
+
   const rawAge = adapter.last_message_age_seconds;
-  if (typeof rawAge === "boolean" || (typeof rawAge === "string" && rawAge.trim() === "")) return false;
+  if (rawAge == null || typeof rawAge === "boolean" || (typeof rawAge === "string" && rawAge.trim() === "")) {
+    return "AGE UNKNOWN";
+  }
   const age = Number(rawAge);
   const cutoff = effectiveFeedStaleCutoff(staleAfterSeconds);
-  return Number.isFinite(age) && age >= 0 && age <= cutoff;
+  if (!Number.isFinite(age) || age < 0) return "AGE UNKNOWN";
+  return age <= cutoff ? "FRESH" : "STALE";
+}
+
+export function isFreshMessageFeed(adapter, staleAfterSeconds) {
+  return getMessageFeedState(adapter, staleAfterSeconds) === "FRESH";
 }
 
 export function getPrimaryBookState(primary, staleAfterSeconds) {
