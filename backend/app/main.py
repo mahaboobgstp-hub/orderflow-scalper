@@ -254,18 +254,30 @@ def _is_fresh_synchronized_book(book, stale_after):
 
 
 def _feed_health_counts(exchange_connections, unified_market_data):
-    """Separate message freshness from a fresh, integrity-verified order book."""
+    """Separate message freshness from a fresh, integrity-verified order book.
+
+    Malformed adapter records are ignored. Connection state must be the boolean
+    True to match the frontend freshness classifier; truthy strings/integers
+    are not accepted as proof of connectivity.
+    """
+    exchange_connections = exchange_connections if isinstance(exchange_connections, dict) else {}
+    unified_market_data = unified_market_data if isinstance(unified_market_data, dict) else {}
     stale_after = _normalize_feed_stale_after(
         unified_market_data.get("stale_after_seconds", 3.0)
     )
     books = unified_market_data.get("books", {})
     if not isinstance(books, dict):
         books = {}
+    adapters = exchange_connections.get("exchanges", [])
+    if not isinstance(adapters, list):
+        adapters = []
     fresh_message_feed_count = 0
     healthy_feed_count = 0
 
-    for adapter in exchange_connections.get("exchanges", []):
-        if adapter.get("enabled", True) is False or not adapter.get("connected"):
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        if adapter.get("enabled", True) is False or adapter.get("connected") is not True:
             continue
         age = adapter.get("last_message_age_seconds")
         if age is None or isinstance(age, bool):
@@ -293,9 +305,14 @@ def _feed_health_counts(exchange_connections, unified_market_data):
 @app.get("/api/market-data/observability")
 async def market_data_observability():
     """Read-only consolidated feed diagnostics for the monitoring UI."""
-    unified=app.state.unified_market_data.get_status()
-    primary=await app.state.market_stream.get_status()
-    exchanges=await app.state.exchange_manager.status()
+    unified_raw=app.state.unified_market_data.get_status()
+    unified=unified_raw if isinstance(unified_raw,dict) else {}
+    primary_raw=await app.state.market_stream.get_status()
+    primary=primary_raw if isinstance(primary_raw,dict) else {}
+    exchanges_raw=await app.state.exchange_manager.status()
+    exchanges=exchanges_raw if isinstance(exchanges_raw,dict) else {}
+    raw_adapters=exchanges.get("exchanges",[])
+    adapters=raw_adapters if isinstance(raw_adapters,list) else []
     feed_counts = _feed_health_counts(exchanges, unified)
     books = unified.get("books", {})
     if not isinstance(books, dict):
@@ -305,14 +322,18 @@ async def market_data_observability():
         1 for book in books.values()
         if _is_fresh_synchronized_book(book, stale_after)
     )
+    feed_errors=sum(
+        1 for adapter in adapters
+        if not isinstance(adapter,dict) or bool(adapter.get("last_error"))
+    )
     return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
         "live_execution_enabled":False,"primary_binance_demo_stream":primary,
         "unified_market_data":unified,"exchange_connections":exchanges,
-        "summary":{"exchange_adapter_count":len(exchanges.get("exchanges",[])),
+        "summary":{"exchange_adapter_count":len(adapters),
           "unified_book_count":len(books),
           "synchronized_book_count":synchronized_book_count,
           **feed_counts,
-          "feed_errors":sum(1 for e in exchanges.get("exchanges",[]) if e.get("last_error")),
+          "feed_errors":feed_errors,
           "safety":"PUBLIC_FEEDS_ONLY; REAL_EXCHANGE_ORDERS_DISABLED"}}
 
 @app.get("/api/market-data/unified/status")

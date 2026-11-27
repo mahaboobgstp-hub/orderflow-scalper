@@ -213,10 +213,13 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
         class FakeExchanges:
             async def status(self):
-                return {"exchanges": [{
-                    "exchange": "bybit", "symbol": "BTCUSDT", "connected": True,
-                    "last_message_age_seconds": 0.25, "last_error": None,
-                }]}
+                return {"exchanges": [
+                    {"exchange": "bybit", "symbol": "BTCUSDT", "connected": True,
+                     "last_message_age_seconds": 0.25, "last_error": None},
+                    {"exchange": "truthy", "symbol": "BTCUSDT", "connected": "true",
+                     "last_message_age_seconds": 0.1, "last_error": None},
+                    None,
+                ]}
 
         state = main.app.state
         names = ("market_stream", "unified_market_data", "exchange_manager")
@@ -252,6 +255,8 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
         self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
         self.assertEqual(payload["summary"]["fresh_message_feed_count"], 1)
+        self.assertEqual(payload["summary"]["exchange_adapter_count"], 3)
+        self.assertEqual(payload["summary"]["feed_errors"], 1)
 
     def test_healthy_feed_count_requires_fresh_synchronized_book(self):
         class FakeUnified:
@@ -583,6 +588,35 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(payload["heartbeat_write_verified"])
         self.assertTrue(payload["connected"])
 
+
+    def test_feed_health_counts_require_boolean_connection_and_skip_malformed_records(self):
+        adapters = [
+            None,
+            "not-an-adapter",
+            [],
+            {"exchange": "string-true", "symbol": "BTCUSDT", "connected": "true", "last_message_age_seconds": 0.1},
+            {"exchange": "integer-one", "symbol": "BTCUSDT", "connected": 1, "last_message_age_seconds": 0.1},
+            {"exchange": "valid", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.1},
+        ]
+        result = main._feed_health_counts(
+            {"exchanges": adapters},
+            {"stale_after_seconds": 3.0, "books": {
+                "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2},
+            }},
+        )
+        self.assertEqual(result["fresh_message_feed_count"], 1)
+        self.assertEqual(result["healthy_feed_count"], 1)
+
+    def test_feed_health_counts_return_zero_for_malformed_containers(self):
+        for exchange_connections, unified_market_data in (
+            (None, None),
+            ("invalid", {}),
+            ({"exchanges": "not-a-list"}, {"books": []}),
+        ):
+            with self.subTest(exchange_connections=exchange_connections):
+                result = main._feed_health_counts(exchange_connections, unified_market_data)
+                self.assertEqual(result["fresh_message_feed_count"], 0)
+                self.assertEqual(result["healthy_feed_count"], 0)
 
 if __name__ == "__main__":
     unittest.main()
