@@ -45,6 +45,7 @@ export function normalizeFeedMonitorPayload(rawPayload) {
   const primary = asRecord(payload.primary_binance_demo_stream);
   const normalizedPayload = {
     ...payload,
+    mode: typeof payload.mode === "string" ? payload.mode : "Unknown",
     summary,
     unified_market_data: { ...unified, books, exchanges: exchangeStats },
     exchange_connections: { ...exchangeConnections, exchanges: adapterList },
