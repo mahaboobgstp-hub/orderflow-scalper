@@ -120,7 +120,7 @@ class Tests(unittest.TestCase):
         for invalid in (True, 1.5, -1, "NaN"):
             with self.subTest(invalid=invalid):
                 self.assertTrue(self.e.process("bybit", bybit_snapshot(u=invalid))["resync_required"])
-        for invalid_levels in ([[["NaN", "1"]]], [[["100", "Infinity"]]], [[[True, "2"]]]):
+        for invalid_levels in ([["NaN", "1"]], [["100", "Infinity"]], [[True, "2"]]):
             with self.subTest(invalid_levels=invalid_levels):
                 bad = bybit_snapshot(u=10, bids=invalid_levels[0], asks=[["101", "1"]])
                 self.assertTrue(self.e.process("bybit", bad)["resync_required"])
@@ -196,7 +196,7 @@ class Tests(unittest.TestCase):
     def test_delta_exchange_crossed_update_invalidates(self        self.e.process("delta", {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]]}})
         result = self.e.process("delta", {"type": "delta", "data": {"buy": [["102", "1"]], "sell": []}})
         self.assertTrue(result["resync_required"])
-        self.assertFalse(self.e.get_book("delta", "BTCUSDT")["synchronized")
+        self.assertFalse(self.e.get_book("delta", "BTCUSDT")["synchronized"])
 
 
 class _FakeWS:
