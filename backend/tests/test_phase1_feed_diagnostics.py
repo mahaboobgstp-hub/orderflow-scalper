@@ -226,10 +226,10 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         status = AsyncMock(return_value={"provider": "supabase", "connected": True})
         write_heartbeat = AsyncMock(return_value=True)
 
-        with patch.object(main.database, "check_connection", new=check_connection), \\
-             patch.object(main.database, "status", new=status), \\
-             patch.object(main.database, "write_heartbeat", new=write_heartbeat):
-            result = asyncio.run(main.database_status())
+        with patch.object(main.database, "check_connection", new=check_connection):
+            with patch.object(main.database, "status", new=status):
+                with patch.object(main.database, "write_heartbeat", new=write_heartbeat):
+                    result = asyncio.run(main.database_status())
 
         check_connection.assert_awaited_once()
         status.assert_awaited_once_with(refresh=False)
