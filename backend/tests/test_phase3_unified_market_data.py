@@ -182,9 +182,11 @@ class Tests(unittest.TestCase):
         self.assertEqual(status["exchanges"]["bybit"]["messages_received"], 1)
 
     def test_status_marks_stale_book(self):
-        self.e.process("bybit", bybit_snapshot(u=1))
+        with patch("app.market_data.unified_engine.time.time", return_value=1000.0):
+            self.e.process("bybit", bybit_snapshot(u=1))
         self.e.stale_after_seconds = 0
-        self.assertTrue(self.e.get_status()["books"]["bybit:BTCUSDT"]["stale"])
+        with patch("app.market_data.unified_engine.time.time", return_value=1001.0):
+            self.assertTrue(self.e.get_status()["books"]["bybit:BTCUSDT"]["stale"])
 
     def test_delta_exchange_snapshot_and_delta(self):
         snapshot = {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]], "u": 1}}
