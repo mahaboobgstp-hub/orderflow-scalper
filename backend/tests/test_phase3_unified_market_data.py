@@ -3,6 +3,14 @@ from unittest.mock import patch
 from app.market_data.unified_engine import UnifiedMarketDataEngine
 class Tests(unittest.TestCase):
  def setUp(self): self.e=UnifiedMarketDataEngine()
+ def test_unified_stale_cutoff_invalid_values_fall_back_to_default(self):
+  for invalid in (None, "", "invalid", float("nan"), float("inf"), float("-inf"), 0, -1, True, False):
+   with self.subTest(value=invalid):
+    self.assertEqual(UnifiedMarketDataEngine(stale_after_seconds=invalid).stale_after_seconds, 3.0)
+ def test_unified_stale_cutoff_preserves_valid_values_and_clamps_minimum(self):
+  self.assertEqual(UnifiedMarketDataEngine(stale_after_seconds=1.25).stale_after_seconds, 1.25)
+  self.assertEqual(UnifiedMarketDataEngine(stale_after_seconds="2.5").stale_after_seconds, 2.5)
+  self.assertEqual(UnifiedMarketDataEngine(stale_after_seconds=0.05).stale_after_seconds, 0.1)
  def test_bybit_snapshot_delta(self):
   s={"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","2"]],"a":[["101","3"]],"u":1}}
   self.e.process("bybit",s); self.assertTrue(self.e.get_book("bybit","BTCUSDT")["synchronized"])
