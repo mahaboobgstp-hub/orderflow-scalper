@@ -189,5 +189,36 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         self.assertEqual(self.stream.asks, before_asks)
 
 
+    def test_snapshot_large_integer_overflow_is_rejected_atomically(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_update_id = self.stream.last_update_id
+        with self.assertRaisesRegex(ValueError, "nonnumeric levels"):
+            self.stream._load_snapshot({
+                "lastUpdateId": 200,
+                "bids": [[10 ** 400, "1"]],
+                "asks": [["101", "1"]],
+            })
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_update_id)
+        self.assertEqual(self.stream.snapshot_count, 1)
+
+    def test_live_large_integer_overflow_is_rejected_and_counted(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_update_id = self.stream.last_update_id
+        with self.assertRaisesRegex(ValueError, "nonnumeric levels"):
+            self.stream._apply_event({
+                "U": 101, "u": 102, "pu": 100,
+                "b": [[10 ** 400, "1"]],
+                "a": [],
+            })
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_update_id)
+        self.assertEqual(self.stream.invalid_depth_message_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
