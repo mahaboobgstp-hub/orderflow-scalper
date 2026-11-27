@@ -198,7 +198,7 @@ class Tests(unittest.TestCase):
                 self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized"])
         bad_levels = {**valid, "age_seconds": 0.1, "bids": [["NaN", "2.0"]]}
         self.assertFalse(self.e.apply_binance_bridge_book(bad_levels))
-        self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized")
+        self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized"])
 
     def test_binance_raw_diff_is_never_exposed_as_synchronized_book(self):
         result = self.e.process("binance", {"e": "depthUpdate", "s": "BTCUSDT", "U": 1, "u": 2, "b": [["10", "1"]], "a": [["11", "2"]]})
