@@ -64,6 +64,7 @@ def test_trade_flow_route_maps_invalid_book_to_422():
     assert exc.value.status_code==422
 
 def test_trade_flow_status_reports_read_only_mode():
+    setup(api_book())
     result=asyncio.run(main.trade_flow_status())
     assert result["mode"]=="read_only_research"
     assert result["phase"]==8
