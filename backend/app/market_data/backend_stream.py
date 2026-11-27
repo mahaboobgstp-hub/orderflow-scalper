@@ -362,6 +362,11 @@ class BinanceOrderBookStream:
             parsed.append((price, quantity))
         return parsed
 
+    @staticmethod
+    def _valid_book(bids: dict[float, float], asks: dict[float, float]) -> bool:
+        """A usable order book must have both sides and a strictly positive spread."""
+        return bool(bids and asks and max(bids) < min(asks))
+
     def _load_snapshot(self, snapshot: dict[str, Any]):
         if not isinstance(snapshot, dict):
             raise ValueError("Depth snapshot must be an object.")
@@ -379,6 +384,8 @@ class BinanceOrderBookStream:
         # snapshot cannot leave a partially loaded book.
         new_bids = {price: quantity for price, quantity in parsed_bids if quantity > 0}
         new_asks = {price: quantity for price, quantity in parsed_asks if quantity > 0}
+        if not self._valid_book(new_bids, new_asks):
+            raise ValueError("Snapshot book is empty, locked, or crossed.")
         self.bids = new_bids
         self.asks = new_asks
 
@@ -472,6 +479,8 @@ class BinanceOrderBookStream:
         next_asks = dict(self.asks)
         self._update_levels(next_bids, bid_updates)
         self._update_levels(next_asks, ask_updates)
+        if not self._valid_book(next_bids, next_asks):
+            return False
         self.bids = next_bids
         self.asks = next_asks
 
@@ -570,6 +579,9 @@ class BinanceOrderBookStream:
                 or age_seconds is None
                 or age_seconds > self.stale_after_seconds
             ):
+                return None
+
+            if not self._valid_book(self.bids, self.asks):
                 return None
 
             sorted_bids = sorted(
