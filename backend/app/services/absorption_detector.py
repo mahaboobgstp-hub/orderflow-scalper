@@ -136,6 +136,13 @@ class AbsorptionLiquidityDetector:
             depletion={"bid_depth_change_pct":round((bid_depth-prior["bid5"])/prior["bid5"]*100,4) if prior["bid5"] else None,
                       "ask_depth_change_pct":round((ask_depth-prior["ask5"])/prior["ask5"]*100,4) if prior["ask5"] else None,
                       "bid_depleted":bid_depth<prior["bid5"],"ask_depleted":ask_depth<prior["ask5"]}
+        liquidity_values=[]
+        if replenishment:
+            liquidity_values.extend((replenishment["bid_depth_change"],replenishment["ask_depth_change"]))
+        if depletion:
+            liquidity_values.extend(value for value in (depletion["bid_depth_change_pct"],depletion["ask_depth_change_pct"]) if value is not None)
+        if any(not math.isfinite(value) for value in liquidity_values):
+            raise ValueError("Liquidity observation calculations produced non-finite values; analysis refused.")
         buy_absorption_score=0.0; sell_absorption_score=0.0
         buy_progress_pct=0.0; sell_progress_pct=0.0
         prior_sample_age_ms=(now_ms-prior["timestamp"]) if prior else None
