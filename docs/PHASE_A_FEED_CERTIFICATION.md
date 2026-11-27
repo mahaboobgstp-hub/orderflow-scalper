@@ -142,3 +142,8 @@ The primary-book status label is derived from the freshness classifier instead o
 ## Feed Monitor payload-shape guard
 
 The Feed Monitor normalizes the consolidated diagnostics payload before rendering. Non-object payload containers fall back to empty objects, non-array adapter collections fall back to empty lists, and malformed adapter/book/exchange-stat entries are normalized to empty objects. Valid diagnostic records are preserved. This prevents malformed or legacy schema shapes from crashing the monitor UI while keeping the existing unknown/empty-state behavior; it does not convert malformed records into fresh or healthy status.
+
+
+## Feed Monitor summary counter normalization
+
+The frontend normalizes optional summary counters before rendering. Present counters must be finite, safe, nonnegative integers; malformed values (including booleans, arrays/objects, negative values, fractions, and non-finite numbers) display as zero rather than being rendered as arbitrary objects or misleading counts. Numeric strings remain supported for legacy payload compatibility when they represent safe nonnegative integers. The optional `fresh_message_feed_count` field is preserved as absent when older payloads omit it so the UI can fall back to `healthy_feed_count`. Non-string `mode` and `safety` labels use safe text fallbacks.
