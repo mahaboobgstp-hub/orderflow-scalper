@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from app.market_data.unified_engine import UnifiedMarketDataEngine
-from app.exchanges.public_adapters import DeltaPublicAdapter, PublicExchangeAdapter
+from app.exchanges.public_adapters import BinancePublicAdapter, BinanceMarketAdapter, DeltaPublicAdapter, PublicExchangeAdapter
+from app.exchanges.manager import BinanceMarketAdapter as ExportedBinanceMarketAdapter
 
 
 def bybit_snapshot(u=10, seq=100, bids=None, asks=None):
@@ -339,6 +340,18 @@ class PublicAdapterResyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sequence gap test", adapter.last_error)
         self.assertEqual(adapter.reconnect_count, 0)
 
+
+class BinanceRoutedEndpointTests(unittest.TestCase):
+    def test_depth_feed_uses_public_routed_endpoint(self):
+        adapter = BinancePublicAdapter(True, symbol="BTCUSDT")
+        self.assertEqual(adapter.url, "wss://fstream.binance.com/public/stream?streams=btcusdt@depth@100ms")
+        self.assertEqual(adapter.feed_type, "depth")
+
+    def test_aggregate_trades_use_market_routed_endpoint(self):
+        adapter = BinanceMarketAdapter(True, symbol="BTCUSDT")
+        self.assertEqual(adapter.url, "wss://fstream.binance.com/market/stream?streams=btcusdt@aggTrade")
+        self.assertEqual(adapter.feed_type, "aggregate_trades")
+        self.assertIs(ExportedBinanceMarketAdapter, BinanceMarketAdapter)
 
 if __name__ == "__main__":
     unittest.main()
