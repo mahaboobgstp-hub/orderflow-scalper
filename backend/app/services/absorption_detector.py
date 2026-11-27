@@ -66,7 +66,10 @@ class AbsorptionLiquidityDetector:
         if not bids or not asks: raise ValueError("Both book sides must have valid levels.")
         best_bid=max(p for p,q in bids); best_ask=min(p for p,q in asks)
         if best_bid>=best_ask: raise ValueError("Crossed or locked book is invalid.")
-        mid=(best_bid+best_ask)/2
+        # Stable midpoint calculation avoids overflow when two large finite prices are added.
+        mid=best_bid/2.0+best_ask/2.0
+        if not math.isfinite(mid) or mid<=0:
+            raise ValueError("Order-book midpoint must be finite and positive.")
         if isinstance(lookback_seconds, bool) or not isinstance(lookback_seconds, Real):
             raise ValueError("Lookback must be a finite number.")
         try: lookback=float(lookback_seconds)
@@ -109,17 +112,22 @@ class AbsorptionLiquidityDetector:
         total_qty=buy_qty+sell_qty
         delta=buy_qty-sell_qty
         flow_ratio=self._safe_ratio(abs(delta),total_qty)
-        buy_avg=self._safe_ratio(sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="buy"),buy_qty)
-        sell_avg=self._safe_ratio(sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="sell"),sell_qty)
+        buy_notional=sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="buy")
+        sell_notional=sum(t["price"]*t["quantity"] for t in normalized if t["side"]=="sell")
+        buy_avg=self._safe_ratio(buy_notional,buy_qty)
+        sell_avg=self._safe_ratio(sell_notional,sell_qty)
         # VWAP-versus-mid is a spatial comparison, not temporal price progress.
         buy_vwap_vs_mid_pct=(mid-buy_avg)/mid*100 if buy_avg and mid else 0.0
         sell_vwap_vs_mid_pct=(sell_avg-mid)/mid*100 if sell_avg and mid else 0.0
         # Current displayed liquidity at the touch, and concentration in first 5 levels.
         bid5=sorted(bids,key=lambda x:x[0],reverse=True)[:5]; ask5=sorted(asks,key=lambda x:x[0])[:5]
         bid_depth=sum(q for p,q in bid5); ask_depth=sum(q for p,q in ask5)
+        aggregates=(buy_qty,sell_qty,total_qty,delta,flow_ratio,buy_notional,sell_notional,buy_avg,sell_avg,
+                   mid,bid_depth,ask_depth,buy_vwap_vs_mid_pct,sell_vwap_vs_mid_pct)
+        if any(not math.isfinite(value) for value in aggregates):
+            raise ValueError("Trade or book aggregation produced non-finite values; analysis refused.")
         key=f"{exchange}:{symbol}"; history=self._history.setdefault(key,deque(maxlen=self.history_size))
         prior=history[-1] if history else None
-        history.append({"timestamp":now_ms,"mid":mid,"bid5":bid_depth,"ask5":ask_depth,"buy_qty":buy_qty,"sell_qty":sell_qty})
         replenishment=None; depletion=None
         if prior:
             # Compare quantities at the same top-5 aggregate scope across requested observations.
@@ -146,6 +154,11 @@ class AbsorptionLiquidityDetector:
             # opposing pressure, not passive liquidity absorbing aggressor flow.
             buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
             sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
+        calculated=(buy_progress_pct,sell_progress_pct,buy_absorption_score,sell_absorption_score)
+        if any(not math.isfinite(value) for value in calculated):
+            raise ValueError("Temporal absorption calculations produced non-finite values; analysis refused.")
+        # Only record a sample after all numerical calculations are valid.
+        history.append({"timestamp":now_ms,"mid":mid,"bid5":bid_depth,"ask5":ask_depth,"buy_qty":buy_qty,"sell_qty":sell_qty})
         buy_absorbed=buy_absorption_score>=self.absorption_threshold
         sell_absorbed=sell_absorption_score>=self.absorption_threshold
         if buy_absorbed and sell_absorbed: label="MIXED_ABSORPTION"
