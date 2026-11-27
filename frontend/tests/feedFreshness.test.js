@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState } from "../src/feedFreshness.js";
+import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState, normalizeFeedMonitorPayload } from "../src/feedFreshness.js";
 
 test("fresh feed accepts finite nonnegative age inside the cutoff", () => {
   assert.equal(isFreshMessageFeed({ enabled: true, connected: true, last_message_age_seconds: 0.25 }, 3), true);
@@ -152,4 +152,51 @@ test("primary book display label preserves classifier distinctions", () => {
   for (const [state, label] of cases) {
     assert.equal(getPrimaryBookDisplayLabel(state), label, `state ${String(state)}`);
   }
+});
+
+
+test("monitor payload safely normalizes malformed containers", () => {
+  const empty = {
+    payload: {},
+    summary: {},
+    unified: {},
+    adapterList: [],
+    books: {},
+    exchangeStats: {},
+    primary: {},
+  };
+  assert.deepEqual(normalizeFeedMonitorPayload(null), empty);
+  assert.deepEqual(normalizeFeedMonitorPayload([]), empty);
+  assert.deepEqual(normalizeFeedMonitorPayload({
+    summary: [],
+    unified_market_data: [],
+    exchange_connections: { exchanges: "not-an-array" },
+    primary_binance_demo_stream: [],
+  }), empty);
+});
+
+test("monitor payload preserves valid fields while normalizing malformed list entries", () => {
+  const primaryBook = { synchronized: true, stale: false, age_seconds: 0.2 };
+  const payload = {
+    summary: { fresh_message_feed_count: 2 },
+    unified_market_data: {
+      books: { "binance:BTCUSDT": primaryBook, "bad:entry": null },
+      exchanges: { binance: { messages_received: 5 }, malformed: null },
+    },
+    exchange_connections: {
+      exchanges: [{ exchange: "binance", connected: true }, null, ["unexpected"]],
+    },
+    primary_binance_demo_stream: { connected: true, synchronized: true },
+  };
+  const normalized = normalizeFeedMonitorPayload(payload);
+  assert.equal(normalized.payload, payload);
+  assert.equal(normalized.summary.fresh_message_feed_count, 2);
+  assert.equal(normalized.adapterList.length, 3);
+  assert.deepEqual(normalized.adapterList[1], {});
+  assert.deepEqual(normalized.adapterList[2], {});
+  assert.equal(normalized.books["binance:BTCUSDT"], primaryBook);
+  assert.deepEqual(normalized.books["bad:entry"], {});
+  assert.equal(normalized.exchangeStats.binance.messages_received, 5);
+  assert.deepEqual(normalized.exchangeStats.malformed, {});
+  assert.equal(normalized.primary.connected, true);
 });
