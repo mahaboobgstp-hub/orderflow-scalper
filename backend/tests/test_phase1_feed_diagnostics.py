@@ -174,6 +174,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             "bids": [["100", "2"]],
             "asks": [["101", "3"]],
         })
+        self.stream.synchronized = True
         before_bids = dict(self.stream.bids)
         before_asks = dict(self.stream.asks)
         self.assertFalse(self.stream._apply_event({
@@ -185,6 +186,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
     def test_sequence_gap_is_rejected_by_book_update(self):
         self.stream.last_update_id = 100
+        self.stream.synchronized = True
         self.assertFalse(self.stream._apply_event({
             "U": 105, "u": 106, "pu": 104, "b": [["100", "1"]], "a": []
         }))
