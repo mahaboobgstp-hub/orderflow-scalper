@@ -132,3 +132,8 @@ REST snapshots and WebSocket depth levels are parsed atomically. Numeric convers
 ## Fail-closed collector termination and buffer loss
 
 When the primary Binance depth WebSocket collector terminates (normal close, malformed frame, or queue overflow), synchronized-book availability is invalidated before the termination sentinel is delivered. A snapshot bridge is not allowed to restore synchronization after the collector has already ended; the connection loop must reconnect and obtain a new snapshot. After the live collector has ended, queued events are not applied as if the stream were still active. Deterministic tests cover invalid-frame termination, bounded-buffer overflow, normal close, and a closed collector during snapshot bridging. This is fail-closed behavior: it preserves diagnostic freshness timestamps but prevents the read-only book endpoint from serving a book as synchronized.
+
+
+## Primary-book display state mapping
+
+The primary-book status label is derived from the freshness classifier instead of a fallback that labels every synchronized-but-not-healthy state as stale. This distinguishes `STALE`, `UNHEALTHY`, `AGE UNKNOWN`, `UNSYNCHRONIZED`, `DISCONNECTED`, healthy (including legacy freshness-only payloads), and unknown status to avoid overstating diagnostics.

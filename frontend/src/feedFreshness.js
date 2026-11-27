@@ -27,6 +27,20 @@ export function getMessageFeedState(adapter, staleAfterSeconds) {
   return age <= cutoff ? "FRESH" : "STALE";
 }
 
+export function getPrimaryBookDisplayLabel(state) {
+  switch (state) {
+    case "HEALTHY": return "SYNCHRONIZED & FRESH";
+    case "FRESH (LEGACY)": return "SYNCHRONIZED & FRESH (LEGACY)";
+    case "STALE": return "SYNCHRONIZED / STALE";
+    case "UNHEALTHY": return "SYNCHRONIZED / UNHEALTHY";
+    case "AGE UNKNOWN": return "SYNCHRONIZED / AGE UNKNOWN";
+    case "UNSYNCHRONIZED": return "CONNECTED / WAITING FOR SYNC";
+    case "DISCONNECTED": return "NOT CONNECTED";
+    default: return "STATUS UNKNOWN";
+  }
+}
+
+
 export function isFreshMessageFeed(adapter, staleAfterSeconds) {
   return getMessageFeedState(adapter, staleAfterSeconds) === "FRESH";
 }

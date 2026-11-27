@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getMessageFeedState, getPrimaryBookState, getUnifiedBookState } from "./feedFreshness.js";
+import { getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -237,7 +237,7 @@ export default function App() {
       <div className="panel"><div className="panel-title"><h2>Safety & Runtime Boundary</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
         <div className="list-row"><b>Market data mode</b><span>{payload.mode||"Unknown"}</span></div>
         <div className="list-row"><b>Real exchange execution</b><span className="negative">Disabled</span></div>
-        <div className="list-row"><b>Primary Binance demo book</b><span>{primaryBookFresh?"SYNCHRONIZED & FRESH":primary.synchronized?"SYNCHRONIZED / STALE":primary.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
+        <div className="list-row"><b>Primary Binance demo book</b><span>{getPrimaryBookDisplayLabel(primaryBookState)}</span></div>
         <div className="list-row"><b>Binance demo last update ID</b><span>{value(payload.primary_binance_demo_stream?.last_update_id)}</span></div>
         <div className="list-row"><b>Primary book freshness</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primaryBookState}</span></div>
         <div className="list-row"><b>Last depth message age</b><span>{primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s"}</span></div>

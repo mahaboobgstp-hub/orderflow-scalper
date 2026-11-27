@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, effectiveFeedStaleCutoff, getUnifiedBookState } from "../src/feedFreshness.js";
+import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState } from "../src/feedFreshness.js";
 
 test("fresh feed accepts finite nonnegative age inside the cutoff", () => {
   assert.equal(isFreshMessageFeed({ enabled: true, connected: true, last_message_age_seconds: 0.25 }, 3), true);
@@ -134,4 +134,22 @@ test("unified book freshness requires valid age and non-crossed top of book", ()
   }
   assert.equal(getUnifiedBookState(null, 3), "UNKNOWN");
   assert.equal(getUnifiedBookState([], 3), "UNKNOWN");
+});
+
+
+test("primary book display label preserves classifier distinctions", () => {
+  const cases = [
+    ["HEALTHY", "SYNCHRONIZED & FRESH"],
+    ["FRESH (LEGACY)", "SYNCHRONIZED & FRESH (LEGACY)"],
+    ["STALE", "SYNCHRONIZED / STALE"],
+    ["UNHEALTHY", "SYNCHRONIZED / UNHEALTHY"],
+    ["AGE UNKNOWN", "SYNCHRONIZED / AGE UNKNOWN"],
+    ["UNSYNCHRONIZED", "CONNECTED / WAITING FOR SYNC"],
+    ["DISCONNECTED", "NOT CONNECTED"],
+    ["UNKNOWN", "STATUS UNKNOWN"],
+    [null, "STATUS UNKNOWN"],
+  ];
+  for (const [state, label] of cases) {
+    assert.equal(getPrimaryBookDisplayLabel(state), label, `state ${String(state)}`);
+  }
 });
