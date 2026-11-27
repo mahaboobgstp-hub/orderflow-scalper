@@ -77,10 +77,10 @@ class BybitPublicAdapter(PublicExchangeAdapter):
         await websocket.send(json.dumps({"op":"subscribe","args":[f"orderbook.50.{self.symbol}",f"publicTrade.{self.symbol}"]}))
 
 class DeltaPublicAdapter(PublicExchangeAdapter):
-    def __init__(self,enabled,symbol="BTCUSDT",on_message=None):
+    def __init__(self,enabled,symbol="BTCUSD",on_message=None):
         super().__init__("delta",enabled,"wss://socket-ind-pub.testnet.deltaex.org",symbol,on_message)
     async def _subscribe(self,websocket):
-        await websocket.send(json.dumps({"type":"subscribe","payload":{"channels":[{"name":"ob_l2","symbols":[self.symbol]},{"name":"trades","symbols":[self.symbol]}]}}))
+        await websocket.send(json.dumps({"type":"subscribe","payload":{"channels":[{"name":"ob_updates","symbols":[self.symbol]},{"name":"trades","symbols":[self.symbol]}]}}))
     async def _on_connected(self,websocket):
         await websocket.send(json.dumps({"type":"enable_heartbeat"}))
 
