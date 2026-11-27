@@ -9,9 +9,15 @@ export function asArray(value) {
 }
 
 export function normalizeDiagnosticCounter(rawValue) {
-  if (typeof rawValue !== "number" && typeof rawValue !== "string") return 0;
-  if (typeof rawValue === "string" && rawValue.trim() === "") return 0;
-  const count = Number(rawValue);
+  if (typeof rawValue === "number") {
+    return Number.isSafeInteger(rawValue) && rawValue >= 0 ? rawValue : 0;
+  }
+  if (typeof rawValue !== "string") return 0;
+  const value = rawValue.trim();
+  // Legacy numeric strings are accepted only in decimal integer notation.
+  // Number() alone also accepts hexadecimal, exponent, and fractional forms.
+  if (!/^\d+$/.test(value)) return 0;
+  const count = Number(value);
   return Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }
 
