@@ -77,7 +77,7 @@ class Tests(unittest.TestCase):
         self.assertFalse(self.e.get_book("bybit", "BTCUSDT")["synchronized"])
         recovered = self.e.process("bybit", bybit_snapshot(u=20, seq=200))
         self.assertTrue(recovered["synchronized"])
-        next_delta = self.e.process("bybit", bybit_delta(21, seq=201, bids=[["99", "9"]]))
+        next_delta = self.e.process("bybit", bybit_delta(21, seq=201, bids=[["100", "0"], ["99", "9"]]))
         self.assertTrue(next_delta["synchronized"])
         self.assertEqual(self.e.get_book("bybit", "BTCUSDT")["best_bid"], 99.0)
 
