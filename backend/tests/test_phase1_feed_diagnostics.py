@@ -18,6 +18,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["snapshot_count"], 0)
         self.assertEqual(status["sequence_gap_count"], 0)
         self.assertEqual(status["invalid_depth_message_count"], 0)
+        self.assertEqual(status["snapshot_buffer_overflow_count"], 0)
         self.assertIsNone(status["last_event_age_seconds"])
         self.assertIsNone(status["last_book_update_age_seconds"])
         self.assertIsNone(status["last_sync_age_seconds"])
@@ -190,6 +191,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                     "last_recovery_age_seconds": None, "messages_received": 12,
                     "snapshot_count": 1, "sequence_gap_count": 0,
                     "invalid_depth_message_count": 0,
+                    "snapshot_buffer_overflow_count": 0,
                 }
 
         class FakeExchanges:
@@ -223,6 +225,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             "reconnect_count", "recovery_count", "last_disconnect_reason",
             "last_recovery_age_seconds", "messages_received", "snapshot_count",
             "sequence_gap_count", "invalid_depth_message_count",
+            "snapshot_buffer_overflow_count",
         ):
             self.assertIn(field, primary)
         self.assertFalse(payload["live_execution_enabled"])
@@ -407,6 +410,37 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(event["u"], 101)
         self.assertIsNone(sentinel)
         self.assertIsNone(self.stream.last_error)
+
+    def test_collector_overflow_discards_partial_buffer_and_signals_recovery(self):
+        class FakeWebSocket:
+            def __init__(self, messages):
+                self.messages = messages
+
+            def __aiter__(self):
+                async def iterate():
+                    for message in self.messages:
+                        yield message
+                return iterate()
+
+        frame = '{"U":100,"u":101,"b":[],"a":[]}'
+        async def run_collector():
+            queue = asyncio.Queue(maxsize=2)
+            await self.stream._collect_depth_events(
+                FakeWebSocket([frame, frame, frame]),
+                queue,
+            )
+            return queue
+
+        queue = asyncio.run(run_collector())
+        self.assertEqual(self.stream.messages_received, 3)
+        self.assertEqual(self.stream.snapshot_buffer_overflow_count, 1)
+        self.assertEqual(queue.qsize(), 1)
+        self.assertIsNone(queue.get_nowait())
+        self.assertTrue(queue.empty())
+        self.assertEqual(
+            self.stream.last_error,
+            "Depth event buffer overflow; reconnecting for fresh snapshot",
+        )
 
     def test_snapshot_loader_rejects_invalid_levels_without_mutating_book(self):
         self.stream.bids = {100.0: 2.0}
