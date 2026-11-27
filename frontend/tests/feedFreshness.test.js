@@ -245,6 +245,14 @@ test("monitor summary sanitizes malformed counters and non-string labels", () =>
   assert.equal(normalized.summary.safety, "PUBLIC FEEDS ONLY");
 });
 
+test("diagnostic counter strings require decimal integer notation", () => {
+  for (const raw of ["0x10", "1e2", "7.0", "+7", "-0", "-1", "Infinity", ""]) {
+    assert.equal(normalizeDiagnosticCounter(raw), 0, `counter string ${JSON.stringify(raw)}`);
+  }
+  assert.equal(normalizeDiagnosticCounter("007"), 7);
+  assert.equal(normalizeDiagnosticCounter(" 7 "), 7);
+});
+
 test("legacy summary without fresh-message counter keeps healthy-count fallback", () => {
   const normalized = normalizeFeedMonitorPayload({
     summary: { healthy_feed_count: "2" },
