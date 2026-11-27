@@ -183,7 +183,8 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 return {
                     "stale_after_seconds": 3.0,
                     "books": {
-                        "bybit:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None}
+                        "bybit:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.25},
+                        "bybit:ETHUSDT": {"synchronized": True, "stale": False, "integrity_error": None}
                     },
                     "exchanges": {
                         "bybit": {"messages_received": 12, "last_message_age_seconds": 0.25}
@@ -248,6 +249,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             self.assertIn(field, primary)
         self.assertFalse(payload["live_execution_enabled"])
         self.assertEqual(payload["mode"], "PUBLIC_MARKET_DATA_PAPER_ONLY")
+        self.assertEqual(payload["summary"]["unified_book_count"], 2)
         self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
         self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
         self.assertEqual(payload["summary"]["fresh_message_feed_count"], 1)
@@ -259,7 +261,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                     "stale_after_seconds": 3.0,
                     "books": {
                         "bybit:BTCUSDT": {
-                            "synchronized": True, "stale": False, "integrity_error": None
+                            "synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2
                         },
                         "delta:BTCUSDT": {
                             "synchronized": False, "stale": False, "integrity_error": "awaiting snapshot"
@@ -310,10 +312,10 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 {"exchange": "disabled", "symbol": "BTCUSDT", "enabled": False, "connected": True, "last_message_age_seconds": 0.1},
             ]},
             {"stale_after_seconds": 3.0, "books": {
-                "bybit:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
-                "delta:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": "sequence mismatch"},
-                "binance:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
-                "disabled:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+                "bybit:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2},
+                "delta:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": "sequence mismatch", "age_seconds": 0.2},
+                "binance:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2},
+                "disabled:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.1},
             }},
         )
         self.assertEqual(result["fresh_message_feed_count"], 2)
@@ -332,7 +334,38 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         result = main._feed_health_counts(
             {"exchanges": adapters},
             {"stale_after_seconds": 3.0, "books": {
-                "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+                "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2},
+            }},
+        )
+        self.assertEqual(result["fresh_message_feed_count"], 1)
+        self.assertEqual(result["healthy_feed_count"], 1)
+
+    def test_feed_health_summary_rejects_missing_and_invalid_book_ages(self):
+        adapter = {"exchange": "bybit", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2}
+        invalid_ages = (None, True, False, -0.01, float("nan"), float("inf"), 3.01, "invalid")
+        for age in invalid_ages:
+            with self.subTest(age=age):
+                book = {"synchronized": True, "stale": False, "integrity_error": None}
+                if age is not None:
+                    book["age_seconds"] = age
+                result = main._feed_health_counts(
+                    {"exchanges": [adapter]},
+                    {"stale_after_seconds": 3.0, "books": {"bybit:BTCUSDT": book}},
+                )
+                self.assertEqual(result["fresh_message_feed_count"], 1)
+                self.assertEqual(result["healthy_feed_count"], 0)
+
+    def test_summary_stale_cutoff_uses_engine_minimum_clamp(self):
+        result = main._feed_health_counts(
+            {"exchanges": [{
+                "exchange": "bybit", "symbol": "BTCUSDT", "connected": True,
+                "last_message_age_seconds": 0.08,
+            }]},
+            {"stale_after_seconds": 0.05, "books": {
+                "bybit:BTCUSDT": {
+                    "synchronized": True, "stale": False, "integrity_error": None,
+                    "age_seconds": 0.09,
+                },
             }},
         )
         self.assertEqual(result["fresh_message_feed_count"], 1)
@@ -344,7 +377,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             {"exchange": "too_old", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 3.1},
         ]
         books = {
-            "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None},
+            "valid:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2},
         }
         for threshold in (float("nan"), float("inf"), -1.0, "invalid", True, False):
             with self.subTest(threshold=threshold):
