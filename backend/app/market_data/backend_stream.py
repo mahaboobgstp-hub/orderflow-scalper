@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 REST_BASE_URL = "https://demo-fapi.binance.com"
 WEBSOCKET_BASE_URL = "wss://demo-fstream.binance.com"
 
+# Bound buffered depth events while REST snapshot synchronization is in progress.
+SNAPSHOT_BUFFER_MAX_EVENTS = 1000
+
 
 class BinanceOrderBookStream:
     def __init__(
@@ -60,6 +63,7 @@ class BinanceOrderBookStream:
         self.snapshot_count = 0
         self.sequence_gap_count = 0
         self.invalid_depth_message_count = 0
+        self.snapshot_buffer_overflow_count = 0
         self.connection_attempt_count = 0
         self.successful_connection_count = 0
         self.reconnect_count = 0
@@ -183,7 +187,8 @@ class BinanceOrderBookStream:
         return event
 
     async def _collect_depth_events(self, websocket, event_queue: asyncio.Queue):
-        """Collect frames and always signal termination so the sync consumer can reconnect."""
+        """Collect frames into a bounded queue; overflow forces snapshot recovery."""
+        overflowed = False
         try:
             async for message in websocket:
                 self.messages_received += 1
@@ -195,10 +200,41 @@ class BinanceOrderBookStream:
                     self.last_error = str(exc)
                     logger.warning("Invalid Binance depth frame: %s", exc)
                     break
-                await event_queue.put(event)
+                try:
+                    event_queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    overflowed = True
+                    self.snapshot_buffer_overflow_count += 1
+                    self.last_error = (
+                        "Depth event buffer overflow; reconnecting for fresh snapshot"
+                    )
+                    # Never synchronize from a partial buffer after dropping an event.
+                    while True:
+                        try:
+                            event_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                    event_queue.put_nowait(None)
+                    logger.warning("Binance depth event buffer overflow; forcing snapshot recovery")
+                    break
         finally:
-            # None is reserved as the queue termination sentinel; depth frames are dicts.
-            await event_queue.put(None)
+            # Queue termination must never block the collector while the consumer
+            # is exiting. If a full queue cannot accept the sentinel, discard
+            # its partial contents and force recovery instead.
+            if not overflowed:
+                try:
+                    event_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    self.snapshot_buffer_overflow_count += 1
+                    self.last_error = (
+                        "Depth event buffer overflow at stream end; reconnecting for fresh snapshot"
+                    )
+                    while True:
+                        try:
+                            event_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                    event_queue.put_nowait(None)
 
 
     # --------------------------------------------------
@@ -253,7 +289,7 @@ class BinanceOrderBookStream:
             )
 
             # Buffer events while the REST snapshot loads.
-            event_queue: asyncio.Queue = asyncio.Queue()
+            event_queue: asyncio.Queue = asyncio.Queue(maxsize=SNAPSHOT_BUFFER_MAX_EVENTS)
 
             collector_task = asyncio.create_task(
                 self._collect_depth_events(websocket, event_queue)
