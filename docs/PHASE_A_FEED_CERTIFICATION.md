@@ -92,7 +92,7 @@ The frontend primary-book classification must not infer freshness from `healthy:
 
 ## Primary Feed Monitor error precedence
 
-For a connected and synchronized primary book with an explicit `integrity_error` or `last_error`, the frontend displays `UNHEALTHY` before age validation. Missing or malformed age alone still displays `AGE UNKNOWN`. Disconnected, unsynchronized, and explicitly stale states retain their existing precedence. This avoids hiding known integrity/runtime errors behind an unknown-age label.
+For a connected and synchronized primary book with an explicit `integrity_error` or `last_error`, the frontend displays `UNHEALTHY` before stale-flag or age classification. Connectivity and synchronization states retain precedence; otherwise an explicit integrity/runtime error outranks `STALE`, and missing or malformed age alone displays `AGE UNKNOWN`. This avoids hiding known integrity/runtime failures behind a freshness-only label.
 
 
 ## Per-adapter freshness state in Feed Monitor
