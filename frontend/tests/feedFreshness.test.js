@@ -157,9 +157,14 @@ test("primary book display label preserves classifier distinctions", () => {
 
 test("monitor payload safely normalizes malformed containers", () => {
   const empty = {
-    payload: {},
+    payload: {
+      summary: {},
+      unified_market_data: { books: {}, exchanges: {} },
+      exchange_connections: { exchanges: [] },
+      primary_binance_demo_stream: {},
+    },
     summary: {},
-    unified: {},
+    unified: { books: {}, exchanges: {} },
     adapterList: [],
     books: {},
     exchangeStats: {},
@@ -188,6 +193,7 @@ test("monitor payload safely normalizes malformed containers", () => {
 test("monitor payload preserves valid fields while normalizing malformed list entries", () => {
   const primaryBook = { synchronized: true, stale: false, age_seconds: 0.2 };
   const payload = {
+    mode: "PUBLIC_MARKET_DATA_PAPER_ONLY",
     summary: { fresh_message_feed_count: 2 },
     unified_market_data: {
       books: { "binance:BTCUSDT": primaryBook, "bad:entry": null },
@@ -199,7 +205,9 @@ test("monitor payload preserves valid fields while normalizing malformed list en
     primary_binance_demo_stream: { connected: true, synchronized: true },
   };
   const normalized = normalizeFeedMonitorPayload(payload);
-  assert.equal(normalized.payload, payload);
+  assert.notEqual(normalized.payload, payload);
+  assert.equal(normalized.payload.mode, payload.mode);
+  assert.equal(normalized.payload.summary, payload.summary);
   assert.equal(normalized.summary.fresh_message_feed_count, 2);
   assert.equal(normalized.adapterList.length, 3);
   assert.deepEqual(normalized.adapterList[1], {});
