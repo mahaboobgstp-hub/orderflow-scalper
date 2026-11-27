@@ -642,5 +642,28 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(result["fresh_message_feed_count"], 0)
                 self.assertEqual(result["healthy_feed_count"], 0)
 
+    def test_feed_health_summary_requires_boolean_enabled_when_present(self):
+        adapters = [
+            {"exchange": "enabled_true", "symbol": "BTCUSDT", "enabled": True, "connected": True, "last_message_age_seconds": 0.2},
+            {"exchange": "legacy", "symbol": "BTCUSDT", "connected": True, "last_message_age_seconds": 0.2},
+            {"exchange": "disabled", "symbol": "BTCUSDT", "enabled": False, "connected": True, "last_message_age_seconds": 0.2},
+            {"exchange": "null_enabled", "symbol": "BTCUSDT", "enabled": None, "connected": True, "last_message_age_seconds": 0.2},
+            {"exchange": "string_true", "symbol": "BTCUSDT", "enabled": "true", "connected": True, "last_message_age_seconds": 0.2},
+            {"exchange": "string_false", "symbol": "BTCUSDT", "enabled": "false", "connected": True, "last_message_age_seconds": 0.2},
+            {"exchange": "integer_one", "symbol": "BTCUSDT", "enabled": 1, "connected": True, "last_message_age_seconds": 0.2},
+            {"exchange": "integer_zero", "symbol": "BTCUSDT", "enabled": 0, "connected": True, "last_message_age_seconds": 0.2},
+        ]
+        books = {
+            "enabled_true:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2, "best_bid": 100.0, "best_ask": 101.0},
+            "legacy:BTCUSDT": {"synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2, "best_bid": 100.0, "best_ask": 101.0},
+        }
+        result = main._feed_health_counts(
+            {"exchanges": adapters},
+            {"stale_after_seconds": 3.0, "books": books},
+        )
+        self.assertEqual(result["fresh_message_feed_count"], 2)
+        self.assertEqual(result["healthy_feed_count"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
