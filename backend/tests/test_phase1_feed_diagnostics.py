@@ -265,7 +265,8 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                     "stale_after_seconds": 3.0,
                     "books": {
                         "bybit:BTCUSDT": {
-                            "synchronized": True, "stale": False, "integrity_error": None, "age_seconds": 0.2
+                            "synchronized": True, "stale": False, "integrity_error": None,
+                            "age_seconds": 0.2, "best_bid": 100.0, "best_ask": 101.0
                         },
                         "delta:BTCUSDT": {
                             "synchronized": False, "stale": False, "integrity_error": "awaiting snapshot"
