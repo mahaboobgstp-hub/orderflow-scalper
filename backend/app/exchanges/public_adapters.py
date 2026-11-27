@@ -44,7 +44,12 @@ class PublicExchangeAdapter(ABC):
                             parsed=json.loads(msg)
                             if isinstance(parsed,dict) and parsed.get("success") is False:
                                 self.last_error=str(parsed.get("ret_msg") or parsed.get("error") or parsed)
-                            if self.on_message: self.on_message(self.name,parsed)
+                            if self.on_message:
+                                result = self.on_message(self.name, parsed)
+                                if isinstance(result, dict) and result.get("resync_required"):
+                                    raise ConnectionError(
+                                        result.get("error") or "Market-data book requires resynchronization"
+                                    )
                         except (json.JSONDecodeError,TypeError) as err:
                             self.last_error="Message parse error: "+str(err)
             except asyncio.CancelledError: raise
