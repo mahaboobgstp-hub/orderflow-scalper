@@ -122,6 +122,13 @@ class UnifiedMarketDataEngine:
         book.received_ts = int(time.time() * 1000)
         book.stale = False
 
+    def _exchange_timestamp_is_fresh(self, timestamp_ms):
+        """Reject book events with missing, stale, or implausibly future exchange time."""
+        if isinstance(timestamp_ms, bool) or not isinstance(timestamp_ms, int) or timestamp_ms <= 0:
+            return False
+        age_seconds = time.time() - timestamp_ms / 1000.0
+        return math.isfinite(age_seconds) and -5.0 <= age_seconds <= self.stale_after_seconds
+
     def _invalidate(self, exchange, book, reason):
         book.bids.clear()
         book.asks.clear()
@@ -264,6 +271,15 @@ class UnifiedMarketDataEngine:
         if ex == "delta" and ts is not None and ts > 10**13:
             ts //= 1000
         book = self.book(ex, symbol)
+        is_bybit_book_event = topic.startswith("orderbook.") and raw.get("type") in ("snapshot", "delta")
+        delta_action = str(data.get("action") or raw.get("action") or raw.get("type") or "").lower()
+        is_delta_book_event = ex == "delta" and delta_action in ("snapshot", "update") and (
+            raw.get("type") in ("ob_updates", "snapshot", "delta")
+            or data.get("type") in ("ob_updates", "ob_l2")
+            or any(k in data for k in ("buy", "sell", "bids", "asks"))
+        )
+        if (is_bybit_book_event or is_delta_book_event) and not self._exchange_timestamp_is_fresh(ts):
+            return self._invalidate(ex, book, "Missing, stale, or future exchange timestamp")
         try:
             # Binance public depth diffs do not have a REST bridge in this
             # exchange-neutral path; never expose these partial levels as a book.
