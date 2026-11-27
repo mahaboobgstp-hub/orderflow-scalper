@@ -87,6 +87,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
             "bids": [[str(price), "1"] for price in (100, 99, 98, 97, 96, 95, 94)],
             "asks": [[str(price), "1"] for price in (101, 102, 103, 104, 105, 106, 107)],
         })
+        stream.synchronized = True
         self.assertEqual(sorted(stream.bids, reverse=True), [100, 99, 98, 97, 96])
         self.assertEqual(sorted(stream.asks), [101, 102, 103, 104, 105])
         self.assertEqual(len(stream.bids), 5)
