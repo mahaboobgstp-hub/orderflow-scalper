@@ -91,3 +91,16 @@ The frontend primary-book classification must not infer freshness from `healthy:
 ## Primary Feed Monitor error precedence
 
 For a connected and synchronized primary book with an explicit `integrity_error` or `last_error`, the frontend displays `UNHEALTHY` before age validation. Missing or malformed age alone still displays `AGE UNKNOWN`. Disconnected, unsynchronized, and explicitly stale states retain their existing precedence. This avoids hiding known integrity/runtime errors behind an unknown-age label.
+
+
+## Per-adapter freshness state in Feed Monitor
+
+The Exchange Feed Connections panel labels each adapter's latest-message state separately from book health:
+- `FRESH`: enabled/connected and message age is finite, nonnegative, and within the effective cutoff.
+- `STALE`: enabled/connected but message age exceeds the effective cutoff.
+- `AGE UNKNOWN`: connected but message age is absent or invalid.
+- `DISCONNECTED`: explicitly disconnected.
+- `DISABLED`: explicitly disabled.
+- `UNKNOWN`: adapter payload or connection state is missing/invalid.
+
+The top summary tile is labeled **Fresh Message Feeds**, because its count measures recent messages rather than merely connected sockets. These message-state labels do not imply a synchronized or healthy order book; book integrity remains displayed separately.
