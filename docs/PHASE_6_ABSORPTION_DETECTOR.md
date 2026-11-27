@@ -45,6 +45,7 @@ These are research hypotheses, not reversal/entry signals.
 - The unified engine's captured trades are capped history and are not guaranteed to fully represent the requested lookback.
 - VWAP versus midpoint is spatial execution context, not true temporal price displacement from an interval start to end. It can be distorted by trade clustering, sampling, and side classification.
 - Temporal midpoint movement is sampled on detector requests; request cadence can miss fast movement or produce incomparable intervals. It is not a continuous trade-time trajectory.
+- A structural 1,000ms minimum interval is enforced for the temporal price-progress baseline. Rapid polls inside that interval cannot replace the baseline or score absorption. This is an anti-polling guard, not an empirically calibrated market threshold.
 - Absorption scoring has no empirically calibrated absolute-volume/notional floor. Very small tape volumes may still qualify if the minimum trade count and volume-share tests pass.
 - The 0.10% absolute-displacement scale and minimum-trade threshold are provisional and need market-based calibration across symbols, liquidity regimes, and noise.
 - Liquidity changes are sampled on API requests. They are not linked to individual consumed orders, and aggregate depth increases alone do not prove replenishment.
