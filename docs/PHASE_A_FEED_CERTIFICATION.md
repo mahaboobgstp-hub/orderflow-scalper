@@ -75,3 +75,8 @@ The exchange-neutral engine's `max_levels` is a per-side in-memory bound, not me
 ## Bounded REST snapshot synchronization buffer
 
 The primary Binance depth collector buffers WebSocket depth frames while the REST snapshot is loading. The buffer is bounded to **1,000 events**. If the queue fills, the collector drops the incomplete buffered sequence, increments `snapshot_buffer_overflow_count`, records a recovery reason, and inserts the termination sentinel. The consumer must not synchronize from a partial buffer; it returns and the connection loop obtains a new REST snapshot. If the stream ends while a full queue prevents inserting the termination sentinel, the collector likewise discards the queued partial sequence, increments the overflow counter, and signals termination without blocking. The Feed Monitor exposes this counter. Buffer overflow is a recovery event, not a sequence gap or malformed-frame count.
+
+
+## Primary Binance retained-depth bound
+
+The primary demo-stream snapshot_limit accepts only Binance USD-M Futures depth limits 5, 10, 20, 50, 100, 500, or 1000. Invalid values are rejected during stream construction rather than sent to REST. The initial snapshot and accepted depth updates retain the highest bid levels and lowest ask levels up to this limit, bounding in-memory book size per side. The API exposes snapshot_limit, and Feed Monitor displays the cap. Levels outside the retained cap are not tracked; the book is a bounded-depth view, not a claim of a full exchange book.

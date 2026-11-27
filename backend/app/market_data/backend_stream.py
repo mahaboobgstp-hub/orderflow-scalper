@@ -26,6 +26,7 @@ WEBSOCKET_BASE_URL = "wss://demo-fstream.binance.com"
 
 # Bound buffered depth events while REST snapshot synchronization is in progress.
 SNAPSHOT_BUFFER_MAX_EVENTS = 1000
+SNAPSHOT_LIMIT_OPTIONS = (5, 10, 20, 50, 100, 500, 1000)
 
 
 class BinanceOrderBookStream:
@@ -37,6 +38,8 @@ class BinanceOrderBookStream:
     ):
         self.symbol = symbol.upper()
         self.stream_symbol = symbol.lower()
+        if isinstance(snapshot_limit, bool) or not isinstance(snapshot_limit, int) or snapshot_limit not in SNAPSHOT_LIMIT_OPTIONS:
+            raise ValueError(f"snapshot_limit must be one of {SNAPSHOT_LIMIT_OPTIONS}")
         self.snapshot_limit = snapshot_limit
         try:
             stale_cutoff = float(stale_after_seconds)
@@ -434,6 +437,12 @@ class BinanceOrderBookStream:
             else:
                 book[price] = quantity
 
+    def _retain_best_levels(self, levels: dict[float, float], *, highest_first: bool) -> dict[float, float]:
+        """Keep only the best configured depth levels, bounding retained book memory."""
+        if len(levels) <= self.snapshot_limit:
+            return levels
+        return dict(sorted(levels.items(), key=lambda item: item[0], reverse=highest_first)[:self.snapshot_limit]
+
     def _load_snapshot(self, snapshot: dict[str, Any]):
         if not isinstance(snapshot, dict):
             raise ValueError("Binance REST snapshot must be an object")
@@ -448,6 +457,8 @@ class BinanceOrderBookStream:
             raise ValueError("Binance snapshot must contain nonempty bid and ask sides")
         if max(bids) >= min(asks):
             raise ValueError("Binance snapshot has a crossed or locked top of book")
+        bids = self._retain_best_levels(bids, highest_first=True)
+        asks = self._retain_best_levels(asks, highest_first=False)
 
         self.bids = bids
         self.asks = asks
@@ -530,6 +541,8 @@ class BinanceOrderBookStream:
             self._apply_parsed_depth_updates(next_asks, ask_updates)
             if not next_bids or not next_asks:
                 raise ValueError("Binance depth update would empty one side of the book")
+            next_bids = self._retain_best_levels(next_bids, highest_first=True)
+            next_asks = self._retain_best_levels(next_asks, highest_first=False)
             if max(next_bids) >= min(next_asks):
                 raise ValueError("Binance depth update would cross or lock the book")
         except ValueError:
@@ -591,6 +604,7 @@ class BinanceOrderBookStream:
         )
         return {
             "symbol": self.symbol,
+            "snapshot_limit": self.snapshot_limit,
             "connected": self.connected,
             "synchronized": self.synchronized,
             "stale": stale,

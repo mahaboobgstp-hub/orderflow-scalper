@@ -19,7 +19,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["sequence_gap_count"], 0)
         self.assertEqual(status["invalid_depth_message_count"], 0)
         self.assertEqual(status["snapshot_buffer_overflow_count"], 0)
-        self.assertEqual(status["snapshot_buffer_overflow_count"], 0)
+        self.assertEqual(status["snapshot_limit"], 1000)
         self.assertIsNone(status["last_event_age_seconds"])
         self.assertIsNone(status["last_book_update_age_seconds"])
         self.assertIsNone(status["last_sync_age_seconds"])
@@ -180,7 +180,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         class FakePrimary:
             async def get_status(self):
                 return {
-                    "symbol": "BTCUSDT", "connected": True, "synchronized": True,
+                    "symbol": "BTCUSDT", "snapshot_limit": 1000, "connected": True, "synchronized": True,
                     "stale": False, "fresh": True, "healthy": True,
                     "stale_after_seconds": 3.0, "last_update_id": 101,
                     "connected_duration_seconds": 40.0, "synchronized_duration_seconds": 35.0,
@@ -228,7 +228,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             "last_recovery_age_seconds", "messages_received", "snapshot_count",
             "sequence_gap_count", "invalid_depth_message_count",
             "snapshot_buffer_overflow_count",
-            "snapshot_buffer_overflow_count",
+            "snapshot_limit",
         ):
             self.assertIn(field, primary)
         self.assertFalse(payload["live_execution_enabled"])

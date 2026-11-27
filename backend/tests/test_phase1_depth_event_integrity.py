@@ -12,6 +12,38 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
             "asks": [["101", "4"], ["102", "5"]],
         })
 
+    def test_snapshot_limit_rejects_invalid_values(self):
+        invalid_limits = (0, -1, 4, 25, 1001, True, False, 1000.0, "1000", None)
+        for invalid in invalid_limits:
+            with self.subTest(limit=invalid):
+                with self.assertRaises(ValueError):
+                    BinanceOrderBookStream(snapshot_limit=invalid)
+        for valid in (5, 10, 20, 50, 100, 500, 1000):
+            self.assertEqual(BinanceOrderBookStream(snapshot_limit=valid).snapshot_limit, valid)
+
+    def test_snapshot_and_live_updates_retain_best_levels_within_cap(self):
+        stream = BinanceOrderBookStream("BTCUSDT", snapshot_limit=5)
+        stream._load_snapshot({
+            "lastUpdateId": 100,
+            "bids": [[str(price), "1"] for price in (100, 99, 98, 97, 96, 95, 94)],
+            "asks": [[str(price), "1"] for price in (101, 102, 103, 104, 105, 106, 107)],
+        })
+        self.assertEqual(sorted(stream.bids, reverse=True), [100, 99, 98, 97, 96])
+        self.assertEqual(sorted(stream.asks), [101, 102, 103, 104, 105])
+        self.assertEqual(len(stream.bids), 5)
+        self.assertEqual(len(stream.asks), 5)
+
+        self.assertTrue(stream._apply_event({
+            "U": 101, "u": 102,
+            "b": [["100.5", "1"], ["95", "2"]],
+            "a": [["100.9", "2"], ["105.5", "1"]],
+        }))
+        self.assertEqual(sorted(stream.bids, reverse=True), [100.5, 100, 99, 98, 97])
+        self.assertEqual(sorted(stream.asks), [100.9, 101, 102, 103, 104])
+        self.assertEqual(len(stream.bids), 5)
+        self.assertEqual(len(stream.asks), 5)
+
+
     def test_crossed_snapshot_is_rejected_without_replacing_existing_book(self):
         before_bids = dict(self.stream.bids)
         before_asks = dict(self.stream.asks)
