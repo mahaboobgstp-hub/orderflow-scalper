@@ -233,14 +233,36 @@ def _normalize_feed_stale_after(raw_stale_after):
     return max(0.1, stale_after)
 
 
+def _is_valid_top_of_book(book):
+    """Validate that a normalized book exposes a finite, positive, non-crossed top of book."""
+    if not isinstance(book, dict):
+        return False
+    raw_bid = book.get("best_bid")
+    raw_ask = book.get("best_ask")
+    if (
+        raw_bid is None or raw_ask is None
+        or isinstance(raw_bid, bool) or isinstance(raw_ask, bool)
+        or (isinstance(raw_bid, str) and not raw_bid.strip())
+        or (isinstance(raw_ask, str) and not raw_ask.strip())
+    ):
+        return False
+    try:
+        bid = float(raw_bid)
+        ask = float(raw_ask)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(bid) and math.isfinite(ask) and bid > 0 and ask > 0 and bid < ask
+
+
 def _is_fresh_synchronized_book(book, stale_after):
-    """Require explicit, valid book-age evidence before counting a book healthy."""
+    """Require sync, valid age, and a valid two-sided top of book before counting health."""
     if not isinstance(book, dict):
         return False
     if (
         book.get("synchronized") is not True
         or book.get("stale") is not False
         or book.get("integrity_error")
+        or not _is_valid_top_of_book(book)
     ):
         return False
     raw_age = book.get("age_seconds")
