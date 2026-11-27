@@ -395,7 +395,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
     def test_depth_frame_decoder_accepts_valid_update_ids(self):
         event = self.stream._decode_depth_message(
-            '{"U":100,"u":101,"pu":99,"b":[],"a":[]}'
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}'
         )
         self.assertEqual(event["U"], 100)
         self.assertEqual(event["u"], 101)
@@ -404,24 +404,65 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         invalid_frames = (
             "{",
             "[]",
-            '{"U":100}',
-            '{"U":100,"u":101,"b":[],"a":[]}',
-            '{"U":102,"u":101}',
-            '{"U":true,"u":101}',
-            '{"U":100.5,"u":101}',
-            '{"U":100,"u":101,"pu":100.5}',
-            '{"U":100,"u":101,"pu":true}',
-            '{"U":100,"u":101,"pu":-1}',
-            '{"U":"100","u":101,"pu":99}',
-            '{"U":100,"u":"101","pu":99}',
-            '{"U":100,"u":101,"pu":"99"}',
-            '{"U":"+100","u":101,"pu":99}',
-            '{"U":100,"u":101,"pu":"+99"}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"b":[],"a":[]}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":102,"u":101,"pu":99}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":true,"u":101,"pu":99}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100.5,"u":101,"pu":99}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":100.5}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":true}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":-1}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":"100","u":101,"pu":99}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":"101","pu":99}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":"99"}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":"+100","u":101,"pu":99}',
+            '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":"+99"}',
+            '{"s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}',
+            '{"e":"aggTrade","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}',
+            '{"e":"depthUpdate","s":"ETHUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}',
+            '{"e":"depthUpdate","U":100,"u":101,"pu":99,"b":[],"a":[]}',
         )
         for frame in invalid_frames:
             with self.subTest(frame=frame):
                 with self.assertRaises(ValueError):
                     self.stream._decode_depth_message(frame)
+
+    def test_depth_decoder_accepts_case_insensitive_configured_symbol(self):
+        event = self.stream._decode_depth_message(
+            '{"e":"depthUpdate","s":"btcusdt","U":100,"u":101,"pu":99,"b":[],"a":[]}'
+        )
+        self.assertEqual(event["s"], "btcusdt")
+
+    def test_collector_rejects_wrong_symbol_or_event_type(self):
+        class FakeWebSocket:
+            def __init__(self, messages):
+                self.messages = messages
+
+            def __aiter__(self):
+                async def iterate():
+                    for message in self.messages:
+                        yield message
+                return iterate()
+
+        invalid_frames = (
+            '{"e":"depthUpdate","s":"ETHUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}',
+            '{"e":"aggTrade","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}',
+        )
+
+        async def run_collector():
+            queues = []
+            for frame in invalid_frames:
+                queue = asyncio.Queue()
+                await self.stream._collect_depth_events(FakeWebSocket([frame]), queue)
+                queues.append(queue)
+            return queues
+
+        queues = asyncio.run(run_collector())
+        self.assertEqual(self.stream.messages_received, 2)
+        self.assertEqual(self.stream.invalid_depth_message_count, 2)
+        for queue in queues:
+            self.assertIsNone(queue.get_nowait())
+            self.assertTrue(queue.empty())
 
     def test_collector_signals_termination_after_malformed_frame(self):
         class FakeWebSocket:
@@ -437,7 +478,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         async def run_collector():
             queue = asyncio.Queue()
             await self.stream._collect_depth_events(
-                FakeWebSocket(['{"U":100,"u":101,"pu":99,"b":[],"a":[]}', "{broken-json"]),
+                FakeWebSocket(['{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}', "{broken-json"]),
                 queue,
             )
             return await queue.get(), await queue.get()
@@ -463,7 +504,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         async def run_collector():
             queue = asyncio.Queue()
             await self.stream._collect_depth_events(
-                FakeWebSocket(['{"U":100,"u":101,"pu":99,"b":[],"a":[]}']),
+                FakeWebSocket(['{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}']),
                 queue,
             )
             return await queue.get(), await queue.get()
@@ -484,7 +525,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                         yield message
                 return iterate()
 
-        frame = '{"U":100,"u":101,"pu":99,"b":[],"a":[]}'
+        frame = '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}'
         async def run_collector():
             queue = asyncio.Queue(maxsize=2)
             await self.stream._collect_depth_events(
@@ -517,7 +558,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                         yield message
                 return iterate()
 
-        frame = '{"U":100,"u":101,"pu":99,"b":[],"a":[]}'
+        frame = '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[],"a":[]}'
         async def run_collector():
             queue = asyncio.Queue(maxsize=2)
             await self.stream._collect_depth_events(
