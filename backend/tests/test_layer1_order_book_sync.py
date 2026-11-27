@@ -52,6 +52,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(self.stream.asks[101.0], 6.0)
 
     def test_old_event_is_ignored_without_mutating_book(self):
+        self.stream.synchronized = True
         before_bids = dict(self.stream.bids)
         before_asks = dict(self.stream.asks)
         self.assertTrue(self.stream._apply_event(self.event(90, 100, bids=[["100.0", "99"]])))
@@ -62,6 +63,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
     def test_contiguous_event_with_previous_id_applies(self):
         e = self.event(102, 103, bids=[["100.0", "8"]], previous=101)
         self.stream.last_update_id = 101
+        self.stream.synchronized = True
         self.assertTrue(self.stream._apply_event(e))
         self.assertEqual(self.stream.last_update_id, 103)
         self.assertEqual(self.stream.bids[100.0], 8.0)
@@ -69,6 +71,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
     def test_previous_update_id_gap_forces_resync(self):
         e = self.event(102, 103, bids=[["100.0", "8"]], previous=100)
         self.stream.last_update_id = 101
+        self.stream.synchronized = True
         self.assertFalse(self.stream._apply_event(e))
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertEqual(self.stream.bids[100.0], 2.0)
@@ -76,6 +79,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
     def test_gap_without_previous_update_id_forces_resync(self):
         e = self.event(103, 104, asks=[["101.0", "8"]])
         self.stream.last_update_id = 101
+        self.stream.synchronized = True
         self.assertFalse(self.stream._apply_event(e))
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertEqual(self.stream.asks[101.0], 4.0)
@@ -85,6 +89,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         before_asks = dict(self.stream.asks)
         e = self.event(101, 102, asks=[["101.0", "0"], ["100.5", "3"]])
         self.stream.last_update_id = 101
+        self.stream.synchronized = True
         self.assertFalse(self.stream._apply_event(e))
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertEqual(self.stream.bids, before_bids)
@@ -93,6 +98,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
     def test_invalid_numeric_update_is_not_silently_applied(self):
         e = self.event(101, 102, bids=[["not-a-price", "2"]], previous=101)
         self.stream.last_update_id = 101
+        self.stream.synchronized = True
         with self.assertRaises((ValueError, TypeError)):
             self.stream._apply_event(e)
 
