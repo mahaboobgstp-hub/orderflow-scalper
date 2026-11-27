@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from app.market_data.unified_engine import UnifiedMarketDataEngine
-from app.exchanges.public_adapters import PublicExchangeAdapter
+from app.exchanges.public_adapters import DeltaPublicAdapter, PublicExchangeAdapter
 
 
 def bybit_snapshot(u=10, seq=100, bids=None, asks=None):
@@ -189,17 +189,95 @@ class Tests(unittest.TestCase):
             self.assertTrue(self.e.get_status()["books"]["bybit:BTCUSDT"]["stale"])
 
     def test_delta_exchange_snapshot_and_delta(self):
-        snapshot = {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]], "u": 1}}
+        snapshot = {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]], "seq": 100}}
         self.assertTrue(self.e.process("delta", snapshot)["synchronized"])
-        delta = {"type": "delta", "data": {"buy": [["100", "0"], ["99", "4"]], "sell": []}}
+        delta = {"type": "delta", "action": "update", "data": {"buy": [["100", "0"], ["99", "4"]], "sell": [], "seq": 101}}
         self.assertTrue(self.e.process("delta", delta)["synchronized"])
         self.assertEqual(self.e.get_book("delta", "BTCUSDT")["best_bid"], 99.0)
 
     def test_delta_exchange_crossed_update_invalidates(self):
-        self.e.process("delta", {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]]}})
-        result = self.e.process("delta", {"type": "delta", "data": {"buy": [["102", "1"]], "sell": []}})
+        self.e.process("delta", {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]], "seq": 100}})
+        result = self.e.process("delta", {"type": "delta", "action": "update", "data": {"buy": [["102", "1"]], "sell": [], "seq": 101}})
         self.assertTrue(result["resync_required"])
         self.assertFalse(self.e.get_book("delta", "BTCUSDT")["synchronized"])
+
+    def test_delta_ob_updates_snapshot_and_incremental_sequence_with_symbol_alias(self):
+        snapshot = {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD", "seq": 6199,
+                    "b": [["100", "2"]], "a": [["101", "3"]], "ts": 1700000000000000}
+        result = self.e.process("delta", snapshot)
+        self.assertTrue(result["synchronized"])
+        book = self.e.get_book("delta", "BTCUSD")
+        self.assertTrue(book["synchronized"])
+        self.assertEqual(book["sequence"], 6199)
+        self.assertEqual(book["best_bid"], 100.0)
+        self.assertEqual(book["best_ask"], 101.0)
+        self.assertEqual(book["exchange_timestamp_ms"], 1700000000000)
+
+        update = {"type": "ob_updates", "action": "update", "sy": "BTCUSD", "seq": 6200,
+                  "b": [["100", "0"], ["99", "4"]], "a": [["101", "0"], ["102", "3"]],
+                  "ts": 1700000000001000}
+        result = self.e.process("delta", update)
+        self.assertTrue(result["synchronized"])
+        book = self.e.get_book("delta", "BTCUSD")
+        self.assertEqual(book["sequence"], 6200)
+        self.assertEqual(book["best_bid"], 99.0)
+        self.assertEqual(book["best_ask"], 102.0)
+
+    def test_delta_ob_updates_gap_invalidates_and_requires_fresh_snapshot(self):
+        self.e.process("delta", {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD",
+                                 "seq": 1000, "b": [["100", "2"]], "a": [["101", "3"]]})
+        gap = self.e.process("delta", {"type": "ob_updates", "action": "update", "sy": "BTCUSD",
+                                       "seq": 1002, "b": [["99", "4"]], "a": []})
+        self.assertTrue(gap["resync_required"])
+        book = self.e.get_book("delta", "BTCUSD")
+        self.assertFalse(book["synchronized"])
+        self.assertEqual(book["bids"], [])
+        blocked = self.e.process("delta", {"type": "ob_updates", "action": "update", "sy": "BTCUSD",
+                                           "seq": 1003, "b": [["99", "4"]], "a": []})
+        self.assertTrue(blocked["resync_required"])
+        recovered = self.e.process("delta", {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD",
+                                            "seq": 2000, "b": [["100", "2"]], "a": [["101", "3"]]})
+        self.assertTrue(recovered["synchronized"])
+        next_update = self.e.process("delta", {"type": "ob_updates", "action": "update", "sy": "BTCUSD",
+                                               "seq": 2001, "b": [["99", "4"]], "a": []})
+        self.assertTrue(next_update["synchronized"])
+        self.assertEqual(self.e.get_book("delta", "BTCUSD")["best_bid"], 99.0)
+
+    def test_delta_ob_updates_rejects_missing_sequence_and_error_action(self):
+        missing = self.e.process("delta", {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD",
+                                          "b": [["100", "2"]], "a": [["101", "3"]]})
+        self.assertTrue(missing["resync_required"])
+        error = self.e.process("delta", {"type": "ob_updates", "action": "error", "sy": "BTCUSD",
+                                         "msg": "Snapshot load failed"})
+        self.assertTrue(error["resync_required"])
+        self.assertIn("Snapshot load failed", error["error"])
+
+    def test_delta_ob_l2_snapshot_only_channel_is_not_accepted_as_synced(self):
+        result = self.e.process("delta", {"type": "ob_l2", "sy": "BTCUSD",
+                                         "b": [["100", "2"]], "a": [["101", "3"]]})
+        self.assertTrue(result["resync_required"])
+        book = self.e.get_book("delta", "BTCUSD")
+        self.assertFalse(book["synchronized"])
+        self.assertEqual(book["bids"], [])
+        self.assertEqual(book["asks"], [])
+
+    def test_delta_trade_buyer_role_maps_aggressor_side_and_microsecond_timestamps(self):
+        base = 1700000000000000
+        maker_buyer = {"type": "trades", "sy": "BTCUSD", "p": "100.5", "s": "2",
+                      "r": "m", "t": base, "ts": base + 1234000}
+        result = self.e.process("delta", maker_buyer)
+        self.assertEqual(result["side"], "sell")
+        self.assertEqual(result["symbol"], "BTCUSD")
+        maker_buyer_trade = self.e.get_recent_trades("delta", "BTCUSD")[0]
+        self.assertEqual(maker_buyer_trade["exchange_timestamp_ms"], base // 1000)
+        self.assertEqual(maker_buyer_trade["quantity"], 2.0)
+
+        taker_buyer = {**maker_buyer, "r": "t", "t": base + 5000}
+        result = self.e.process("delta", taker_buyer)
+        self.assertEqual(result["side"], "buy")
+        recent = self.e.get_recent_trades("delta", "BTCUSD")
+        self.assertEqual(recent[-1]["side"], "buy")
+        self.assertEqual(recent[-1]["exchange_timestamp_ms"], (base + 5000) // 1000)
 
 
 class _FakeWS:
@@ -208,6 +286,13 @@ class _FakeWS:
 
     async def __aiter__(self):
         yield json.dumps(self.payload)
+
+class _CaptureWS:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, message):
+        self.sent.append(message)
 
 
 class _FakeConnection:
@@ -227,6 +312,17 @@ class _TestAdapter(PublicExchangeAdapter):
 
 
 class PublicAdapterResyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_delta_adapter_subscribes_to_sequenced_book_and_trade_channels(self):
+        adapter = DeltaPublicAdapter(True)
+        self.assertEqual(adapter.symbol, "BTCUSD")
+        self.assertIn("testnet", adapter.url)
+        ws = _CaptureWS()
+        await adapter._subscribe(ws)
+        payload = json.loads(ws.sent[0])
+        channels = payload["payload"]["channels"]
+        self.assertEqual([channel["name"] for channel in channels], ["ob_updates", "trades"])
+        self.assertEqual([channel["symbols"] for channel in channels], [["BTCUSD"], ["BTCUSD"]])
+
     async def test_resync_required_callback_forces_disconnect(self):
         adapter = _TestAdapter("test", True, "wss://test.invalid", on_message=None)
         adapter._stop.clear()
