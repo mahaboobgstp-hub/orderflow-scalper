@@ -417,6 +417,9 @@ class BinanceOrderBookStream:
         final_update_id = event.get("u")
         if not self._valid_update_id(first_update_id) or not self._valid_update_id(final_update_id):
             return False
+        # Reject malformed ranges (U must not exceed u) before stale-event handling.
+        if first_update_id > final_update_id:
+            return False
 
         # Ignore old events after validating their sequence ID types.
         if final_update_id <= self.last_update_id:

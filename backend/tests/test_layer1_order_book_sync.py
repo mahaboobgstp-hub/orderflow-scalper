@@ -39,6 +39,16 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
                 self.assertEqual(self.stream.bids, before_bids)
                 self.assertEqual(self.stream.asks, before_asks)
 
+    def test_reversed_update_id_range_rejected_without_mutation(self):
+        self.stream.last_update_id = 101
+        event = self.event(105, 104, bids=[["99.0", "9.0"]], previous=101)
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event(event))
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
     def test_snapshot_update_id_rejects_boolean_fractional_and_negative(self):
         valid_snapshot = {
             "bids": [["100.0", "2.0"]],
