@@ -299,7 +299,10 @@ def _feed_health_counts(exchange_connections, unified_market_data):
     for adapter in adapters:
         if not isinstance(adapter, dict):
             continue
-        if adapter.get("enabled", True) is False or adapter.get("connected") is not True:
+        # Preserve legacy adapters that omit enabled, but reject malformed
+        # explicit values instead of treating truthy strings/numbers as enabled.
+        enabled = adapter.get("enabled", True)
+        if enabled is not True or adapter.get("connected") is not True:
             continue
         age = adapter.get("last_message_age_seconds")
         if age is None or isinstance(age, bool):
