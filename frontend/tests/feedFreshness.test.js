@@ -84,7 +84,7 @@ test("legacy primary freshness is not inferred without valid book-age evidence",
   assert.equal(getPrimaryBookState({ ...legacy, last_book_update_age_seconds: 4 }), "STALE");
   assert.equal(getPrimaryBookState({ ...legacy, last_error: "integrity issue" }), "UNHEALTHY");
 });
-test("explicit primary integrity errors outrank missing or malformed book age", () => {
+test("explicit primary integrity errors outrank stale and missing-age classifications", () => {
   const base = { connected: true, synchronized: true, stale: false };
   for (const age of [null, undefined, Number.NaN, "invalid"]) {
     assert.equal(
@@ -97,7 +97,18 @@ test("explicit primary integrity errors outrank missing or malformed book age", 
       "UNHEALTHY",
       `age ${String(age)} with integrity error`,
     );
+    assert.equal(
+      getPrimaryBookState({ ...base, stale: true, last_book_update_age_seconds: age, last_error: "depth integrity failure" }),
+      "UNHEALTHY",
+      `stale age ${String(age)} with explicit error`,
+    );
+    assert.equal(
+      getPrimaryBookState({ ...base, stale: true, last_book_update_age_seconds: age, integrity_error: "crossed book" }),
+      "UNHEALTHY",
+      `stale age ${String(age)} with integrity error`,
+    );
   }
+  assert.equal(getPrimaryBookState({ ...base, stale: true, last_book_update_age_seconds: 4 }), "STALE");
   assert.equal(getPrimaryBookState({ ...base, last_book_update_age_seconds: null }), "AGE UNKNOWN");
 });
 
