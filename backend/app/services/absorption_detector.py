@@ -171,7 +171,8 @@ class AbsorptionLiquidityDetector:
             buy_share=self._safe_ratio(buy_qty,total_qty); sell_share=self._safe_ratio(sell_qty,total_qty)
             # Both favorable and adverse movement weaken the stall hypothesis.
             buy_absorption_score=buy_share*max(0.0,1.0-min(abs(buy_progress_pct)/0.10,1.0))
-            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))        calculated=(buy_progress_pct,sell_progress_pct,buy_absorption_score,sell_absorption_score)
+            sell_absorption_score=sell_share*max(0.0,1.0-min(abs(sell_progress_pct)/0.10,1.0))
+        calculated=(buy_progress_pct,sell_progress_pct,buy_absorption_score,sell_absorption_score)
         if any(not math.isfinite(value) for value in calculated):
             raise ValueError("Temporal absorption calculations produced non-finite values; analysis refused.")
         # Only record observations/baselines after numerical validation succeeds.
