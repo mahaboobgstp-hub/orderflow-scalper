@@ -275,6 +275,33 @@ def _is_fresh_synchronized_book(book, stale_after):
     return math.isfinite(age) and 0 <= age <= stale_after
 
 
+def _feed_diagnostics_error_count(exchange_connections):
+    """Count adapter records with explicit errors or malformed status flags.
+
+    Missing enabled is allowed for legacy adapters, but connected must be a
+    literal bool and an explicitly supplied enabled must also be a literal bool.
+    Count each adapter once even if multiple problems are present. Malformed
+    containers count as one diagnostics-schema error.
+    """
+    if not isinstance(exchange_connections, dict):
+        return 1
+    adapters = exchange_connections.get("exchanges", [])
+    if not isinstance(adapters, list):
+        return 1
+
+    errors = 0
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            errors += 1
+            continue
+        invalid_status = type(adapter.get("connected")) is not bool
+        if "enabled" in adapter and type(adapter["enabled"]) is not bool:
+            invalid_status = True
+        if invalid_status or bool(adapter.get("last_error")):
+            errors += 1
+    return errors
+
+
 def _feed_health_counts(exchange_connections, unified_market_data):
     """Separate message freshness from a fresh, integrity-verified order book.
 
@@ -347,10 +374,7 @@ async def market_data_observability():
         1 for book in books.values()
         if _is_fresh_synchronized_book(book, stale_after)
     )
-    feed_errors=sum(
-        1 for adapter in adapters
-        if not isinstance(adapter,dict) or bool(adapter.get("last_error"))
-    )
+    feed_errors=_feed_diagnostics_error_count(exchanges)
     return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
         "live_execution_enabled":False,"primary_binance_demo_stream":primary,
         "unified_market_data":unified,"exchange_connections":exchanges,
