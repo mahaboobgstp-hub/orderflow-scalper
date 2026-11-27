@@ -399,7 +399,7 @@ class BinanceOrderBookStream:
                 raise ValueError(f"Binance snapshot {side_name} contains boolean level values")
             try:
                 price, quantity = float(row[0]), float(row[1])
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError(f"Binance snapshot {side_name} contains nonnumeric levels") from exc
             if not math.isfinite(price) or price <= 0:
                 raise ValueError(f"Binance snapshot {side_name} contains an invalid price")
@@ -422,7 +422,7 @@ class BinanceOrderBookStream:
                 raise ValueError(f"Binance depth {side_name} contains boolean level values")
             try:
                 price, quantity = float(row[0]), float(row[1])
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError(f"Binance depth {side_name} contains nonnumeric levels") from exc
             if not math.isfinite(price) or price <= 0:
                 raise ValueError(f"Binance depth {side_name} contains an invalid price")
