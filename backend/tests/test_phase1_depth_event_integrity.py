@@ -13,6 +13,27 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
             "bids": [["100", "2"], ["99", "3"]],
             "asks": [["101", "4"], ["102", "5"]],
         })
+        # The fixtures below exercise live deltas against a valid synchronized
+        # session unless a test explicitly invalidates synchronization.
+        self.stream.synchronized = True
+
+
+    def test_live_delta_is_refused_after_sync_invalidation_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_update_id = self.stream.last_update_id
+        before_book_update_at = self.stream.last_book_update_at
+        self.stream.synchronized = False
+        event = {
+            "U": 101, "u": 102, "pu": 100,
+            "b": [["99.5", "7"]], "a": [],
+        }
+        self.assertFalse(self.stream._apply_event(event))
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_update_id)
+        self.assertEqual(self.stream.last_book_update_at, before_book_update_at)
+        self.assertEqual(self.stream.invalid_depth_message_count, 0)
 
     def test_valid_snapshot_establishes_book_freshness_timestamp(self):
         stream = BinanceOrderBookStream("BTCUSDT")
