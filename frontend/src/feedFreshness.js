@@ -13,6 +13,7 @@ export function effectiveFeedStaleCutoff(rawCutoff) {
 export function getMessageFeedState(adapter, staleAfterSeconds) {
   if (!adapter || typeof adapter !== "object" || Array.isArray(adapter)) return "UNKNOWN";
   if (adapter.enabled === false) return "DISABLED";
+  if (adapter.enabled !== undefined && adapter.enabled !== true) return "UNKNOWN";
   if (adapter.connected === false) return "DISCONNECTED";
   if (adapter.connected !== true) return "UNKNOWN";
 
