@@ -152,3 +152,8 @@ The frontend normalizes optional summary counters before rendering. Present coun
 ## Live delta guard after synchronization invalidation
 
 The live Binance depth consumer must re-check that the book remains synchronized before applying queued depth events. The collector invalidates synchronization in its termination handler before signaling the queue consumer; this ordering prevents a race where buffered events are consumed during the brief period before the collector task reports completion. Live event application also refuses to mutate the book while synchronization is invalidated. The snapshot bridge path is the only intentional exception and uses the separate overlap validation. This guard is not counted as a sequence gap or malformed payload because the session has already been invalidated and must reconnect for a fresh snapshot.
+
+
+## Diagnostic counter string normalization
+
+Frontend summary counters accept numeric values only when they are safe, nonnegative integers. Legacy string values are accepted only in trimmed decimal integer notation (digits only); hexadecimal, exponent, fractional, signed, negative, blank, boolean, object, and non-finite forms normalize to zero. This avoids JavaScript `Number()` coercions making malformed diagnostic counts look valid.
