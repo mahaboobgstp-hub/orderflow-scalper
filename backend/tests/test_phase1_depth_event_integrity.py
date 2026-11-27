@@ -34,7 +34,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         self.assertEqual(len(stream.asks), 5)
 
         self.assertTrue(stream._apply_event({
-            "U": 101, "u": 102,
+            "U": 101, "u": 102, "pu": 100,
             "b": [["100.5", "1"], ["95", "2"]],
             "a": [["100.9", "2"], ["105.5", "1"]],
         }))
@@ -64,7 +64,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         before_asks = dict(self.stream.asks)
         before_update_id = self.stream.last_update_id
         event = {
-            "U": 101, "u": 102,
+            "U": 101, "u": 102, "pu": 100,
             "b": [["99.5", "7"]],
             "a": [["NaN", "2"]],
         }
@@ -79,7 +79,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         before_asks = dict(self.stream.asks)
         before_update_id = self.stream.last_update_id
         event = {
-            "U": 101, "u": 102,
+            "U": 101, "u": 102, "pu": 100,
             "b": [["102", "1"]],
             "a": [["101", "1"]],
         }
@@ -94,9 +94,9 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         before_asks = dict(self.stream.asks)
         before_update_id = self.stream.last_update_id
         invalid_events = (
-            {"U": 101, "u": 102, "b": [[True, "1"]], "a": []},
-            {"U": 101, "u": 102, "b": [["99", True]], "a": []},
-            {"U": 101, "u": 102, "b": [], "a": [["101", False]]},
+            {"U": 101, "u": 102, "pu": 100, "b": [[True, "1"]], "a": []},
+            {"U": 101, "u": 102, "pu": 100, "b": [["99", True]], "a": []},
+            {"U": 101, "u": 102, "pu": 100, "b": [], "a": [["101", False]]},
         )
         for event in invalid_events:
             with self.subTest(event=event):
@@ -111,7 +111,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         before_asks = dict(self.stream.asks)
         before_update_id = self.stream.last_update_id
         with self.assertRaisesRegex(ValueError, "no level updates"):
-            self.stream._apply_event({"U": 101, "u": 102, "b": [], "a": []})
+            self.stream._apply_event({"U": 101, "u": 102, "pu": 100, "b": [], "a": []})
         self.assertEqual(self.stream.bids, before_bids)
         self.assertEqual(self.stream.asks, before_asks)
         self.assertEqual(self.stream.last_update_id, before_update_id)
@@ -119,14 +119,14 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
 
     def test_one_sided_depth_event_is_valid_and_counted_as_applied(self):
         before_asks = dict(self.stream.asks)
-        self.assertTrue(self.stream._apply_event({"U": 101, "u": 102, "b": [["99.5", "7"]], "a": []}))
+        self.assertTrue(self.stream._apply_event({"U": 101, "u": 102, "pu": 100, "b": [["99.5", "7"]], "a": []}))
         self.assertEqual(self.stream.bids[99.5], 7.0)
         self.assertEqual(self.stream.asks, before_asks)
         self.assertEqual(self.stream.invalid_depth_message_count, 0)
 
     def test_valid_two_sided_depth_event_applies_atomically(self):
         event = {
-            "U": 101, "u": 102,
+            "U": 101, "u": 102, "pu": 100,
             "b": [["100", "0"], ["99.5", "7"]],
             "a": [["101", "0"], ["100.5", "6"]],
         }
@@ -141,7 +141,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         before_bids = dict(self.stream.bids)
         before_asks = dict(self.stream.asks)
         event = {
-            "U": 101, "u": 102,
+            "U": 101, "u": 102, "pu": 100,
             "b": [["99.5", "7", "extra"]],
             "a": [],
         }

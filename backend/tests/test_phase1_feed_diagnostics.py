@@ -154,10 +154,25 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertFalse(self.stream._event_bridges_snapshot({"U": 98, "u": 99}))
         self.assertFalse(self.stream._event_bridges_snapshot({"U": 102, "u": 103}))
 
+    def test_live_depth_event_requires_previous_update_id(self):
+        self.stream._load_snapshot({
+            "lastUpdateId": 100,
+            "bids": [["100", "2"]],
+            "asks": [["101", "3"]],
+        })
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event({
+            "U": 101, "u": 102, "b": [["99.5", "1"]], "a": []
+        }))
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, 100)
+
     def test_sequence_gap_is_rejected_by_book_update(self):
         self.stream.last_update_id = 100
         self.assertFalse(self.stream._apply_event({
-            "U": 105, "u": 106, "b": [["100", "1"]], "a": []
+            "U": 105, "u": 106, "pu": 104, "b": [["100", "1"]], "a": []
         }))
         self.assertEqual(self.stream.last_update_id, 100)
 
@@ -352,6 +367,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             "{",
             "[]",
             '{"U":100}',
+            '{"U":100,"u":101,"b":[],"a":[]}',
             '{"U":102,"u":101}',
             '{"U":true,"u":101}',
             '{"U":100.5,"u":101}',
@@ -378,7 +394,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         async def run_collector():
             queue = asyncio.Queue()
             await self.stream._collect_depth_events(
-                FakeWebSocket(['{"U":100,"u":101,"b":[],"a":[]}', "{broken-json"]),
+                FakeWebSocket(['{"U":100,"u":101,"pu":99,"b":[],"a":[]}', "{broken-json"]),
                 queue,
             )
             return await queue.get(), await queue.get()
@@ -404,7 +420,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         async def run_collector():
             queue = asyncio.Queue()
             await self.stream._collect_depth_events(
-                FakeWebSocket(['{"U":100,"u":101,"b":[],"a":[]}']),
+                FakeWebSocket(['{"U":100,"u":101,"pu":99,"b":[],"a":[]}']),
                 queue,
             )
             return await queue.get(), await queue.get()
@@ -425,7 +441,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                         yield message
                 return iterate()
 
-        frame = '{"U":100,"u":101,"b":[],"a":[]}'
+        frame = '{"U":100,"u":101,"pu":99,"b":[],"a":[]}'
         async def run_collector():
             queue = asyncio.Queue(maxsize=2)
             await self.stream._collect_depth_events(
@@ -458,7 +474,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                         yield message
                 return iterate()
 
-        frame = '{"U":100,"u":101,"b":[],"a":[]}'
+        frame = '{"U":100,"u":101,"pu":99,"b":[],"a":[]}'
         async def run_collector():
             queue = asyncio.Queue(maxsize=2)
             await self.stream._collect_depth_events(
