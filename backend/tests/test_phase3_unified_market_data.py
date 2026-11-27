@@ -193,7 +193,8 @@ class Tests(unittest.TestCase):
         self.assertTrue(self.e.process("delta", delta)["synchronized"])
         self.assertEqual(self.e.get_book("delta", "BTCUSDT")["best_bid"], 99.0)
 
-    def test_delta_exchange_crossed_update_invalidates(self        self.e.process("delta", {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]]}})
+    def test_delta_exchange_crossed_update_invalidates(self):
+        self.e.process("delta", {"type": "snapshot", "data": {"buy": [["100", "2"]], "sell": [["101", "3"]]}})
         result = self.e.process("delta", {"type": "delta", "data": {"buy": [["102", "1"]], "sell": []}})
         self.assertTrue(result["resync_required"])
         self.assertFalse(self.e.get_book("delta", "BTCUSDT")["synchronized"])
