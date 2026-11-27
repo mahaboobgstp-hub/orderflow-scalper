@@ -615,6 +615,7 @@ class BinanceOrderBookStream:
             "last_recovery_age_seconds": round(recovery_age, 3) if recovery_age is not None else None,
             "messages_received": self.messages_received,
             "invalid_depth_message_count": self.invalid_depth_message_count,
+            "snapshot_buffer_overflow_count": self.snapshot_buffer_overflow_count,
             "snapshot_count": self.snapshot_count,
             "sequence_gap_count": self.sequence_gap_count,
         }
