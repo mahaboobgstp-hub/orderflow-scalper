@@ -87,3 +87,7 @@ The primary demo-stream snapshot_limit accepts only Binance USD-M Futures depth 
 ## Primary Feed Monitor frontend age gate
 
 The frontend primary-book classification must not infer freshness from `healthy: true` or the legacy `stale: false` flag alone. It requires explicit connectivity and synchronization, an explicit non-stale flag, and a finite nonnegative `last_book_update_age_seconds` within the normalized stale cutoff. Missing or malformed age is displayed as `AGE UNKNOWN` and must not be counted as fresh. The legacy classification is retained only when valid book-age evidence is present. This is a UI defense-in-depth gate; the backend remains authoritative for book integrity.
+
+## Primary Feed Monitor error precedence
+
+For a connected and synchronized primary book with an explicit `integrity_error` or `last_error`, the frontend displays `UNHEALTHY` before age validation. Missing or malformed age alone still displays `AGE UNKNOWN`. Disconnected, unsynchronized, and explicitly stale states retain their existing precedence. This avoids hiding known integrity/runtime errors behind an unknown-age label.
