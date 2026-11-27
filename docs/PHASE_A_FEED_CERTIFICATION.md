@@ -137,3 +137,8 @@ When the primary Binance depth WebSocket collector terminates (normal close, mal
 ## Primary-book display state mapping
 
 The primary-book status label is derived from the freshness classifier instead of a fallback that labels every synchronized-but-not-healthy state as stale. This distinguishes `STALE`, `UNHEALTHY`, `AGE UNKNOWN`, `UNSYNCHRONIZED`, `DISCONNECTED`, healthy (including legacy freshness-only payloads), and unknown status to avoid overstating diagnostics.
+
+
+## Feed Monitor payload-shape guard
+
+The Feed Monitor normalizes the consolidated diagnostics payload before rendering. Non-object payload containers fall back to empty objects, non-array adapter collections fall back to empty lists, and malformed adapter/book/exchange-stat entries are normalized to empty objects. Valid diagnostic records are preserved. This prevents malformed or legacy schema shapes from crashing the monitor UI while keeping the existing unknown/empty-state behavior; it does not convert malformed records into fresh or healthy status.
