@@ -13,6 +13,11 @@ test("invalid message ages never appear fresh", () => {
   }
 });
 
+test("positive stale cutoff uses the backend minimum clamp", () => {
+  assert.equal(isFreshMessageFeed({ connected: true, last_message_age_seconds: 0.08 }, 0.05), true);
+  assert.equal(isFreshMessageFeed({ connected: true, last_message_age_seconds: 0.1001 }, 0.05), false);
+});
+
 test("invalid or missing cutoff uses the backend three-second default", () => {
   for (const cutoff of [undefined, null, true, false, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, "invalid", ""]) {
     assert.equal(isFreshMessageFeed({ connected: true, last_message_age_seconds: 2.5 }, cutoff), true, `cutoff ${String(cutoff)}`);
