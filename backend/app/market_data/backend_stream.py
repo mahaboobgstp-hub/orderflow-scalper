@@ -337,6 +337,30 @@ class BinanceOrderBookStream:
         """Binance update IDs are non-negative integer sequence values, not coercible numbers."""
         return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
+    @staticmethod
+    def _parse_levels(raw: Any) -> list[tuple[float, float]]:
+        """Validate depth levels before any book mutation."""
+        if not isinstance(raw, (list, tuple)):
+            raise ValueError("Depth levels must be a list.")
+        parsed = []
+        for row in raw:
+            if not isinstance(row, (list, tuple)) or len(row) != 2:
+                raise ValueError("Depth level must contain price and quantity.")
+            raw_price, raw_quantity = row
+            if isinstance(raw_price, bool) or isinstance(raw_quantity, bool):
+                raise ValueError("Depth level values cannot be boolean.")
+            try:
+                price = float(raw_price)
+                quantity = float(raw_quantity)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Depth level values must be numeric.") from exc
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError("Depth price must be positive and finite.")
+            if not math.isfinite(quantity) or quantity < 0:
+                raise ValueError("Depth quantity must be non-negative and finite.")
+            parsed.append((price, quantity))
+        return parsed
+
     def _load_snapshot(self, snapshot: dict[str, Any]):
         if not isinstance(snapshot, dict):
             raise ValueError("Depth snapshot must be an object.")
@@ -344,17 +368,18 @@ class BinanceOrderBookStream:
         if not self._valid_update_id(raw_update_id):
             raise ValueError("Snapshot lastUpdateId must be a non-negative integer.")
 
-        self.bids = {
-            float(price): float(quantity)
-            for price, quantity in snapshot.get("bids", [])
-            if float(quantity) > 0
-        }
+        try:
+            parsed_bids = self._parse_levels(snapshot.get("bids", []))
+            parsed_asks = self._parse_levels(snapshot.get("asks", []))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Snapshot contains invalid depth levels.") from exc
 
-        self.asks = {
-            float(price): float(quantity)
-            for price, quantity in snapshot.get("asks", [])
-            if float(quantity) > 0
-        }
+        # Build both sides before replacing the existing state, so a malformed
+        # snapshot cannot leave a partially loaded book.
+        new_bids = {price: quantity for price, quantity in parsed_bids if quantity > 0}
+        new_asks = {price: quantity for price, quantity in parsed_asks if quantity > 0}
+        self.bids = new_bids
+        self.asks = new_asks
 
         self.last_update_id = raw_update_id
 
@@ -434,15 +459,20 @@ class BinanceOrderBookStream:
             if previous_final_id != self.last_update_id:
                 return False
 
-        self._update_levels(
-            self.bids,
-            event.get("b", []),
-        )
+        try:
+            bid_updates = self._parse_levels(event.get("b", []))
+            ask_updates = self._parse_levels(event.get("a", []))
+        except (TypeError, ValueError, OverflowError):
+            return False
 
-        self._update_levels(
-            self.asks,
-            event.get("a", []),
-        )
+        # Apply validated updates to copies; malformed events cannot mutate one
+        # side of the book before failing on the other.
+        next_bids = dict(self.bids)
+        next_asks = dict(self.asks)
+        self._update_levels(next_bids, bid_updates)
+        self._update_levels(next_asks, ask_updates)
+        self.bids = next_bids
+        self.asks = next_asks
 
         self.last_update_id = final_update_id
         # A progressing, accepted depth event—not mere message receipt—refreshes
@@ -454,12 +484,9 @@ class BinanceOrderBookStream:
     @staticmethod
     def _update_levels(
         book: dict[float, float],
-        updates: list[list[str]],
+        updates: list[tuple[float, float]],
     ):
-        for price_text, quantity_text in updates:
-            price = float(price_text)
-            quantity = float(quantity_text)
-
+        for price, quantity in updates:
             if quantity == 0:
                 book.pop(price, None)
             else:

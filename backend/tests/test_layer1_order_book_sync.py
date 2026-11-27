@@ -127,11 +127,52 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertEqual(self.stream.asks, before_asks)
 
-    def test_invalid_numeric_update_is_not_silently_applied(self):
+    def test_invalid_numeric_update_is_rejected_without_mutation(self):
         e = self.event(101, 102, bids=[["not-a-price", "2"]], previous=101)
         self.stream.last_update_id = 101
-        with self.assertRaises((ValueError, TypeError)):
-            self.stream._apply_event(e)
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event(e))
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
+    def test_nonfinite_and_negative_depth_updates_rejected_atomically(self):
+        self.stream.last_update_id = 100
+        invalid_cases = [
+            ([["99.5", "7.0"]], [["101.0", "NaN"]]),  # valid bid must not apply
+            ([["NaN", "2.0"]], []),
+            ([["99.0", "Infinity"]], []),
+            ([["99.0", "-1.0"]], []),
+            ([["-99.0", "2.0"]], []),
+            ([["99.0", True]]], []),
+        ]
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        for bids, asks in invalid_cases:
+            with self.subTest(bids=bids, asks=asks):
+                event = self.event(101, 102, bids=bids, asks=asks, previous=100)
+                self.assertFalse(self.stream._apply_event(event))
+                self.assertEqual(self.stream.last_update_id, 100)
+                self.assertEqual(self.stream.bids, before_bids)
+                self.assertEqual(self.stream.asks, before_asks)
+
+    def test_invalid_snapshot_levels_rejected_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_id = self.stream.last_update_id
+        before_snapshot_count = self.stream.snapshot_count
+        bad_snapshot = {
+            "lastUpdateId": 200,
+            "bids": [["99.0", "1.0"]],
+            "asks": [["NaN", "2.0"]],
+        }
+        with self.assertRaisesRegex(ValueError, "invalid depth levels"):
+            self.stream._load_snapshot(bad_snapshot)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_id)
+        self.assertEqual(self.stream.snapshot_count, before_snapshot_count)
 
     def test_stale_book_is_not_returned(self):
         self.stream.connected = True
