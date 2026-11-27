@@ -158,12 +158,13 @@ test("primary book display label preserves classifier distinctions", () => {
 test("monitor payload safely normalizes malformed containers", () => {
   const empty = {
     payload: {
-      summary: {},
+      mode: "Unknown",
+      summary: { safety: "PUBLIC FEEDS ONLY" },
       unified_market_data: { books: {}, exchanges: {} },
       exchange_connections: { exchanges: [] },
       primary_binance_demo_stream: {},
     },
-    summary: {},
+    summary: { safety: "PUBLIC FEEDS ONLY" },
     unified: { books: {}, exchanges: {} },
     adapterList: [],
     books: {},
@@ -178,13 +179,14 @@ test("monitor payload safely normalizes malformed containers", () => {
     exchange_connections: { exchanges: "not-an-array" },
     primary_binance_demo_stream: [],
   });
-  assert.deepEqual(malformed.summary, {});
+  assert.deepEqual(malformed.summary, { safety: "PUBLIC FEEDS ONLY" });
   assert.deepEqual(malformed.unified, { books: {}, exchanges: {} });
   assert.deepEqual(malformed.adapterList, []);
   assert.deepEqual(malformed.books, {});
   assert.deepEqual(malformed.exchangeStats, {});
   assert.deepEqual(malformed.primary, {});
-  assert.deepEqual(malformed.payload.summary, {});
+  assert.deepEqual(malformed.payload.summary, { safety: "PUBLIC FEEDS ONLY" });
+  assert.equal(malformed.payload.mode, "Unknown");
   assert.deepEqual(malformed.payload.unified_market_data, { books: {}, exchanges: {} });
   assert.deepEqual(malformed.payload.exchange_connections, { exchanges: [] });
   assert.deepEqual(malformed.payload.primary_binance_demo_stream, {});
@@ -207,7 +209,7 @@ test("monitor payload preserves valid fields while normalizing malformed list en
   const normalized = normalizeFeedMonitorPayload(payload);
   assert.notEqual(normalized.payload, payload);
   assert.equal(normalized.payload.mode, payload.mode);
-  assert.equal(normalized.payload.summary, payload.summary);
+  assert.deepEqual(normalized.payload.summary, { fresh_message_feed_count: 2, safety: "PUBLIC FEEDS ONLY" });
   assert.equal(normalized.summary.fresh_message_feed_count, 2);
   assert.equal(normalized.adapterList.length, 3);
   assert.deepEqual(normalized.adapterList[1], {});
