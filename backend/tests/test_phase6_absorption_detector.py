@@ -334,6 +334,31 @@ class Phase6SpatialVwapAndApiTests(unittest.TestCase):
         self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
 
 class Phase6NumericOverflowTests(unittest.TestCase):
+    def test_absorption_api_refuses_binance_book_without_snapshot_bridge(self):
+        import asyncio
+        from fastapi import HTTPException
+        from app import main
+        from app.market_data.unified_engine import UnifiedMarketDataEngine
+
+        engine = UnifiedMarketDataEngine()
+        result = engine.process("binance", {
+            "e": "depthUpdate", "s": "BTCUSDT", "U": 101, "u": 102,
+            "b": [["100.0", "1.0"]], "a": [["101.0", "2.0"]]
+        })
+        self.assertFalse(result["synchronized"])
+        unsafe_book = engine.get_book("binance", "BTCUSDT")
+        self.assertFalse(unsafe_book["synchronized"])
+        class MarketStub:
+            def get_book(self, exchange, symbol):
+                return unsafe_book
+            def get_recent_trades(self, exchange, symbol, limit):
+                return trades("buy", count=8)
+        with patch.object(main.app.state, "unified_market_data", MarketStub(), create=True), \
+             patch.object(main.app.state, "absorption_detector", AbsorptionLiquidityDetector(), create=True):
+            with self.assertRaises(HTTPException) as exc:
+                asyncio.run(main.analyze_absorption("binance", "BTCUSDT", 15, 500))
+        self.assertEqual(exc.exception.status_code, 422)
+
     def test_finite_depth_change_that_overflows_percentage_is_refused_without_mutating_history(self):
         detector = AbsorptionLiquidityDetector()
         now_ms = 1_000_000
