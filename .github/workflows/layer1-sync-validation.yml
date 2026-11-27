@@ -4,7 +4,10 @@ on:
     branches: [main]
     paths:
       - "backend/app/market_data/backend_stream.py"
+      - "backend/app/market_data/unified_engine.py"
+      - "backend/app/exchanges/public_adapters.py"
       - "backend/tests/test_layer1_order_book_sync.py"
+      - "backend/tests/test_phase3_unified_market_data.py"
       - ".github/workflows/layer1-sync-validation.yml"
   pull_request:
     branches: [main]
@@ -28,4 +31,4 @@ jobs:
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -q tests/test_layer1_order_book_sync.py tests/test_phase5_imbalance_detector.py
+        run: pytest -q tests/test_layer1_order_book_sync.py tests/test_phase3_unified_market_data.py tests/test_phase5_imbalance_detector.py
