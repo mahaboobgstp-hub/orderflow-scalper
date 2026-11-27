@@ -220,6 +220,7 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         self.assertEqual(self.stream.bids, before_bids)
         self.assertEqual(self.stream.asks, before_asks)
         self.assertEqual(self.stream.last_update_id, before_update_id)
+        self.assertEqual(self.stream.last_book_update_at, before_book_update_at)
         self.assertEqual(self.stream.invalid_depth_message_count, 1)
 
 
