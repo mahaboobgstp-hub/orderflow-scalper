@@ -168,11 +168,11 @@ class BinanceOrderBookStream:
             raise ValueError("Binance depth frame must be a JSON object")
         try:
             first_raw, final_raw = event["U"], event["u"]
-            if isinstance(first_raw, bool) or isinstance(final_raw, bool):
-                raise ValueError("Update IDs must be integer values")
-            if not isinstance(first_raw, (int, str)) or not isinstance(final_raw, (int, str)):
-                raise ValueError("Update IDs must be integer values")
-            first_update_id, final_update_id = int(first_raw), int(final_raw)
+            if isinstance(first_raw, bool) or not isinstance(first_raw, int):
+                raise ValueError("Update ID U must be a JSON integer")
+            if isinstance(final_raw, bool) or not isinstance(final_raw, int):
+                raise ValueError("Update ID u must be a JSON integer")
+            first_update_id, final_update_id = first_raw, final_raw
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("Depth frame must contain valid integer U/u update IDs") from exc
         if first_update_id < 0 or final_update_id < first_update_id:
@@ -180,12 +180,9 @@ class BinanceOrderBookStream:
         if "pu" not in event:
             raise ValueError("Depth frame must contain previous update ID pu")
         previous_raw = event["pu"]
-        if isinstance(previous_raw, bool) or not isinstance(previous_raw, (int, str)):
-            raise ValueError("Previous update ID pu must be an integer value")
-        try:
-            previous_update_id = int(previous_raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Previous update ID pu must be an integer value") from exc
+        if isinstance(previous_raw, bool) or not isinstance(previous_raw, int):
+            raise ValueError("Previous update ID pu must be a JSON integer")
+        previous_update_id = previous_raw
         if previous_update_id < 0:
             raise ValueError("Depth frame has an invalid previous update ID pu")
         return event
