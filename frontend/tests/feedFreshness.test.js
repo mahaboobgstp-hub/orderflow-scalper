@@ -167,12 +167,22 @@ test("monitor payload safely normalizes malformed containers", () => {
   };
   assert.deepEqual(normalizeFeedMonitorPayload(null), empty);
   assert.deepEqual(normalizeFeedMonitorPayload([]), empty);
-  assert.deepEqual(normalizeFeedMonitorPayload({
+  const malformed = normalizeFeedMonitorPayload({
     summary: [],
     unified_market_data: [],
     exchange_connections: { exchanges: "not-an-array" },
     primary_binance_demo_stream: [],
-  }), empty);
+  });
+  assert.deepEqual(malformed.summary, {});
+  assert.deepEqual(malformed.unified, {});
+  assert.deepEqual(malformed.adapterList, []);
+  assert.deepEqual(malformed.books, {});
+  assert.deepEqual(malformed.exchangeStats, {});
+  assert.deepEqual(malformed.primary, {});
+  assert.deepEqual(malformed.payload.summary, {});
+  assert.deepEqual(malformed.payload.unified_market_data, {});
+  assert.deepEqual(malformed.payload.exchange_connections, { exchanges: [] });
+  assert.deepEqual(malformed.payload.primary_binance_demo_stream, {});
 });
 
 test("monitor payload preserves valid fields while normalizing malformed list entries", () => {
