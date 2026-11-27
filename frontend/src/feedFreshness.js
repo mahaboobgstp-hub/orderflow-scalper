@@ -21,7 +21,14 @@ export function normalizeFeedMonitorPayload(rawPayload) {
     Object.entries(asRecord(unified.exchanges)).map(([key, stats]) => [key, asRecord(stats)]),
   );
   const primary = asRecord(payload.primary_binance_demo_stream);
-  return { payload, summary, unified, adapterList, books, exchangeStats, primary };
+  const normalizedPayload = {
+    ...payload,
+    summary,
+    unified_market_data: { ...unified, books, exchanges: exchangeStats },
+    exchange_connections: { ...exchangeConnections, exchanges: adapterList },
+    primary_binance_demo_stream: primary,
+  };
+  return { payload: normalizedPayload, summary, unified: normalizedPayload.unified_market_data, adapterList, books, exchangeStats, primary };
 }
 
 export function effectiveFeedStaleCutoff(rawCutoff) {
