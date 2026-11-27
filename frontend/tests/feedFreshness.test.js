@@ -218,3 +218,35 @@ test("monitor payload preserves valid fields while normalizing malformed list en
   assert.deepEqual(normalized.exchangeStats.malformed, {});
   assert.equal(normalized.primary.connected, true);
 });
+
+
+test("monitor summary sanitizes malformed counters and non-string labels", () => {
+  const normalized = normalizeFeedMonitorPayload({
+    mode: { unexpected: "object" },
+    summary: {
+      exchange_adapter_count: "7",
+      unified_book_count: -1,
+      synchronized_book_count: true,
+      fresh_message_feed_count: {},
+      healthy_feed_count: "3.5",
+      feed_errors: Number.POSITIVE_INFINITY,
+      safety: ["unexpected"],
+    },
+  });
+  assert.equal(normalized.payload.mode, "Unknown");
+  assert.equal(normalized.summary.exchange_adapter_count, 7);
+  assert.equal(normalized.summary.unified_book_count, 0);
+  assert.equal(normalized.summary.synchronized_book_count, 0);
+  assert.equal(normalized.summary.fresh_message_feed_count, 0);
+  assert.equal(normalized.summary.healthy_feed_count, 0);
+  assert.equal(normalized.summary.feed_errors, 0);
+  assert.equal(normalized.summary.safety, "PUBLIC FEEDS ONLY");
+});
+
+test("legacy summary without fresh-message counter keeps healthy-count fallback", () => {
+  const normalized = normalizeFeedMonitorPayload({
+    summary: { healthy_feed_count: "2" },
+  });
+  assert.equal(Object.hasOwn(normalized.summary, "fresh_message_feed_count"), false);
+  assert.equal(normalized.summary.healthy_feed_count, 2);
+});
