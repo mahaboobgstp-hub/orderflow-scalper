@@ -76,6 +76,11 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
     def test_snapshot_bridge_accepts_event_without_snapshot_pu_match(self):
         with patch("app.market_data.backend_stream.time.time", return_value=50.0):
+            self.stream._load_snapshot({
+                "lastUpdateId": 100,
+                "bids": [["99.0", "2"]],
+                "asks": [["101.0", "3"]],
+            })
             self.stream.last_update_id = 100
             self.stream.successful_connection_count = 1
             event = {"U": 100, "u": 101, "pu": 99, "b": [["100", "1"]], "a": []}
@@ -96,6 +101,11 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
 
     def test_live_events_enforce_pu_after_snapshot_bridge(self):
+        self.stream._load_snapshot({
+            "lastUpdateId": 100,
+            "bids": [["99.0", "2"]],
+            "asks": [["101.0", "3"]],
+        })
         self.stream.last_update_id = 100
         bridge = {"U": 100, "u": 101, "pu": 99, "b": [], "a": []}
         self.assertTrue(self.stream._apply_snapshot_bridge(bridge))
