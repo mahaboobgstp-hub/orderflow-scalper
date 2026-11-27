@@ -349,8 +349,10 @@ class BinanceOrderBookStream:
                         self.synchronized_since = None
                         self.last_error = self.last_error or "WebSocket stream ended after synchronization"
                         return
-                    if collector_task.done():
-                        # Do not apply leftover queue items after stream termination.
+                    if collector_task.done() or not self.synchronized:
+                        # Collector termination invalidates synchronization before
+                        # its sentinel is consumed. Do not apply leftover events
+                        # during that race or misclassify termination as a gap.
                         self.synchronized = False
                         self.synchronized_since = None
                         self.last_error = self.last_error or "WebSocket stream ended after synchronization"
@@ -508,6 +510,11 @@ class BinanceOrderBookStream:
         """
 
         if self.last_update_id is None:
+            return False
+        # Live deltas must not mutate a book after collector termination has
+        # invalidated synchronization. Snapshot bridge application explicitly
+        # bypasses this guard via validate_previous_sequence=False.
+        if validate_previous_sequence and not self.synchronized:
             return False
 
         first_update_id = int(event["U"])
