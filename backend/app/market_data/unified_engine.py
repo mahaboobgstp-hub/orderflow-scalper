@@ -258,7 +258,7 @@ class UnifiedMarketDataEngine:
             return result
         if not isinstance(data, dict):
             return None
-        symbol = str(data.get("s") or data.get("sy") or data.get("symbol") or default_symbol).upper()
+        symbol = str(data.get("sy") or data.get("symbol") or data.get("s") or default_symbol).upper()
         raw_timestamp = raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts")
         ts = self.as_int(raw_timestamp)
         if ex == "delta" and ts is not None and ts > 10**13:
