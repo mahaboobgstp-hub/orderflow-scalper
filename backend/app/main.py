@@ -220,18 +220,47 @@ async def get_order_book():
     book=await app.state.market_stream.get_order_book()
     if book is None: raise HTTPException(status_code=503,detail="Order book is not synchronized yet.")
     return {"symbol":"BTCUSDT","order_book":book}
-def _feed_health_counts(exchange_connections, unified_market_data):
-    """Separate message freshness from a fully synchronized, fresh order book."""
-    raw_stale_after = unified_market_data.get("stale_after_seconds", 3.0)
+def _normalize_feed_stale_after(raw_stale_after):
+    """Normalize diagnostic freshness cutoffs to the engine's safe policy."""
     try:
         if isinstance(raw_stale_after, bool):
             raise ValueError("boolean stale cutoff is invalid")
         stale_after = float(raw_stale_after)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         stale_after = 3.0
     if not math.isfinite(stale_after) or stale_after <= 0:
         stale_after = 3.0
+    return max(0.1, stale_after)
+
+
+def _is_fresh_synchronized_book(book, stale_after):
+    """Require explicit, valid book-age evidence before counting a book healthy."""
+    if not isinstance(book, dict):
+        return False
+    if (
+        book.get("synchronized") is not True
+        or book.get("stale") is not False
+        or book.get("integrity_error")
+    ):
+        return False
+    raw_age = book.get("age_seconds")
+    if raw_age is None or isinstance(raw_age, bool):
+        return False
+    try:
+        age = float(raw_age)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(age) and 0 <= age <= stale_after
+
+
+def _feed_health_counts(exchange_connections, unified_market_data):
+    """Separate message freshness from a fresh, integrity-verified order book."""
+    stale_after = _normalize_feed_stale_after(
+        unified_market_data.get("stale_after_seconds", 3.0)
+    )
     books = unified_market_data.get("books", {})
+    if not isinstance(books, dict):
+        books = {}
     fresh_message_feed_count = 0
     healthy_feed_count = 0
 
@@ -239,13 +268,11 @@ def _feed_health_counts(exchange_connections, unified_market_data):
         if adapter.get("enabled", True) is False or not adapter.get("connected"):
             continue
         age = adapter.get("last_message_age_seconds")
-        if age is None:
-            continue
-        if isinstance(age, bool):
+        if age is None or isinstance(age, bool):
             continue
         try:
             age = float(age)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
         if not math.isfinite(age) or age < 0 or age > stale_after:
             continue
@@ -253,12 +280,8 @@ def _feed_health_counts(exchange_connections, unified_market_data):
         fresh_message_feed_count += 1
         exchange = str(adapter.get("exchange", "")).lower()
         symbol = str(adapter.get("symbol", "")).upper()
-        book = books.get(f"{exchange}:{symbol}", {})
-        if (
-            book.get("synchronized") is True
-            and book.get("stale") is False
-            and not book.get("integrity_error")
-        ):
+        book = books.get(f"{exchange}:{symbol}")
+        if _is_fresh_synchronized_book(book, stale_after):
             healthy_feed_count += 1
 
     return {
@@ -274,12 +297,20 @@ async def market_data_observability():
     primary=await app.state.market_stream.get_status()
     exchanges=await app.state.exchange_manager.status()
     feed_counts = _feed_health_counts(exchanges, unified)
+    books = unified.get("books", {})
+    if not isinstance(books, dict):
+        books = {}
+    stale_after = _normalize_feed_stale_after(unified.get("stale_after_seconds", 3.0))
+    synchronized_book_count = sum(
+        1 for book in books.values()
+        if _is_fresh_synchronized_book(book, stale_after)
+    )
     return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
         "live_execution_enabled":False,"primary_binance_demo_stream":primary,
         "unified_market_data":unified,"exchange_connections":exchanges,
         "summary":{"exchange_adapter_count":len(exchanges.get("exchanges",[])),
-          "unified_book_count":len(unified.get("books",{})),
-          "synchronized_book_count":sum(1 for b in unified.get("books",{}).values() if b.get("synchronized") and not b.get("stale") and not b.get("integrity_error")),
+          "unified_book_count":len(books),
+          "synchronized_book_count":synchronized_book_count,
           **feed_counts,
           "feed_errors":sum(1 for e in exchanges.get("exchanges",[]) if e.get("last_error")),
           "safety":"PUBLIC_FEEDS_ONLY; REAL_EXCHANGE_ORDERS_DISABLED"}}
