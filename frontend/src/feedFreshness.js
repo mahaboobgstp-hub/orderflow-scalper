@@ -110,10 +110,11 @@ export function getPrimaryBookState(primary, staleAfterSeconds) {
   if (primary.connected === false) return "DISCONNECTED";
   if (primary.connected !== true) return "UNKNOWN";
   if (primary.synchronized !== true) return "UNSYNCHRONIZED";
+  // Known integrity/runtime failures take precedence over a stale flag: stale is
+  // a freshness diagnosis, while an error means the current book is unusable.
+  if (primary.integrity_error || primary.last_error) return "UNHEALTHY";
   if (primary.stale === true) return "STALE";
   if (primary.stale !== false) return "UNKNOWN";
-  // An explicit integrity/runtime error takes precedence over missing age data.
-  if (primary.integrity_error || primary.last_error) return "UNHEALTHY";
 
   const rawAge = primary.last_book_update_age_seconds;
   if (rawAge == null || typeof rawAge === "boolean" || (typeof rawAge === "string" && rawAge.trim() === "")) {
