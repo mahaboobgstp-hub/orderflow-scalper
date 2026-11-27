@@ -127,3 +127,8 @@ A successfully validated REST snapshot establishes the primary order-book freshn
 ## Overflow-safe numeric conversion in depth validation
 
 REST snapshots and WebSocket depth levels are parsed atomically. Numeric conversion overflow (for example, an unbounded JSON integer that cannot be represented as a finite float) is treated as malformed level data and normalized to a validation `ValueError`, rather than escaping as an unexpected `OverflowError`. Rejected snapshots preserve the previously loaded book and snapshot count; rejected live updates preserve bids, asks, and update ID, and are counted as invalid depth messages.
+
+
+## Fail-closed collector termination and buffer loss
+
+When the primary Binance depth WebSocket collector terminates (normal close, malformed frame, or queue overflow), synchronized-book availability is invalidated before the termination sentinel is delivered. A snapshot bridge is not allowed to restore synchronization after the collector has already ended; the connection loop must reconnect and obtain a new snapshot. After the live collector has ended, queued events are not applied as if the stream were still active. Deterministic tests cover invalid-frame termination, bounded-buffer overflow, normal close, and a closed collector during snapshot bridging. This is fail-closed behavior: it preserves diagnostic freshness timestamps but prevents the read-only book endpoint from serving a book as synchronized.

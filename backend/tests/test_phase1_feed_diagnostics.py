@@ -10,6 +10,20 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.stream = BinanceOrderBookStream(symbol="BTCUSDT")
 
+    def _prime_synchronized_book(self):
+        with patch("app.market_data.backend_stream.time.time", return_value=100.0):
+            self.stream._record_connection_success(now=100.0)
+            self.stream._load_snapshot({
+                "lastUpdateId": 100,
+                "bids": [["100", "2"]],
+                "asks": [["101", "3"]],
+            })
+            self.assertTrue(self.stream._apply_snapshot_bridge({
+                "U": 100, "u": 101, "pu": 99,
+                "b": [["99.5", "1"]], "a": [],
+            }))
+        self.assertTrue(self.stream.synchronized)
+
     def test_status_contains_feed_health_metrics(self):
         status = __import__("asyncio").run(self.stream.get_status())
         self.assertFalse(status["connected"])
@@ -434,6 +448,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(event["s"], "btcusdt")
 
     def test_collector_rejects_wrong_symbol_or_event_type(self):
+        self._prime_synchronized_book()
         class FakeWebSocket:
             def __init__(self, messages):
                 self.messages = messages
@@ -463,6 +478,10 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         for queue in queues:
             self.assertIsNone(queue.get_nowait())
             self.assertTrue(queue.empty())
+        self.assertFalse(self.stream.synchronized)
+        self.assertIsNone(self.stream.synchronized_since)
+        with patch("app.market_data.backend_stream.time.time", return_value=100.5):
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
     def test_collector_signals_termination_after_malformed_frame(self):
         class FakeWebSocket:
@@ -515,6 +534,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(self.stream.last_error)
 
     def test_collector_overflow_discards_partial_buffer_and_signals_recovery(self):
+        self._prime_synchronized_book()
         class FakeWebSocket:
             def __init__(self, messages):
                 self.messages = messages
@@ -544,6 +564,66 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             self.stream.last_error,
             "Depth event buffer overflow; reconnecting for fresh snapshot",
         )
+        self.assertFalse(self.stream.synchronized)
+        self.assertIsNone(self.stream.synchronized_since)
+        with patch("app.market_data.backend_stream.time.time", return_value=100.5):
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_collector_normal_close_invalidates_synchronized_book(self):
+        self._prime_synchronized_book()
+
+        class FakeWebSocket:
+            def __aiter__(self):
+                async def iterate():
+                    if False:
+                        yield None
+                return iterate()
+
+        async def run_collector():
+            queue = asyncio.Queue()
+            await self.stream._collect_depth_events(FakeWebSocket(), queue)
+            return await queue.get()
+
+        sentinel = asyncio.run(run_collector())
+        self.assertIsNone(sentinel)
+        self.assertFalse(self.stream.synchronized)
+        self.assertIsNone(self.stream.synchronized_since)
+        with patch("app.market_data.backend_stream.time.time", return_value=100.5):
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_snapshot_bridge_not_synchronized_after_collector_has_ended(self):
+        frame = '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[["99.5","1"]],"a":[]}'
+        snapshot = {
+            "lastUpdateId": 100,
+            "bids": [["100", "2"]],
+            "asks": [["101", "3"]],
+        }
+
+        class FakeWebSocket:
+            def __aiter__(self):
+                async def iterate():
+                    yield frame
+                return iterate()
+
+        class FakeConnection:
+            async def __aenter__(self):
+                return FakeWebSocket()
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def delayed_snapshot():
+            await asyncio.sleep(0)
+            return snapshot
+
+        async def run_connection():
+            with patch("app.market_data.backend_stream.websockets.connect", return_value=FakeConnection()), \
+                 patch.object(self.stream, "_fetch_snapshot", new=AsyncMock(side_effect=delayed_snapshot)):
+                await self.stream._connect_and_sync()
+
+        asyncio.run(run_connection())
+        self.assertFalse(self.stream.synchronized)
+        self.assertIsNone(self.stream.synchronized_since)
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
     def test_snapshot_buffer_is_bounded_and_overflow_forces_recovery(self):
         self.assertEqual(SNAPSHOT_BUFFER_MAX_EVENTS, 1000)

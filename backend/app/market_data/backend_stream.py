@@ -223,6 +223,11 @@ class BinanceOrderBookStream:
                     logger.warning("Binance depth event buffer overflow; forcing snapshot recovery")
                     break
         finally:
+            # A terminated collector cannot prove a live sequence. Invalidate
+            # book availability before signaling the consumer, so readers fail
+            # closed during the reconnect handoff.
+            self.synchronized = False
+            self.synchronized_since = None
             # Queue termination must never block the collector while the consumer
             # is exiting. If a full queue cannot accept the sentinel, discard
             # its partial contents and force recovery instead.
@@ -312,6 +317,13 @@ class BinanceOrderBookStream:
                     if event is None:
                         self.last_error = self.last_error or "WebSocket ended before snapshot synchronization"
                         return
+                    if collector_task.done():
+                        # Buffered events from a closed stream cannot establish
+                        # a usable live book, even if one overlaps the snapshot.
+                        self.synchronized = False
+                        self.synchronized_since = None
+                        self.last_error = self.last_error or "WebSocket ended before snapshot synchronization"
+                        return
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
@@ -333,6 +345,14 @@ class BinanceOrderBookStream:
                 while not self._stop_event.is_set():
                     event = await event_queue.get()
                     if event is None:
+                        self.synchronized = False
+                        self.synchronized_since = None
+                        self.last_error = self.last_error or "WebSocket stream ended after synchronization"
+                        return
+                    if collector_task.done():
+                        # Do not apply leftover queue items after stream termination.
+                        self.synchronized = False
+                        self.synchronized_since = None
                         self.last_error = self.last_error or "WebSocket stream ended after synchronization"
                         return
 
