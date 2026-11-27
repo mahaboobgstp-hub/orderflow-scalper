@@ -239,7 +239,7 @@ class Tests(unittest.TestCase):
                                             "seq": 2000, "b": [["100", "2"]], "a": [["101", "3"]]})
         self.assertTrue(recovered["synchronized"])
         next_update = self.e.process("delta", {"type": "ob_updates", "action": "update", "sy": "BTCUSD",
-                                               "seq": 2001, "b": [["99", "4"]], "a": []})
+                                               "seq": 2001, "b": [["100", "0"], ["99", "4"]], "a": []})
         self.assertTrue(next_update["synchronized"])
         self.assertEqual(self.e.get_book("delta", "BTCUSD")["best_bid"], 99.0)
 
