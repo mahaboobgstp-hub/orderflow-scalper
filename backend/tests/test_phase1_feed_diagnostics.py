@@ -200,7 +200,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                     "stale": False, "fresh": True, "healthy": True,
                     "stale_after_seconds": 3.0, "last_update_id": 101,
                     "connected_duration_seconds": 40.0, "synchronized_duration_seconds": 35.0,
-                    "last_event_age_seconds": 0.25, "last_sync_age_seconds": 5.0,
+                    "last_event_age_seconds": 0.25, "last_book_update_age_seconds": 0.1, "last_sync_age_seconds": 5.0,
                     "last_disconnect_at": None, "last_disconnect_reason": None,
                     "connection_attempt_count": 1, "successful_connection_count": 1,
                     "reconnect_count": 0, "recovery_count": 0,
@@ -208,7 +208,6 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                     "last_recovery_age_seconds": None, "messages_received": 12,
                     "snapshot_count": 1, "sequence_gap_count": 0,
                     "invalid_depth_message_count": 0,
-                    "snapshot_buffer_overflow_count": 0,
                     "snapshot_buffer_overflow_count": 0,
                 }
 
@@ -241,7 +240,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             "connected_duration_seconds", "synchronized_duration_seconds",
             "connection_attempt_count", "successful_connection_count",
             "reconnect_count", "recovery_count", "last_disconnect_reason",
-            "last_recovery_age_seconds", "messages_received", "snapshot_count",
+            "last_recovery_age_seconds", "last_book_update_age_seconds", "messages_received", "snapshot_count",
             "sequence_gap_count", "invalid_depth_message_count",
             "snapshot_buffer_overflow_count",
             "snapshot_limit",
