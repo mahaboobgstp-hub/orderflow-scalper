@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import unittest
+import zlib
 from unittest.mock import patch
 
 from app.market_data.unified_engine import UnifiedMarketDataEngine
@@ -31,6 +32,12 @@ def bybit_delta(u, seq=101, bids=None, asks=None, ts=None):
     if seq is not None:
         data["seq"] = seq
     return {"topic": "orderbook.50.BTCUSDT", "type": "delta", "data": data, "ts": int(time.time() * 1000) if ts is None else ts}
+
+
+def delta_checksum(bids, asks):
+    asks_text = ",".join(f"{price}:{quantity}" for price, quantity in sorted(asks, key=lambda level: float(level[0]))[:10])
+    bids_text = ",".join(f"{price}:{quantity}" for price, quantity in sorted(bids, key=lambda level: float(level[0]), reverse=True)[:10])
+    return zlib.crc32((asks_text + "|" + bids_text).encode("utf-8")) & 0xffffffff
 
 
 class Tests(unittest.TestCase):
@@ -227,7 +234,8 @@ class Tests(unittest.TestCase):
     def test_delta_ob_updates_snapshot_and_incremental_sequence_with_symbol_alias(self):
         base = int(time.time() * 1_000_000)
         snapshot = {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD", "seq": 6199,
-                    "b": [["100", "2"]], "a": [["101", "3"]], "ts": base}
+                    "b": [["100", "2"]], "a": [["101", "3"]], "ts": base,
+                    "cs": delta_checksum([["100", "2"]], [["101", "3"]])}
         result = self.e.process("delta", snapshot)
         self.assertTrue(result["synchronized"])
         book = self.e.get_book("delta", "BTCUSD")
@@ -239,7 +247,7 @@ class Tests(unittest.TestCase):
 
         update = {"type": "ob_updates", "action": "update", "sy": "BTCUSD", "seq": 6200,
                   "b": [["100", "0"], ["99", "4"]], "a": [["101", "0"], ["102", "3"]],
-                  "ts": base + 1000}
+                  "ts": base + 1000, "cs": delta_checksum([["99", "4"]], [["102", "3"]])}
         result = self.e.process("delta", update)
         self.assertTrue(result["synchronized"])
         book = self.e.get_book("delta", "BTCUSD")
@@ -247,10 +255,56 @@ class Tests(unittest.TestCase):
         self.assertEqual(book["best_bid"], 99.0)
         self.assertEqual(book["best_ask"], 102.0)
 
+    def test_delta_ob_updates_requires_checksum_and_rejects_mismatch(self):
+        base = int(time.time() * 1_000_000)
+        levels_bids = [["100", "2"]]
+        levels_asks = [["101", "3"]]
+        missing_checksum = {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD", "seq": 1,
+                           "b": levels_bids, "a": levels_asks, "ts": base}
+        result = self.e.process("delta", missing_checksum)
+        self.assertTrue(result["resync_required"])
+        self.assertFalse(self.e.get_book("delta", "BTCUSD")["synchronized"])
+
+        valid_snapshot = {**missing_checksum, "seq": 10, "cs": delta_checksum(levels_bids, levels_asks)}
+        self.assertTrue(self.e.process("delta", valid_snapshot)["synchronized"])
+        update_bids = [["100", "0"], ["99", "4"]]
+        update_asks = [["101", "0"], ["102", "3"]]
+        bad_update = {"type": "ob_updates", "action": "update", "sy": "BTCUSD", "seq": 11,
+                      "b": update_bids, "a": update_asks, "ts": base + 1000,
+                      "cs": (delta_checksum([["99", "4"]], [["102", "3"]]) + 1) & 0xffffffff}
+        result = self.e.process("delta", bad_update)
+        self.assertTrue(result["resync_required"])
+        book = self.e.get_book("delta", "BTCUSD")
+        self.assertFalse(book["synchronized"])
+        self.assertEqual(book["bids"], [])
+        self.assertEqual(book["asks"], [])
+
+    def test_delta_checksum_preserves_raw_decimal_format_on_snapshot_and_update(self):
+        base = int(time.time() * 1_000_000)
+        snapshot_bids = [["100.00", "2.000"], ["99.50", "1.250"]]
+        snapshot_asks = [["101.00", "3.000"], ["101.50", "2.500"]]
+        snapshot = {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD", "seq": 50,
+                    "b": snapshot_bids, "a": snapshot_asks, "ts": base,
+                    "cs": delta_checksum(snapshot_bids, snapshot_asks)}
+        self.assertTrue(self.e.process("delta", snapshot)["synchronized"])
+
+        update_bids = [["100.00", "0"], ["99.75", "0.750"]]
+        update_asks = [["101.00", "0"], ["100.75", "1.250"]]
+        final_bids = [["99.75", "0.750"], ["99.50", "1.250"]]
+        final_asks = [["100.75", "1.250"], ["101.50", "2.500"]]
+        update = {"type": "ob_updates", "action": "update", "sy": "BTCUSD", "seq": 51,
+                  "b": update_bids, "a": update_asks, "ts": base + 1000,
+                  "cs": delta_checksum(final_bids, final_asks)}
+        self.assertTrue(self.e.process("delta", update)["synchronized"])
+        book = self.e.get_book("delta", "BTCUSD")
+        self.assertEqual(book["best_bid"], 99.75)
+        self.assertEqual(book["best_ask"], 100.75)
+
     def test_delta_ob_updates_gap_invalidates_and_requires_fresh_snapshot(self):
         base = int(time.time() * 1_000_000)
         self.e.process("delta", {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD",
-                                 "seq": 1000, "b": [["100", "2"]], "a": [["101", "3"]], "ts": base})
+                                 "seq": 1000, "b": [["100", "2"]], "a": [["101", "3"]], "ts": base,
+                                 "cs": delta_checksum([["100", "2"]], [["101", "3"]])})
         gap = self.e.process("delta", {"type": "ob_updates", "action": "update", "sy": "BTCUSD",
                                        "seq": 1002, "b": [["99", "4"]], "a": [], "ts": base + 1000})
         self.assertTrue(gap["resync_required"])
@@ -261,10 +315,12 @@ class Tests(unittest.TestCase):
                                            "seq": 1003, "b": [["99", "4"]], "a": [], "ts": base + 2000})
         self.assertTrue(blocked["resync_required"])
         recovered = self.e.process("delta", {"type": "ob_updates", "action": "snapshot", "sy": "BTCUSD",
-                                            "seq": 2000, "b": [["100", "2"]], "a": [["101", "3"]], "ts": base + 3000})
+                                            "seq": 2000, "b": [["100", "2"]], "a": [["101", "3"]], "ts": base + 3000,
+                                            "cs": delta_checksum([["100", "2"]], [["101", "3"]])})
         self.assertTrue(recovered["synchronized"])
         next_update = self.e.process("delta", {"type": "ob_updates", "action": "update", "sy": "BTCUSD",
-                                               "seq": 2001, "b": [["100", "0"], ["99", "4"]], "a": [], "ts": base + 4000})
+                                               "seq": 2001, "b": [["100", "0"], ["99", "4"]], "a": [], "ts": base + 4000,
+                                               "cs": delta_checksum([["99", "4"]], [["101", "3"]])})
         self.assertTrue(next_update["synchronized"])
         self.assertEqual(self.e.get_book("delta", "BTCUSD")["best_bid"], 99.0)
 
