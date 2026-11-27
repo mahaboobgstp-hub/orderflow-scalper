@@ -145,7 +145,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
             ([["99.0", "Infinity"]], []),
             ([["99.0", "-1.0"]], []),
             ([["-99.0", "2.0"]], []),
-            ([["99.0", True]]], []),
+            ([["99.0", True]], []),
         ]
         before_bids = dict(self.stream.bids)
         before_asks = dict(self.stream.asks)
