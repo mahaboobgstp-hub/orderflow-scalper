@@ -80,16 +80,18 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertEqual(self.stream.asks[101.0], 4.0)
 
-    def test_overlapping_event_without_previous_id_is_applied(self):
+    def test_overlapping_event_without_previous_id_forces_resync(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
         e = self.event(101, 102, asks=[["101.0", "0"], ["100.5", "3"]])
         self.stream.last_update_id = 101
-        self.assertTrue(self.stream._apply_event(e))
-        self.assertEqual(self.stream.last_update_id, 102)
-        self.assertNotIn(101.0, self.stream.asks)
-        self.assertEqual(self.stream.asks[100.5], 3.0)
+        self.assertFalse(self.stream._apply_event(e))
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
 
     def test_invalid_numeric_update_is_not_silently_applied(self):
-        e = self.event(101, 102, bids=[["not-a-price", "2"]])
+        e = self.event(101, 102, bids=[["not-a-price", "2"]], previous=101)
         self.stream.last_update_id = 101
         with self.assertRaises((ValueError, TypeError)):
             self.stream._apply_event(e)
@@ -113,7 +115,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.stream.connected = True
         self.stream.synchronized = True
         self.stream.last_book_update_at = None
-        event = self.event(101, 101, bids=[["99.5", "1.0"]])
+        event = self.event(101, 101, bids=[["99.5", "1.0"]], previous=100)
         self.assertTrue(self.stream._apply_event(event))
         book = asyncio.run(self.stream.get_order_book())
         self.assertIsNotNone(book)
