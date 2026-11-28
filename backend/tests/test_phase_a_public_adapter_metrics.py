@@ -133,7 +133,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["successful_connection_count"], 1)
         self.assertEqual(status["last_connection_attempt_at"], 50.0)
         self.assertEqual(status["last_connected_at"], 51.0)
-        self.assertEqual(status["last_disconnect_at"], 53.0)
+        self.assertEqual(status["last_disconnect_at"], 55.0)
         self.assertEqual(status["last_connection_duration_seconds"], 4.0)
         self.assertEqual(status["last_message_age_seconds"], 2.0)
         self.assertEqual(status["error_count"], 2)
