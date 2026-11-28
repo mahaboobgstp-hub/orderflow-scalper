@@ -125,6 +125,7 @@ class BinanceOrderBookStream:
         else:
             self.synchronized = False
             self.synchronized_since = None
+        self.synchronized_since_monotonic = None
 
     def _record_connection_attempt(self):
         self.connection_attempt_count += 1
@@ -143,6 +144,7 @@ class BinanceOrderBookStream:
             self.last_reconnect_at = now
         self.synchronized = False
         self.synchronized_since = None
+        self.synchronized_since_monotonic = None
         self.last_event_at = None
         self.last_event_monotonic = None
         self.last_book_update_at = None
@@ -200,6 +202,7 @@ class BinanceOrderBookStream:
         if collector_task is not None and collector_task.done():
             self.synchronized = False
             self.synchronized_since = None
+        self.synchronized_since_monotonic = None
             self.last_error = self.last_error or "WebSocket ended during snapshot synchronization"
             return False
         if not self._event_bridges_snapshot(event):
@@ -282,6 +285,7 @@ class BinanceOrderBookStream:
             # closed during the reconnect handoff.
             self.synchronized = False
             self.synchronized_since = None
+        self.synchronized_since_monotonic = None
             # Queue termination must never block the collector while the consumer
             # is exiting. If a full queue cannot accept the sentinel, discard
             # its partial contents and force recovery instead.
@@ -376,6 +380,7 @@ class BinanceOrderBookStream:
                         # a usable live book, even if one overlaps the snapshot.
                         self.synchronized = False
                         self.synchronized_since = None
+        self.synchronized_since_monotonic = None
                         self.last_error = self.last_error or "WebSocket ended before snapshot synchronization"
                         return
 
@@ -408,6 +413,7 @@ class BinanceOrderBookStream:
                     if event is None:
                         self.synchronized = False
                         self.synchronized_since = None
+        self.synchronized_since_monotonic = None
                         self.last_error = self.last_error or "WebSocket stream ended after synchronization"
                         return
                     if collector_task.done() or not self.synchronized:
@@ -416,6 +422,7 @@ class BinanceOrderBookStream:
                         # during that race or misclassify termination as a gap.
                         self.synchronized = False
                         self.synchronized_since = None
+        self.synchronized_since_monotonic = None
                         self.last_error = self.last_error or "WebSocket stream ended after synchronization"
                         return
 
@@ -426,6 +433,7 @@ class BinanceOrderBookStream:
                             self.sequence_gap_count += 1
                             self.synchronized = False
                             self.synchronized_since = None
+        self.synchronized_since_monotonic = None
                             self.last_error = "Order-book sequence gap; reconnecting for snapshot recovery"
                             logger.warning(
                                 "Order-book sequence gap detected"
