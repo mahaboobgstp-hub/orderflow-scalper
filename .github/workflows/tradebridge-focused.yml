@@ -1,0 +1,46 @@
+name: TradeBridge Focused CI
+
+on:
+  push:
+    branches:
+      - feature/tradebridge-chat-execution
+    paths:
+      - "backend/app/tradebridge/**"
+      - "backend/app/execution/binance_demo_client.py"
+      - "backend/tests/test_tradebridge_*.py"
+      - ".github/workflows/tradebridge-focused.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "backend/app/tradebridge/**"
+      - "backend/app/execution/binance_demo_client.py"
+      - "backend/tests/test_tradebridge_*.py"
+      - ".github/workflows/tradebridge-focused.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tradebridge-focused-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest
+      - name: Compile TradeBridge and Demo client modules
+        run: python -m compileall -q backend/app/tradebridge backend/app/execution/binance_demo_client.py
+      - name: Run TradeBridge focused regression tests
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest -q tests/test_tradebridge_foundation.py tests/test_tradebridge_risk.py tests/test_tradebridge_snapshot_provider.py
