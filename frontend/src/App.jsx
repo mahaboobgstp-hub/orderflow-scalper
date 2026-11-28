@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getMessageFeedState, getUnifiedFeedMessageState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState, normalizeFeedMonitorPayload } from "./feedFreshness.js";
+import { getMessageFeedState, getUnifiedFeedMessageState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState, normalizeFeedMonitorPayload, displayDiagnosticCounter } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -239,16 +239,16 @@ export default function App() {
         <div className="list-row"><b>Applied book update age</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primary.last_book_update_age_seconds==null?"--":primary.last_book_update_age_seconds+"s"}</span></div>
         <div className="list-row"><b>Connected for</b><span>{primary.connected_duration_seconds==null?"--":primary.connected_duration_seconds+"s"}</span></div>
         <div className="list-row"><b>Synchronized for</b><span>{primary.synchronized_duration_seconds==null?"--":primary.synchronized_duration_seconds+"s"}</span></div>
-        <div className="list-row"><b>Connection attempts / successes</b><span>{primary.connection_attempt_count??0} / {primary.successful_connection_count??0}</span></div>
-        <div className="list-row"><b>Reconnects / recoveries</b><span>{primary.reconnect_count??0} / {primary.recovery_count??0}</span></div>
+        <div className="list-row"><b>Connection attempts / successes</b><span>{displayDiagnosticCounter(primary,"connection_attempt_count")} / {displayDiagnosticCounter(primary,"successful_connection_count")}</span></div>
+        <div className="list-row"><b>Reconnects / recoveries</b><span>{displayDiagnosticCounter(primary,"reconnect_count")} / {displayDiagnosticCounter(primary,"recovery_count")}</span></div>
         <div className="list-row"><b>Last recovery</b><span>{primary.last_recovery_age_seconds==null?"Never":primary.last_recovery_age_seconds+"s ago"}</span></div>
-        <div className="list-row"><b>REST snapshots loaded</b><span>{primary.snapshot_count??0}</span></div>
+        <div className="list-row"><b>REST snapshots loaded</b><span>{displayDiagnosticCounter(primary,"snapshot_count")}</span></div>
         <div className="list-row"><b>Snapshot depth cap</b><span>{primary.snapshot_limit??"--"} levels/side</span></div>
         <div className="list-row"><b>Last disconnect reason</b><span>{primary.last_disconnect_reason||"None recorded"}</span></div>
-        <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{primary.sequence_gap_count??0}</span></div>
-        <div className="list-row"><b>Depth events received</b><span>{primary.messages_received??0}</span></div>
-        <div className="list-row"><b>Rejected depth messages</b><span>{value(primary.invalid_depth_message_count)}</span></div>
-        <div className="list-row"><b>Depth buffer overflow recoveries</b><span className={primary.snapshot_buffer_overflow_count?"negative":""}>{primary.snapshot_buffer_overflow_count??0}</span></div>
+        <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{displayDiagnosticCounter(primary,"sequence_gap_count")}</span></div>
+        <div className="list-row"><b>Depth events received</b><span>{displayDiagnosticCounter(primary,"messages_received")}</span></div>
+        <div className="list-row"><b>Rejected depth messages</b><span>{displayDiagnosticCounter(primary,"invalid_depth_message_count")}</span></div>
+        <div className="list-row"><b>Depth buffer overflow recoveries</b><span className={primary.snapshot_buffer_overflow_count?"negative":""}>{displayDiagnosticCounter(primary,"snapshot_buffer_overflow_count")}</span></div>
         <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
         <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
       </div>
