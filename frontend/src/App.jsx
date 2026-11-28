@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { tokenHeaderForBackend } from "./tokenSession.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -39,7 +40,8 @@ const money = (v) => Number.isFinite(Number(v)) ? Number(v).toLocaleString(undef
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [apiBase, setApiBase] = useState(localStorage.getItem("ofs_api") || "");
-  const [token, setToken] = useState(localStorage.getItem("ofs_token") || "");
+  const [token, setToken] = useState("");
+  const [tokenBoundBase, setTokenBoundBase] = useState("");
   const [connected, setConnected] = useState(false);
   const [health, setHealth] = useState(null);
   const [marketObs, setMarketObs] = useState(null);
@@ -67,7 +69,7 @@ export default function App() {
     if (!base) throw new Error("Enter your backend API URL in Controls & Settings.");
     const headers = { ...(options.headers || {}) };
     if (options.body) headers["Content-Type"] = "application/json";
-    if (token) headers["X-Control-Token"] = token;
+    Object.assign(headers, tokenHeaderForBackend(token, tokenBoundBase, base));
     const response = await fetch(base + path, { ...options, headers });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || data.message || "API request failed (" + response.status + ")");
@@ -113,7 +115,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("ofs_api", apiBase);
-    localStorage.setItem("ofs_token", token);
+    localStorage.removeItem("ofs_token");
     refreshAll();
     refreshScanner();
     refreshPhaseCScanner();
@@ -121,7 +123,7 @@ export default function App() {
     const scanTimer = setInterval(refreshScanner, 45000);
     const phaseCTimer = setInterval(refreshPhaseCScanner, 45000);
     return () => { clearInterval(timer); clearInterval(scanTimer); clearInterval(phaseCTimer); };
-  }, [apiBase, token]);
+  }, [apiBase, token, tokenBoundBase]);
 
   async function command(cmd) {
     setBusy(true); setNotice("");
@@ -383,7 +385,7 @@ export default function App() {
   function renderControls() {
     const cfg=control?.config||configDraft;
     return <>{header("Controls & Settings","Operator decisions sent to and validated by the backend")}
-      <div className="panel connection-panel"><h2>Backend Connection</h2><label>Backend API URL<input placeholder="https://your-backend-host" value={apiBase} onChange={e=>setApiBase(e.target.value)}/></label><label>Control API token<input type="password" placeholder="Backend CONTROL_API_TOKEN" value={token} onChange={e=>setToken(e.target.value)}/></label><div className="control-buttons"><button className="btn primary" onClick={refreshAll}>Test / Refresh Connection</button></div><p className="subtle">Token is saved in this browser's local storage. Configure CONTROL_API_TOKEN on your backend before using controls.</p></div>
+      <div className="panel connection-panel"><h2>Backend Connection</h2><label>Backend API URL<input placeholder="https://your-backend-host" value={apiBase} onChange={e=>{setApiBase(e.target.value);setToken("");setTokenBoundBase("");}}/></label><label>Control API token<input type="password" placeholder="Backend CONTROL_API_TOKEN" value={token} onChange={e=>{setToken(e.target.value);setTokenBoundBase(base);}}/></label><div className="control-buttons"><button className="btn primary" onClick={refreshAll}>Test / Refresh Connection</button></div><p className="subtle">Token is held in memory only and cleared whenever the backend URL changes. Configure CONTROL_API_TOKEN on your backend before using controls.</p></div>
       <div className="panel"><div className="panel-title"><h2>Engine State</h2><span className="status-chip">{engineLabel}</span></div><p className="notice warning">Autonomous paper runtime is integrated. Emergency halt blocks new entries while the runtime continues monitoring existing paper positions; no live exchange orders are enabled.</p><div className="list-row"><b>Emergency risk halt</b><span className="status-chip">{control?.runtime?.risk_kill_switch?.active ? "ACTIVE — ENTRIES BLOCKED" : "CLEAR"}</span></div>{control?.runtime?.risk_kill_switch?.active && <button className="btn warn wide" onClick={resetEmergencyRiskHalt} disabled={busy||!connected||control?.runtime?.state!=="STOPPED"}>Reset Emergency Risk Halt (runtime must be stopped)</button>}<div className="control-buttons"><button className="btn primary" onClick={()=>command("START")} disabled={busy||!connected||!control?.autonomous_engine_integrated}>Start</button><button className="btn warn" onClick={()=>command("PAUSE")} disabled={busy||!connected||!control?.autonomous_engine_integrated}>Pause New Entries</button><button className="btn secondary" onClick={()=>command("RESUME")} disabled={busy||!connected||!control?.autonomous_engine_integrated}>Resume</button><button className="btn danger" onClick={()=>command("STOP")} disabled={busy||!connected||!control?.autonomous_engine_integrated}>Stop</button><button className="btn danger-outline" onClick={()=>command("EMERGENCY_HALT")} disabled={busy||!connected||!control?.autonomous_engine_integrated}>Emergency Halt</button></div></div>
       <div className="panel"><div className="panel-title"><h2>Trading Preferences</h2><span className="subtle">Saved to backend configuration only</span></div><div className="settings-grid"><label>Trading Direction<select value={cfg.trading_direction||"BOTH"} onChange={e=>setConfigDraft(prev=>({...prev,trading_direction:e.target.value}))}><option value="BOTH">Long & Short</option><option value="LONG">Long Only</option><option value="SHORT">Short Only</option></select></label><label>Entry Mode<select value={cfg.entry_mode||"AUTONOMOUS_PAPER"} onChange={e=>setConfigDraft(prev=>({...prev,entry_mode:e.target.value}))}><option value="AUTONOMOUS_PAPER">Autonomous Paper</option><option value="MANUAL_APPROVAL">Manual Approval</option></select></label></div><div className="toggle-grid"><label className="toggle-row"><span>Market regime filter</span><input type="checkbox" checked={Boolean(cfg.market_regime_filter_enabled)} onChange={e=>setConfigDraft(prev=>({...prev,market_regime_filter_enabled:e.target.checked}))}/></label></div><h3 className="subsection-title">Strategy Enable / Disable</h3><div className="toggle-grid">{Object.entries(cfg.strategy_enabled||{}).map(([key,on])=><label className="toggle-row" key={key}><span>{key.replaceAll("_"," ")}</span><input type="checkbox" checked={Boolean(on)} onChange={e=>setConfigDraft(prev=>({...prev,strategy_enabled:{...(prev.strategy_enabled||cfg.strategy_enabled),[key]:e.target.checked}}))}/></label>)}</div><p className="subtle">Strategy switches are recorded in backend memory; they do not currently turn strategy modules on/off.</p></div>
       <div className="panel"><div className="panel-title"><h2>Risk & Position Limits</h2><span className="subtle">Range-validated by backend</span></div><div className="settings-grid">{CONFIG_FIELDS.map(([key,label,min,max,step])=><label key={key}>{label}<input type="number" min={min} max={max} step={step} value={cfg[key]??""} onChange={e=>setConfigDraft(prev=>({...prev,[key]:Number(e.target.value)}))}/></label>)}</div><div className="toggle-grid">{["trailing_stop_enabled","trailing_take_profit_enabled","break_even_enabled"].map(k=><label className="toggle-row" key={k}><span>{k.replaceAll("_"," ")}</span><input type="checkbox" checked={Boolean(cfg[k])} onChange={e=>setConfigDraft(prev=>({...prev,[k]:e.target.checked}))}/></label>)}</div><button className="btn primary wide" onClick={saveConfig} disabled={busy||!connected}>Save Risk & Management Settings</button><p className="subtle">Risk controls are applied to the autonomous paper runtime and manual paper entries. Settings remain in backend process memory and are not durable across backend restarts.</p></div>
