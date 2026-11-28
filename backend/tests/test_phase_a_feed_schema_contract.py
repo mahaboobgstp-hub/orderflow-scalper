@@ -48,7 +48,10 @@ def test_observability_api_preserves_per_symbol_message_freshness_schema(monkeyp
 
     class FakePrimary:
         async def get_status(self):
-            return {"connected": False, "synchronized": False, "stale": True, "healthy": False}
+            return {
+                "connected": False, "synchronized": False, "stale": True, "healthy": False,
+                "error_count": 4, "last_error": "demo depth reconnect failure",
+            }
 
     class FakeExchanges:
         async def status(self):
@@ -88,6 +91,10 @@ def test_observability_api_preserves_per_symbol_message_freshness_schema(monkeyp
                 delattr(state, name)
             else:
                 setattr(state, name, originals[name])
+
+    primary = payload["primary_binance_demo_stream"]
+    assert primary["error_count"] == 4
+    assert primary["last_error"] == "demo depth reconnect failure"
 
     feeds = payload["unified_market_data"]["feeds"]
     assert feeds["binance:BTCUSDT"] == {
