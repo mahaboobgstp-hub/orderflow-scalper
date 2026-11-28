@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFreshMessageFeed, getMessageFeedState, getUnifiedFeedMessageState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState, normalizeFeedMonitorPayload, normalizeDiagnosticCounter } from "../src/feedFreshness.js";
+import { isFreshMessageFeed, getMessageFeedState, getUnifiedFeedMessageState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState, normalizeFeedMonitorPayload, normalizeDiagnosticCounter, displayDiagnosticCounter } from "../src/feedFreshness.js";
 
 test("fresh feed accepts finite nonnegative age inside the cutoff", () => {
   assert.equal(isFreshMessageFeed({ enabled: true, connected: true, last_message_age_seconds: 0.25 }, 3), true);
@@ -278,6 +278,14 @@ test("diagnostic counter strings require decimal integer notation", () => {
   }
   assert.equal(normalizeDiagnosticCounter("007"), 7);
   assert.equal(normalizeDiagnosticCounter(" 7 "), 7);
+});
+
+test("missing diagnostic counters display unavailable instead of zero", () => {
+  assert.equal(displayDiagnosticCounter({}, "connection_attempt_count"), "--");
+  assert.equal(displayDiagnosticCounter(null, "reconnect_count"), "--");
+  assert.equal(displayDiagnosticCounter({ snapshot_count: null }, "snapshot_count"), 0);
+  assert.equal(displayDiagnosticCounter({ sequence_gap_count: "004" }, "sequence_gap_count"), 4);
+  assert.equal(displayDiagnosticCounter({ messages_received: "1e2" }, "messages_received"), 0);
 });
 
 test("unified invalid-symbol diagnostic counter is normalized when present", () => {
