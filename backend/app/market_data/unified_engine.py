@@ -73,7 +73,7 @@ class UnifiedMarketDataEngine:
                 return None
 
         topic_has_symbol = isinstance(topic, str) and (
-            topic.startswith("publicTrade.") or topic.startswith("orderbook.")
+            topic.startswith("publicTrade") or topic.startswith("orderbook.")
         )
         topic_symbol = self.topic_symbol(topic)
         if topic_has_symbol and topic_symbol is None:
