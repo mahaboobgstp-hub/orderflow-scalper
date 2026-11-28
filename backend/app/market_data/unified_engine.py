@@ -38,9 +38,15 @@ class UnifiedMarketDataEngine:
     def as_int(x):
         try: return int(x)
         except (ValueError,TypeError): return None
+    def touch_message(self,ex):
+        """Record exchange message activity without implying order-book progress."""
+        now=time.time()
+        self.last_seen[ex]=now
+        self.counts[ex]=self.counts.get(ex,0)+1
+        return now
     def touch(self,ex,b,ts):
-        now=time.time(); b.exchange_ts=ts; b.received_ts=int(now*1000); b.stale=False
-        self.last_seen[ex]=now; self.counts[ex]=self.counts.get(ex,0)+1
+        now=self.touch_message(ex)
+        b.exchange_ts=ts; b.received_ts=int(now*1000); b.stale=False
     def process(self,exchange,raw,default_symbol="BTCUSDT"):
         ex=exchange.lower()
         if not isinstance(raw,dict): return None
@@ -55,12 +61,14 @@ class UnifiedMarketDataEngine:
         ts=self.as_int(raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts"))
         b=self.book(ex,symbol)
         try:
-            # Binance depth diffs lack the snapshot bridge here: mark unusable for strategies.
+            # Binance raw depth diffs cannot be trusted until a REST snapshot bridge is applied.
+            # Do not mutate the unified book or refresh its freshness clock from an unbridged diff.
             if ex=="binance" and ("b" in data or "a" in data) and ("U" in data or "u" in data):
-                u=self.as_int(data.get("u")); b.sequence=u if u is not None else b.sequence
-                self.apply(b.bids,data.get("b",[])); self.apply(b.asks,data.get("a",[]))
-                b.synchronized=False; b.error="Needs REST snapshot synchronization"
-                self.touch(ex,b,ts); return {"type":"book_delta","synchronized":False}
+                b.synchronized=False; b.stale=True
+                b.error="Needs REST snapshot synchronization"
+                self.errors[self.key(ex,symbol)]=b.error
+                self.touch_message(ex)
+                return {"type":"book_delta","synchronized":False}
             if topic.startswith("orderbook."):
                 typ=str(raw.get("type","")).lower()
                 if typ=="snapshot":
@@ -89,7 +97,7 @@ class UnifiedMarketDataEngine:
                 if side not in ("buy","sell"): side=None
                 trade=Trade(ex,symbol,p,q,side,self.as_int(t.get("T") or t.get("timestamp") or ts),int(time.time()*1000))
                 key=self.key(ex,symbol); self.trades.setdefault(key,[]).append(trade)
-                self.trades[key]=self.trades[key][-5000:]; self.touch(ex,b,ts)
+                self.trades[key]=self.trades[key][-5000:]; self.touch_message(ex)
                 return {"type":"trade","exchange":ex,"symbol":symbol,"price":p,"quantity":q,"side":side}
         except (ValueError,TypeError,KeyError) as err:
             b.error="Payload parse error: "+str(err); self.errors[self.key(ex,symbol)]=b.error
