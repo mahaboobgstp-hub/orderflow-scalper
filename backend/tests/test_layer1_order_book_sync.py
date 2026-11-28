@@ -456,7 +456,7 @@ def test_binance_bridge_snapshot_updates_unified_book_and_disconnect_invalidates
     assert book["synchronized"] is True
     assert book["best_bid"] == 99.5
     assert book["best_ask"] == 101.0
-    with patch("app.market_data.unified_engine.time.time", return_value=time.time() + 2.0):
+    with patch("app.market_data.unified_engine.time.monotonic", return_value=time.monotonic() + 2.0):
         key2 = asyncio.run(main._bridge_binance_book_once(stream, engine, key))
         book2 = engine.get_book("binance", "BTCUSDT")
         assert key2 == key
