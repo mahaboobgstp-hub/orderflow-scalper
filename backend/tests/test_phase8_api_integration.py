@@ -19,6 +19,20 @@ class StubMarket:
     def get_book(self,exchange,symbol): return self.book
     def get_recent_trades(self,exchange,symbol,limit): return api_tape()[:limit]
 
+@pytest.fixture(autouse=True)
+def restore_main_app_state():
+    old_market=getattr(main.app.state,"unified_market_data",None)
+    old_trade_flow=getattr(main.app.state,"trade_flow_momentum_detector",None)
+    yield
+    if old_market is None:
+        if hasattr(main.app.state,"unified_market_data"): delattr(main.app.state,"unified_market_data")
+    else:
+        main.app.state.unified_market_data=old_market
+    if old_trade_flow is None:
+        if hasattr(main.app.state,"trade_flow_momentum_detector"): delattr(main.app.state,"trade_flow_momentum_detector")
+    else:
+        main.app.state.trade_flow_momentum_detector=old_trade_flow
+
 def setup(book):
     main.app.state.unified_market_data=StubMarket(book)
     main.app.state.trade_flow_momentum_detector=main.TradeFlowMomentumDetector()
@@ -50,6 +64,7 @@ def test_trade_flow_route_maps_invalid_book_to_422():
     assert exc.value.status_code==422
 
 def test_trade_flow_status_reports_read_only_mode():
+    setup(api_book())
     result=asyncio.run(main.trade_flow_status())
     assert result["mode"]=="read_only_research"
     assert result["phase"]==8

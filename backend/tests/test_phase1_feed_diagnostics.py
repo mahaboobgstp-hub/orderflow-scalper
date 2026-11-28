@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app import main
 from app.market_data.backend_stream import BinanceOrderBookStream
@@ -76,6 +76,11 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
     def test_snapshot_bridge_accepts_event_without_snapshot_pu_match(self):
         with patch("app.market_data.backend_stream.time.time", return_value=50.0):
+            self.stream._load_snapshot({
+                "lastUpdateId": 100,
+                "bids": [["99.0", "2"]],
+                "asks": [["101.0", "3"]],
+            })
             self.stream.last_update_id = 100
             self.stream.successful_connection_count = 1
             event = {"U": 100, "u": 101, "pu": 99, "b": [["100", "1"]], "a": []}
@@ -96,6 +101,11 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
 
 
     def test_live_events_enforce_pu_after_snapshot_bridge(self):
+        self.stream._load_snapshot({
+            "lastUpdateId": 100,
+            "bids": [["99.0", "2"]],
+            "asks": [["101.0", "3"]],
+        })
         self.stream.last_update_id = 100
         bridge = {"U": 100, "u": 101, "pu": 99, "b": [], "a": []}
         self.assertTrue(self.stream._apply_snapshot_bridge(bridge))
@@ -196,7 +206,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                 else:
                     setattr(state, name, originals[name])
 
-        primary = payload["primary_binance_demo_stream"]
+        primary = payload["primary_binance_live_stream"]
         for field in (
             "stale", "fresh", "healthy", "stale_after_seconds",
             "connected_duration_seconds", "synchronized_duration_seconds",
@@ -210,6 +220,25 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "PUBLIC_MARKET_DATA_PAPER_ONLY")
         self.assertEqual(payload["summary"]["synchronized_book_count"], 1)
         self.assertEqual(payload["summary"]["healthy_feed_count"], 1)
+        self.assertTrue(payload["summary"]["binance_depth_bridge_healthy"])
+        self.assertFalse(payload["summary"]["binance_unified_book_synchronized"])
+
+    def test_database_status_endpoint_is_read_only(self):
+        check_connection = AsyncMock(return_value=True)
+        status = AsyncMock(return_value={"provider": "supabase", "connected": True})
+        write_heartbeat = AsyncMock(return_value=True)
+
+        with patch.object(main.database, "check_connection", new=check_connection):
+            with patch.object(main.database, "status", new=status):
+                with patch.object(main.database, "write_heartbeat", new=write_heartbeat):
+                    result = asyncio.run(main.database_status())
+
+        check_connection.assert_awaited_once()
+        status.assert_awaited_once_with(refresh=False)
+        write_heartbeat.assert_not_awaited()
+        self.assertIsNone(result["heartbeat_write_verified"])
+        self.assertEqual(result["diagnostic_mode"], "read_only")
+
 
 if __name__ == "__main__":
     unittest.main()

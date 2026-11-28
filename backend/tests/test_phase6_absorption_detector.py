@@ -1,4 +1,7 @@
 import unittest
+import time
+import json
+from unittest.mock import patch
 from app.services.absorption_detector import AbsorptionLiquidityDetector
 
 
@@ -13,18 +16,83 @@ def trades(side="buy",qty=1.0,count=8,price=100.05):
 
 
 class Phase6DetectorTests(unittest.TestCase):
+    def _fixed_movement_result(self, side, movement_pct, elapsed_ms=1000):
+        baseline_mid = 100.05
+        current_mid = baseline_mid * (1.0 + movement_pct / 100.0)
+        timestamp_ms = 1_000_000
+        elapsed_ms = int(elapsed_ms)
+        detector = AbsorptionLiquidityDetector()
+        tape = [
+            {"side": side, "quantity": 1.0, "price": 100.05,
+             "received_timestamp_ms": timestamp_ms}
+            for _ in range(8)
+        ]
+
+        def book_at(mid):
+            return book(
+                bids=[[mid - 0.05, 10.0], [mid - 0.15, 8.0]],
+                asks=[[mid + 0.05, 10.0], [mid + 0.15, 8.0]],
+            )
+
+        with patch("app.services.absorption_detector.time.time", side_effect=[timestamp_ms / 1000.0, (timestamp_ms + elapsed_ms) / 1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic", side_effect=[500.0, 500.0 + elapsed_ms / 1000.0]):
+            detector.analyze(book_at(baseline_mid), tape, 15)
+            return detector.analyze(book_at(current_mid), tape, 15)
+
+    def test_adverse_midpoint_movement_reduces_stall_score_for_both_sides(self):
+        buy = self._fixed_movement_result("buy", -0.05)
+        sell = self._fixed_movement_result("sell", 0.05)
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], -0.05, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], -0.05, places=6)
+        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 0.5, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 0.5, places=6)
+
+    def test_adverse_progress_boundary_zeroes_stall_scores_for_both_sides(self):
+        buy = self._fixed_movement_result("buy", -0.10)
+        sell = self._fixed_movement_result("sell", 0.10)
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], -0.10, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], -0.10, places=6)
+        self.assertEqual(buy["metrics"]["buy_absorption_score"], 0.0)
+        self.assertEqual(sell["metrics"]["sell_absorption_score"], 0.0)
+
+    def test_flat_midpoint_maximizes_stall_score_for_both_sides(self):
+        buy = self._fixed_movement_result("buy", 0.0)
+        sell = self._fixed_movement_result("sell", 0.0)
+        self.assertEqual(buy["metrics"]["buy_absorption_score"], 1.0)
+        self.assertEqual(sell["metrics"]["sell_absorption_score"], 1.0)
+
+    def test_favorable_progress_boundary_zeroes_scores_for_both_sides(self):
+        buy = self._fixed_movement_result("buy", 0.10)
+        sell = self._fixed_movement_result("sell", -0.10)
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], 0.10, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], 0.10, places=6)
+        self.assertEqual(buy["metrics"]["buy_absorption_score"], 0.0)
+        self.assertEqual(sell["metrics"]["sell_absorption_score"], 0.0)
+
+    def test_sell_progress_uses_same_prior_mid_baseline_as_buy(self):
+        result = self._fixed_movement_result("sell", -0.05)
+        self.assertAlmostEqual(result["metrics"]["sell_price_progress_pct"], 0.05, places=6)
+
     def test_high_aggressive_buy_with_limited_progress_is_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("buy"),15)
-        result=detector.analyze(book(),trades("buy"),15)
+        tape=trades("buy")
+        now_ms=int(time.time()*1000); mono=time.monotonic()
+        with patch("app.services.absorption_detector.time.time",side_effect=[now_ms/1000.0,(now_ms+1000)/1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=[mono,mono+1.0]):
+            detector.analyze(book(),tape,15)
+            result=detector.analyze(book(),tape,15)
         self.assertEqual(result["classification"],"POSSIBLE_BUY_ABSORPTION")
         self.assertTrue(result["metrics"]["buy_absorption_candidate"])
         self.assertEqual(result["metrics"]["aggressive_buy_quantity"],8.0)
 
     def test_sell_side_absorption_candidate(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("sell"),15)
-        result=detector.analyze(book(),trades("sell"),15)
+        tape=trades("sell")
+        now_ms=int(time.time()*1000); mono=time.monotonic()
+        with patch("app.services.absorption_detector.time.time",side_effect=[now_ms/1000.0,(now_ms+1000)/1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=[mono,mono+1.0]):
+            detector.analyze(book(),tape,15)
+            result=detector.analyze(book(),tape,15)
         self.assertEqual(result["classification"],"POSSIBLE_SELL_ABSORPTION")
         self.assertTrue(result["metrics"]["sell_absorption_candidate"])
 
@@ -35,13 +103,17 @@ class Phase6DetectorTests(unittest.TestCase):
 
     def test_buy_and_sell_progress_are_temporal_and_directional(self):
         detector=AbsorptionLiquidityDetector()
-        detector.analyze(book(),trades("buy"),15)
-        up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),trades("buy"),15)
-        self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
-        self.assertEqual(up["metrics"]["sell_price_progress_pct"],0.0)
-        down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),trades("sell"),15)
-        self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
-        self.assertEqual(down["metrics"]["buy_price_progress_pct"],0.0)
+        tape=trades("buy")
+        now_ms=int(time.time()*1000); mono=time.monotonic()
+        with patch("app.services.absorption_detector.time.time",side_effect=[now_ms/1000.0,(now_ms+1000)/1000.0,(now_ms+2000)/1000.0]), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=[mono,mono+1.0,mono+2.0]):
+            detector.analyze(book(),tape,15)
+            up=detector.analyze(book(bids=[[100.1,10],[100.0,8]],asks=[[100.2,10],[100.3,8]]),tape,15)
+            self.assertGreater(up["metrics"]["buy_price_progress_pct"],0)
+            self.assertLess(up["metrics"]["sell_price_progress_pct"],0.0)
+            down=detector.analyze(book(bids=[[99.9,10],[99.8,8]],asks=[[100.0,10],[100.1,8]]),tape,15)
+            self.assertGreater(down["metrics"]["sell_price_progress_pct"],0)
+            self.assertLess(down["metrics"]["buy_price_progress_pct"],0.0)
 
     def test_no_clear_absorption_when_tape_below_minimum(self):
         result=AbsorptionLiquidityDetector().analyze(book(),trades(count=2),15)
@@ -72,6 +144,64 @@ class Phase6DetectorTests(unittest.TestCase):
         self.assertIn("quality",result)
         self.assertIn("not an entry",result["diagnostics"][4].lower())
 
+
+
+    def test_rejects_boolean_and_fractional_integer_configuration(self):
+        for value in (True, False, 30.5, 5.5):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "integer"):
+                    AbsorptionLiquidityDetector(history_size=value)
+                with self.assertRaisesRegex(ValueError, "integer"):
+                    AbsorptionLiquidityDetector(min_trades=value)
+
+    def test_rejects_boolean_numeric_configuration(self):
+        with self.assertRaisesRegex(ValueError, "numeric"):
+            AbsorptionLiquidityDetector(max_book_age_seconds=True)
+        with self.assertRaisesRegex(ValueError, "numeric"):
+            AbsorptionLiquidityDetector(absorption_threshold=False)
+
+    def test_rejects_boolean_book_age_and_lookback(self):
+        detector=AbsorptionLiquidityDetector()
+        with self.assertRaisesRegex(ValueError, "age"):
+            detector.analyze(book(age_seconds=True),trades())
+        with self.assertRaisesRegex(ValueError, "Lookback"):
+            detector.analyze(book(),trades(),lookback_seconds=True)
+
+    def test_received_timestamp_is_authoritative_and_future_boundary_is_explicit(self):
+        now_ms=1_000_000
+        valid=[
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms+5000,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":None,"exchange_timestamp_ms":now_ms},
+        ]
+        invalid=[
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":0,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms-60000,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":"bad","exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms+5001,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":now_ms+1.5,"exchange_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":100.05,"received_timestamp_ms":True,"exchange_timestamp_ms":now_ms},
+        ]
+        with patch("app.services.absorption_detector.time.time",return_value=now_ms/1000.0):
+            result=AbsorptionLiquidityDetector().analyze(book(),valid+invalid,15)
+        self.assertEqual(result["trade_count"],3)
+        self.assertEqual(result["metrics"]["aggressive_buy_quantity"],3.0)
+
+    def test_rejects_boolean_trade_price_and_quantity(self):
+        now_ms=1_000_000
+        invalid=[
+            {"side":"buy","quantity":True,"price":100.05,"received_timestamp_ms":now_ms},
+            {"side":"buy","quantity":1,"price":False,"received_timestamp_ms":now_ms},
+        ]
+        with patch("app.services.absorption_detector.time.time",return_value=now_ms/1000.0):
+            result=AbsorptionLiquidityDetector().analyze(book(),invalid,15)
+        self.assertEqual(result["trade_count"],0)
+
+    def test_rejects_boolean_book_level_values(self):
+        with self.assertRaisesRegex(ValueError,"valid levels"):
+            AbsorptionLiquidityDetector().analyze(
+                book(bids=[[True,10.0]],asks=[[100.1,10.0]]),trades(),15
+            )
 
     def test_rejects_negative_and_nonfinite_book_age(self):
         detector=AbsorptionLiquidityDetector()
@@ -128,11 +258,223 @@ class Phase6DetectorTests(unittest.TestCase):
     def test_absorption_requires_baseline_within_lookback(self):
         detector=AbsorptionLiquidityDetector()
         detector.analyze(book(),trades("buy"),lookback_seconds=1)
-        # Simulate a previous observation older than the requested lookback.
-        detector._history["bybit:BTCUSDT"][-1]["timestamp"]-=2000
+        # Simulate the temporal baseline older than the requested lookback.
+        detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"]-=2000
+        detector._price_progress_baselines["bybit:BTCUSDT"]["monotonic_timestamp"]-=2000
         result=detector.analyze(book(),trades("buy"),lookback_seconds=1)
+        self.assertFalse(result["metrics"]["price_progress_baseline_valid"])
         self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
         self.assertEqual(result["metrics"]["buy_absorption_score"],0.0)
+
+    def test_subthreshold_midpoint_noise_can_still_score_candidates(self):
+        buy = self._fixed_movement_result("buy", 0.02)
+        sell = self._fixed_movement_result("sell", -0.02)
+        # Small moves below the 0.10% heuristic threshold still leave 0.80 scores.
+        self.assertAlmostEqual(buy["metrics"]["buy_price_progress_pct"], 0.02, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_price_progress_pct"], 0.02, places=6)
+        self.assertAlmostEqual(buy["metrics"]["buy_absorption_score"], 0.8, places=6)
+        self.assertAlmostEqual(sell["metrics"]["sell_absorption_score"], 0.8, places=6)
+        self.assertTrue(buy["metrics"]["buy_absorption_candidate"])
+        self.assertTrue(sell["metrics"]["sell_absorption_candidate"])
+
+
+    def test_minimum_temporal_baseline_interval_is_enforced_at_999_and_1000_ms(self):
+        below=self._fixed_movement_result("buy",0.0,elapsed_ms=999)
+        exact=self._fixed_movement_result("buy",0.0,elapsed_ms=1000)
+        self.assertEqual(below["metrics"]["price_progress_baseline_age_ms"],999)
+        self.assertFalse(below["metrics"]["price_progress_baseline_valid"])
+        self.assertEqual(below["metrics"]["buy_absorption_score"],0.0)
+        self.assertEqual(exact["metrics"]["price_progress_baseline_age_ms"],1000)
+        self.assertTrue(exact["metrics"]["price_progress_baseline_valid"])
+        self.assertEqual(exact["metrics"]["buy_absorption_score"],1.0)
+
+    def test_rapid_polls_do_not_replace_temporal_baseline_before_minimum_interval(self):
+        detector=AbsorptionLiquidityDetector()
+        now_ms=1_000_000
+        mono=100.0
+        tape=[{"side":"buy","quantity":1.0,"price":100.05,"received_timestamp_ms":now_ms} for _ in range(8)]
+        times=[now_ms/1000.0,(now_ms+500)/1000.0,(now_ms+999)/1000.0,(now_ms+1000)/1000.0]
+        monotonic_times=[mono,mono+0.5,mono+0.999,mono+1.0]
+        results=[]
+        with patch("app.services.absorption_detector.time.time",side_effect=times), \
+             patch("app.services.absorption_detector.time.monotonic",side_effect=monotonic_times):
+            results.append(detector.analyze(book(),tape,15))
+            results.append(detector.analyze(book(),tape,15))
+            results.append(detector.analyze(book(),tape,15))
+            self.assertEqual(detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"],now_ms)
+            results.append(detector.analyze(book(),tape,15))
+        ages=[r["metrics"]["price_progress_baseline_age_ms"] for r in results]
+        valid=[r["metrics"]["price_progress_baseline_valid"] for r in results]
+        scores=[r["metrics"]["buy_absorption_score"] for r in results]
+        self.assertEqual(ages,[None,500,999,1000])
+        self.assertEqual(valid,[False,False,False,True])
+        self.assertEqual(scores,[0.0,0.0,0.0,1.0])
+        self.assertEqual(detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"],now_ms+1000)
+
+class Phase6SpatialVwapAndApiTests(unittest.TestCase):
+    def test_vwap_vs_mid_sign_is_aggressor_side_normalized_not_temporal_progress(self):
+        # With a 100.00 bid / 100.10 ask, midpoint is 100.05.
+        buy_at_ask = AbsorptionLiquidityDetector().analyze(
+            book(), trades("buy", count=8, price=100.10), 15
+        )
+        sell_at_bid = AbsorptionLiquidityDetector().analyze(
+            book(), trades("sell", count=8, price=100.00), 15
+        )
+        buy_below_mid = AbsorptionLiquidityDetector().analyze(
+            book(), trades("buy", count=8, price=100.00), 15
+        )
+        sell_above_mid = AbsorptionLiquidityDetector().analyze(
+            book(), trades("sell", count=8, price=100.10), 15
+        )
+        self.assertLess(buy_at_ask["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertLess(sell_at_bid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
+        self.assertGreater(buy_below_mid["metrics"]["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertGreater(sell_above_mid["metrics"]["sell_vwap_vs_mid_pct"], 0.0)
+        self.assertAlmostEqual(buy_at_ask["metrics"]["buy_vwap_vs_mid_pct"], -0.049975, places=6)
+        self.assertAlmostEqual(sell_at_bid["metrics"]["sell_vwap_vs_mid_pct"], -0.049975, places=6)
+        self.assertAlmostEqual(buy_below_mid["metrics"]["buy_vwap_vs_mid_pct"], 0.049975, places=6)
+        self.assertAlmostEqual(sell_above_mid["metrics"]["sell_vwap_vs_mid_pct"], 0.049975, places=6)
+        # Spatial VWAP offset alone is not temporal midpoint progress.
+        self.assertEqual(buy_at_ask["metrics"]["buy_price_progress_pct"], 0.0)
+        self.assertEqual(sell_at_bid["metrics"]["sell_price_progress_pct"], 0.0)
+        self.assertEqual(buy_at_ask["metrics"]["buy_absorption_score"], 0.0)
+        self.assertEqual(sell_at_bid["metrics"]["sell_absorption_score"], 0.0)
+
+    def test_api_exposes_spatial_temporal_metrics_and_uncalibrated_micro_volume_candidate(self):
+        import asyncio
+        from app import main
+
+        now_ms = int(time.time() * 1000)
+        tiny_tape = [
+            {"side": "buy", "quantity": 1e-9, "price": 100.10,
+             "received_timestamp_ms": now_ms}
+            for _ in range(8)
+        ]
+        thin_book = book(bids=[[100.00, 1e-8]], asks=[[100.10, 1e-8]])
+        class MarketStub:
+            def get_book(self, exchange, symbol): return thin_book
+            def get_recent_trades(self, exchange, symbol, limit): return tiny_tape[:limit]
+
+        detector = AbsorptionLiquidityDetector()
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0), \
+             patch.object(main.app.state, "unified_market_data", MarketStub(), create=True), \
+             patch.object(main.app.state, "absorption_detector", detector, create=True):
+            asyncio.run(main.analyze_absorption("bybit", "BTCUSDT", 15, 500))
+            detector._price_progress_baselines["bybit:BTCUSDT"]["timestamp"]-=1000
+            detector._price_progress_baselines["bybit:BTCUSDT"]["monotonic_timestamp"]-=1000
+            result = asyncio.run(main.analyze_absorption("bybit", "BTCUSDT", 15, 500))
+
+        metrics = result["metrics"]
+        self.assertIn("buy_vwap_vs_mid_pct", metrics)
+        self.assertIn("sell_vwap_vs_mid_pct", metrics)
+        self.assertIn("buy_price_progress_pct", metrics)
+        self.assertIn("sell_price_progress_pct", metrics)
+        self.assertLess(metrics["buy_vwap_vs_mid_pct"], 0.0)
+        self.assertAlmostEqual(metrics["buy_vwap_vs_mid_pct"], -0.049975, places=6)
+        self.assertGreaterEqual(metrics["price_progress_baseline_age_ms"],1000)
+        self.assertTrue(metrics["price_progress_baseline_valid"])
+        self.assertEqual(metrics["price_progress_min_interval_ms"],1000)
+        self.assertEqual(metrics["buy_price_progress_pct"], 0.0)
+        self.assertEqual(metrics["buy_absorption_score"], 1.0)
+        self.assertTrue(metrics["buy_absorption_candidate"])
+        self.assertEqual(metrics["top5_bid_depth"], 1e-8)
+        self.assertEqual(metrics["top5_ask_depth"], 1e-8)
+        self.assertTrue(any("not an entry" in item.lower() for item in result["diagnostics"]))
+
+    def test_api_same_timestamp_poll_does_not_score_zero_progress_absorption(self):
+        import asyncio
+        from app import main
+
+        now_ms=int(time.time()*1000)
+        tiny_tape=[{"side":"buy","quantity":1e-9,"price":100.10,"received_timestamp_ms":now_ms} for _ in range(8)]
+        thin_book=book(bids=[[100.00,1e-8]],asks=[[100.10,1e-8]])
+        class MarketStub:
+            def get_book(self,exchange,symbol): return thin_book
+            def get_recent_trades(self,exchange,symbol,limit): return tiny_tape[:limit]
+
+        detector=AbsorptionLiquidityDetector()
+        with patch("app.services.absorption_detector.time.time",return_value=now_ms/1000.0), \
+             patch.object(main.app.state,"unified_market_data",MarketStub(),create=True), \
+             patch.object(main.app.state,"absorption_detector",detector,create=True):
+            asyncio.run(main.analyze_absorption("bybit","BTCUSDT",15,500))
+            detector._price_progress_baselines["bybit:BTCUSDT"]["monotonic_timestamp"]=700000
+            with patch("app.services.absorption_detector.time.monotonic",return_value=700.0):
+                result=asyncio.run(main.analyze_absorption("bybit","BTCUSDT",15,500))
+
+        metrics=result["metrics"]
+        self.assertEqual(metrics["price_progress_baseline_age_ms"],0)
+        self.assertFalse(metrics["price_progress_baseline_valid"])
+        self.assertEqual(metrics["buy_price_progress_pct"],0.0)
+        self.assertEqual(metrics["buy_absorption_score"],0.0)
+        self.assertFalse(metrics["buy_absorption_candidate"])
+        self.assertEqual(result["classification"],"NO_CLEAR_ABSORPTION")
+
+class Phase6NumericOverflowTests(unittest.TestCase):
+    def test_absorption_api_refuses_binance_book_without_snapshot_bridge(self):
+        import asyncio
+        from fastapi import HTTPException
+        from app import main
+        from app.market_data.unified_engine import UnifiedMarketDataEngine
+
+        engine = UnifiedMarketDataEngine()
+        result = engine.process("binance", {
+            "e": "depthUpdate", "s": "BTCUSDT", "U": 101, "u": 102,
+            "b": [["100.0", "1.0"]], "a": [["101.0", "2.0"]]
+        })
+        self.assertFalse(result["synchronized"])
+        unsafe_book = engine.get_book("binance", "BTCUSDT")
+        self.assertFalse(unsafe_book["synchronized"])
+        class MarketStub:
+            def get_book(self, exchange, symbol):
+                return unsafe_book
+            def get_recent_trades(self, exchange, symbol, limit):
+                return trades("buy", count=8)
+        with patch.object(main.app.state, "unified_market_data", MarketStub(), create=True), \
+             patch.object(main.app.state, "absorption_detector", AbsorptionLiquidityDetector(), create=True):
+            with self.assertRaises(HTTPException) as exc:
+                asyncio.run(main.analyze_absorption("binance", "BTCUSDT", 15, 500))
+        self.assertEqual(exc.exception.status_code, 422)
+
+    def test_finite_depth_change_that_overflows_percentage_is_refused_without_mutating_history(self):
+        detector = AbsorptionLiquidityDetector()
+        now_ms = 1_000_000
+        thin = book(bids=[[100.0, 1e-308]], asks=[[100.1, 1e-308]])
+        extreme = book(bids=[[100.0, 1e308]], asks=[[100.1, 1e308]])
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0):
+            detector.analyze(thin, [], 15)
+            with self.assertRaisesRegex(ValueError, "Liquidity observation"):
+                detector.analyze(extreme, [], 15)
+        self.assertEqual(len(detector._history["bybit:BTCUSDT"]), 1)
+
+    def test_large_finite_book_prices_use_overflow_safe_midpoint_and_json(self):
+        detector = AbsorptionLiquidityDetector()
+        extreme_book = book(bids=[[1.6e308, 10.0]], asks=[[1.7e308, 10.0]])
+        now_ms = 1_000_000
+        tape = [
+            {"side": "buy", "quantity": 1.0, "price": 1e100,
+             "received_timestamp_ms": now_ms}
+            for _ in range(8)
+        ]
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0):
+            detector.analyze(extreme_book, tape, 15)
+            result = detector.analyze(extreme_book, tape, 15)
+        mid = result["metrics"]["mid_price"]
+        self.assertAlmostEqual(mid / 1e308, 1.65, places=10)
+        json.dumps(result, allow_nan=False)
+
+    def test_finite_trade_inputs_that_overflow_notional_aggregate_are_rejected_without_history(self):
+        detector = AbsorptionLiquidityDetector()
+        now_ms = 1_000_000
+        tape = [
+            {"side": "buy", "quantity": 1.0, "price": 1.2e308,
+             "received_timestamp_ms": now_ms}
+            for _ in range(2)
+        ]
+        with patch("app.services.absorption_detector.time.time", return_value=now_ms / 1000.0):
+            with self.assertRaisesRegex(ValueError, "non-finite"):
+                detector.analyze(book(), tape, 15)
+        self.assertEqual(detector._history, {})
+
 
 if __name__=="__main__":
     unittest.main()

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -11,7 +12,7 @@ from app.services.binance_connectivity_diagnostics import run_binance_diagnostic
 from app.execution.order_service import DemoOrderService, OrderRejected
 from app.market_data.backend_stream import BinanceOrderBookStream
 from app.market_data.unified_engine import UnifiedMarketDataEngine
-from app.exchanges.manager import ExchangeConnectionManager, BinancePublicAdapter, BybitPublicAdapter, DeltaPublicAdapter
+from app.exchanges.manager import ExchangeConnectionManager, BinanceMarketAdapter, BybitPublicAdapter, DeltaPublicAdapter
 from app.services.coin_scanner import CoinMarketScanner
 from app.services.opportunity_ranker import OpportunityRanker
 from app.services.imbalance_detector import OrderBookImbalanceDetector
@@ -37,13 +38,36 @@ import time
 logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO').upper(),format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger=logging.getLogger('orderflow-scalper')
 
+async def _bridge_binance_book_once(stream, engine, last_key):
+    """Bridge one validated full Binance snapshot into unified market data; do not refresh unchanged books."""
+    status = await stream.get_status()
+    book = await stream.get_order_book()
+    if book is None:
+        reason = status.get("last_error") or status.get("last_disconnect_reason") or "Binance depth stream unsynchronized or stale"
+        engine.invalidate_binance_bridge_book(stream.symbol, reason)
+        return None
+    key = (book.get("last_update_id"), status.get("snapshot_count"))
+    if key != last_key:
+        normalized = {
+            **book,
+            "exchange": "binance",
+            "symbol": stream.symbol,
+            "synchronized": True,
+            "stale": False,
+        }
+        if not engine.apply_binance_bridge_book(normalized):
+            engine.invalidate_binance_bridge_book(stream.symbol, "Unified engine rejected Binance bridged book")
+            return None
+    return key
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.monitoring_service=MonitoringService()
     app.state.database=database
     await database.start()
-    stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     engine=UnifiedMarketDataEngine(); app.state.unified_market_data=engine
+    stream=BinanceOrderBookStream(symbol="BTCUSDT"); app.state.market_stream=stream
     app.state.coin_scanner=CoinMarketScanner()
     app.state.opportunity_ranker=OpportunityRanker()
     app.state.imbalance_detector=OrderBookImbalanceDetector()
@@ -71,14 +95,34 @@ async def lifespan(app: FastAPI):
     set_runtime(runtime)
     callback=lambda exchange,payload: engine.process(exchange,payload)
     manager=ExchangeConnectionManager([
-        BinancePublicAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
+        BinanceMarketAdapter(enabled=settings.binance_public_enabled,symbol="BTCUSDT",on_message=callback),
         BybitPublicAdapter(enabled=settings.bybit_public_enabled,symbol=settings.bybit_public_symbol,on_message=callback),
         DeltaPublicAdapter(enabled=settings.delta_public_enabled,symbol=settings.delta_public_symbol,on_message=callback),
     ])
     app.state.exchange_manager=manager
     try:
-        await stream.start(); await manager.start()
-        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':3,'supabase_connected':database.connected})
+        bridge_stop=None
+        bridge_task=None
+        if settings.binance_public_enabled:
+            await stream.start()
+            bridge_stop=asyncio.Event()
+            async def bridge_loop():
+                last_key=None
+                while not bridge_stop.is_set():
+                    try:
+                        last_key=await _bridge_binance_book_once(stream,engine,last_key)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as bridge_exc:
+                        engine.invalidate_binance_bridge_book(stream.symbol, "Bridge polling error: "+type(bridge_exc).__name__)
+                        last_key=None
+                        logger.exception("Binance unified book bridge failed")
+                    await asyncio.sleep(0.1)
+            bridge_task=asyncio.create_task(bridge_loop())
+        else:
+            engine.invalidate_binance_bridge_book(stream.symbol, "Binance public depth feed disabled by configuration")
+        await manager.start()
+        app.state.monitoring_service.record('INFO','startup_complete',{'exchange_adapters':int(settings.binance_public_enabled)+int(settings.bybit_public_enabled)+int(settings.delta_public_enabled),'binance_depth_bridge':settings.binance_public_enabled,'supabase_connected':database.connected})
         await repository.engine_state(mode='DEMO_PAPER_ONLY',status='running',execution_enabled=False,state={'autonomous_entry_enabled':False,'paper_only':True})
         await repository.system_log('INFO','Backend startup completed','lifecycle',{'database_connected':database.connected,'mode':'PAPER_ONLY'})
         yield
@@ -87,6 +131,11 @@ async def lifespan(app: FastAPI):
         logger.exception('Application lifecycle error')
         raise
     finally:
+        if bridge_stop is not None:
+            bridge_stop.set()
+        if bridge_task is not None:
+            try: await bridge_task
+            except asyncio.CancelledError: pass
         try: await persistence_worker.stop()
         except Exception: logger.exception('Paper persistence worker shutdown error')
         try: await repository.engine_state(mode='DEMO_PAPER_ONLY',status='stopped',execution_enabled=False,state={'autonomous_entry_enabled':False,'paper_only':True})
@@ -200,15 +249,11 @@ async def health():
 
 @app.get("/api/database/status")
 async def database_status():
-    # Diagnostic endpoint performs a real DB check and heartbeat write so that
-    # connectivity status is based on an actual write, not only a successful read.
+    # Read-only diagnostic: verifies REST connectivity with a SELECT; never writes.
     await database.check_connection()
-    heartbeat_written = False
-    if database.connected:
-        heartbeat_written = await database.write_heartbeat("diagnostic", {"trigger": "database_status_endpoint"})
     result = await database.status(refresh=False)
-    result["heartbeat_write_verified"] = heartbeat_written
-    result["diagnostic_mode"] = "read_and_write"
+    result["heartbeat_write_verified"] = None
+    result["diagnostic_mode"] = "read_only"
     return result
 @app.get("/api/monitoring/diagnostics")
 async def monitoring_diagnostics():
@@ -232,12 +277,14 @@ async def market_data_observability():
     primary=await app.state.market_stream.get_status()
     exchanges=await app.state.exchange_manager.status()
     return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
-        "live_execution_enabled":False,"primary_binance_demo_stream":primary,
+        "live_execution_enabled":False,"primary_binance_live_stream":primary,
         "unified_market_data":unified,"exchange_connections":exchanges,
         "summary":{"exchange_adapter_count":len(exchanges.get("exchanges",[])),
           "unified_book_count":len(unified.get("books",{})),
           "synchronized_book_count":sum(1 for b in unified.get("books",{}).values() if b.get("synchronized") and not b.get("stale")),
           "healthy_feed_count":sum(1 for e in exchanges.get("exchanges",[]) if e.get("connected") and e.get("last_message_age_seconds") is not None and e.get("last_message_age_seconds")<=unified.get("stale_after_seconds",3)),
+          "binance_depth_bridge_healthy":primary.get("healthy",False),
+          "binance_unified_book_synchronized":unified.get("books",{}).get("binance:BTCUSDT",{}).get("synchronized",False),
           "feed_errors":sum(1 for e in exchanges.get("exchanges",[]) if e.get("last_error")),
           "safety":"PUBLIC_FEEDS_ONLY; REAL_EXCHANGE_ORDERS_DISABLED"}}
 
@@ -475,9 +522,13 @@ async def paper_submit_order(request:PaperOrderRequest):
     actual_risk=abs(request.price-request.stop_loss_price)*request.quantity+request.quantity*(request.price+request.stop_loss_price)*paper_engine.fee_rate
     notional=request.price*request.quantity
     account=paper_engine.account()
+    unified_market_data=getattr(app.state,"unified_market_data",None)
+    book=unified_market_data.get_book("binance",request.symbol) if unified_market_data is not None else None
+    max_age_seconds=getattr(unified_market_data,"stale_after_seconds",None)
+    synchronized_book=risk_engine.is_synchronized_fresh_book(book,max_age_seconds)
     gate=risk_engine.evaluate_runtime_gate(account_equity=account["equity"],closed_trades=paper_engine.closed_trades,
         orders=paper_engine.orders,positions=paper_engine.positions,symbol=request.symbol.upper(),config=config,
-        synchronized_book=True,proposed_trade_risk_cash=actual_risk,proposed_notional=notional,proposed_leverage=request.leverage,risk_limit_basis_equity=account.get("initial_equity",account.get("equity",0)),fee_rate=paper_engine.fee_rate)
+        synchronized_book=synchronized_book,proposed_trade_risk_cash=actual_risk,proposed_notional=notional,proposed_leverage=request.leverage,risk_limit_basis_equity=account.get("initial_equity",account.get("equity",0)),fee_rate=paper_engine.fee_rate)
     if not gate["allowed"]:
         raise HTTPException(status_code=409,detail={"message":"Phase E risk gate rejected paper entry.","blockers":gate["blockers"],"risk":gate})
     try: return paper_engine.submit(request.model_dump())

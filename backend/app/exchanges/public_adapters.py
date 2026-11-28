@@ -11,6 +11,7 @@ logger=logging.getLogger(__name__)
 class PublicExchangeAdapter(ABC):
     def __init__(self,name,enabled,url,symbol="BTCUSDT",on_message:Callable[[str,Any],None]|None=None):
         self.name=name; self.enabled=enabled; self.url=url; self.symbol=symbol.upper(); self.on_message=on_message
+        self.feed_type="unspecified"
         self.connected=False; self.last_message_at=None; self.last_error=None; self.reconnect_count=0
         self._task=None; self._stop=asyncio.Event()
     @abstractmethod
@@ -34,7 +35,7 @@ class PublicExchangeAdapter(ABC):
             try:
                 async with websockets.connect(self.url,ping_interval=20,ping_timeout=20,close_timeout=5,max_size=2**20) as ws:
                     self.connected=True; self.last_error=None; delay=1
-                    logger.info("%s public websocket connected",self.name)
+                    logger.info("%s %s websocket connected",self.name,self.feed_type)
                     await self._on_connected(ws); await self._subscribe(ws)
                     async for msg in ws:
                         if self._stop.is_set(): break
@@ -44,7 +45,12 @@ class PublicExchangeAdapter(ABC):
                             parsed=json.loads(msg)
                             if isinstance(parsed,dict) and parsed.get("success") is False:
                                 self.last_error=str(parsed.get("ret_msg") or parsed.get("error") or parsed)
-                            if self.on_message: self.on_message(self.name,parsed)
+                            if self.on_message:
+                                result = self.on_message(self.name, parsed)
+                                if isinstance(result, dict) and result.get("resync_required"):
+                                    raise ConnectionError(
+                                        result.get("error") or "Market-data book requires resynchronization"
+                                    )
                         except (json.JSONDecodeError,TypeError) as err:
                             self.last_error="Message parse error: "+str(err)
             except asyncio.CancelledError: raise
@@ -55,14 +61,24 @@ class PublicExchangeAdapter(ABC):
                 self.reconnect_count+=1; await asyncio.sleep(delay); delay=min(delay*2,30)
     async def status(self):
         age=None if self.last_message_at is None else round(time.time()-self.last_message_at,3)
-        return {"exchange":self.name,"enabled":self.enabled,"connected":self.connected,"symbol":self.symbol,
+        return {"exchange":self.name,"feed_type":self.feed_type,"enabled":self.enabled,"connected":self.connected,"symbol":self.symbol,
             "last_message_age_seconds":age,"reconnect_count":self.reconnect_count,"last_error":self.last_error,
             "purpose":"public feed connection and normalized data callback"}
 
 class BinancePublicAdapter(PublicExchangeAdapter):
+    """USD-M high-frequency depth feed on the routed Public endpoint."""
     def __init__(self,enabled,symbol="BTCUSDT",on_message=None):
-        streams=f"{symbol.lower()}@depth@100ms/{symbol.lower()}@aggTrade"
-        super().__init__("binance",enabled,f"wss://fstream.binance.com/stream?streams={streams}",symbol,on_message)
+        stream=f"{symbol.lower()}@depth@100ms"
+        super().__init__("binance",enabled,f"wss://fstream.binance.com/public/stream?streams={stream}",symbol,on_message)
+        self.feed_type="depth"
+    async def _subscribe(self,websocket): return
+
+class BinanceMarketAdapter(PublicExchangeAdapter):
+    """USD-M aggregate trades on the routed Market endpoint."""
+    def __init__(self,enabled,symbol="BTCUSDT",on_message=None):
+        stream=f"{symbol.lower()}@aggTrade"
+        super().__init__("binance",enabled,f"wss://fstream.binance.com/market/stream?streams={stream}",symbol,on_message)
+        self.feed_type="aggregate_trades"
     async def _subscribe(self,websocket): return
 
 class BybitPublicAdapter(PublicExchangeAdapter):
@@ -72,10 +88,10 @@ class BybitPublicAdapter(PublicExchangeAdapter):
         await websocket.send(json.dumps({"op":"subscribe","args":[f"orderbook.50.{self.symbol}",f"publicTrade.{self.symbol}"]}))
 
 class DeltaPublicAdapter(PublicExchangeAdapter):
-    def __init__(self,enabled,symbol="BTCUSDT",on_message=None):
+    def __init__(self,enabled,symbol="BTCUSD",on_message=None):
         super().__init__("delta",enabled,"wss://socket-ind-pub.testnet.deltaex.org",symbol,on_message)
     async def _subscribe(self,websocket):
-        await websocket.send(json.dumps({"type":"subscribe","payload":{"channels":[{"name":"ob_l2","symbols":[self.symbol]},{"name":"trades","symbols":[self.symbol]}]}}))
+        await websocket.send(json.dumps({"type":"subscribe","payload":{"channels":[{"name":"ob_updates","symbols":[self.symbol]},{"name":"trades","symbols":[self.symbol]}]}}))
     async def _on_connected(self,websocket):
         await websocket.send(json.dumps({"type":"enable_heartbeat"}))
 

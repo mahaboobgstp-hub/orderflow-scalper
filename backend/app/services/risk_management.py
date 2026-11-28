@@ -26,6 +26,36 @@ class RiskManagementEngine:
             return n if math.isfinite(n) else None
         except (TypeError,ValueError): return None
 
+    @staticmethod
+    def is_synchronized_fresh_book(book: dict[str, Any] | None, max_age_seconds: float | None) -> bool:
+        """Fail closed unless the book is synchronized, fresh, finite, and uncrossed."""
+        if not isinstance(book, dict):
+            return False
+        if book.get("synchronized") is not True or book.get("stale") is not False:
+            return False
+        if book.get("integrity_error") is not None:
+            return False
+        age_value = book.get("age_seconds")
+        bid_value = book.get("best_bid")
+        ask_value = book.get("best_ask")
+        if any(isinstance(value, bool) for value in (age_value, bid_value, ask_value, max_age_seconds)):
+            return False
+        age = RiskManagementEngine._finite(age_value)
+        max_age = RiskManagementEngine._finite(max_age_seconds)
+        bid = RiskManagementEngine._finite(bid_value)
+        ask = RiskManagementEngine._finite(ask_value)
+        return (
+            age is not None
+            and max_age is not None
+            and max_age >= 0
+            and 0 <= age <= max_age
+            and bid is not None
+            and bid > 0
+            and ask is not None
+            and ask > bid
+        )
+
+
     def status(self):
         return {"phase":10,"engine":"risk_management_position_sizing","mode":"calculation_only","order_execution":False,"kill_switch":self.kill_switch_status(),"default_limits":self.defaults.copy(),"notes":["Risk settings are conservative starter defaults, not personalized financial advice.","Risk calculation assumes stop-loss is executed at the specified stop price; gaps/slippage may increase realized loss."]}
 

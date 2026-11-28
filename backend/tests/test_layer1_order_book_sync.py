@@ -1,8 +1,12 @@
 import asyncio
+import json
 import time
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
 
-from app.market_data.backend_stream import BinanceOrderBookStream
+from app.market_data.backend_stream import BinanceOrderBookStream, REST_BASE_URL, WEBSOCKET_BASE_URL
+from app.market_data.unified_engine import UnifiedMarketDataEngine
 
 
 class BinanceOrderBookSynchronizationTests(unittest.TestCase):
@@ -19,6 +23,43 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         if previous is not None:
             event["pu"] = previous
         return event
+
+    def test_rejects_boolean_and_fractional_live_sequence_ids(self):
+        self.stream.last_update_id = 101
+        malformed_events = [
+            self.event(True, 103, previous=101),
+            self.event(102, 103.5, previous=101),
+            self.event(102, 103, previous=101.5),
+            self.event(102, -1, previous=101),
+        ]
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        for event in malformed_events:
+            with self.subTest(event=event):
+                self.assertFalse(self.stream._apply_event(event))
+                self.assertEqual(self.stream.last_update_id, 101)
+                self.assertEqual(self.stream.bids, before_bids)
+                self.assertEqual(self.stream.asks, before_asks)
+
+    def test_reversed_update_id_range_rejected_without_mutation(self):
+        self.stream.last_update_id = 101
+        event = self.event(105, 104, bids=[["99.0", "9.0"]], previous=101)
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event(event))
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
+    def test_snapshot_update_id_rejects_boolean_fractional_and_negative(self):
+        valid_snapshot = {
+            "bids": [["100.0", "2.0"]],
+            "asks": [["101.0", "4.0"]],
+        }
+        for invalid_id in (True, 100.5, -1):
+            with self.subTest(invalid_id=invalid_id):
+                with self.assertRaisesRegex(ValueError, "lastUpdateId"):
+                    self.stream._load_snapshot({**valid_snapshot, "lastUpdateId": invalid_id})
 
     def test_event_covered_by_snapshot_is_not_bridge(self):
         self.assertFalse(self.stream._event_bridges_snapshot(self.event(98, 99)))
@@ -80,40 +121,170 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(self.stream.last_update_id, 101)
         self.assertEqual(self.stream.asks[101.0], 4.0)
 
-    def test_overlapping_event_without_previous_id_is_applied(self):
-        e = self.event(101, 102, asks=[["101.0", "0"], ["100.5", "3"]])
+    def test_live_event_missing_pu_is_rejected_even_if_u_is_contiguous(self):
+        e = self.event(102, 103, asks=[["101.0", "0"], ["100.5", "3"]])
         self.stream.last_update_id = 101
-        self.assertTrue(self.stream._apply_event(e))
-        self.assertEqual(self.stream.last_update_id, 102)
-        self.assertNotIn(101.0, self.stream.asks)
-        self.assertEqual(self.stream.asks[100.5], 3.0)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event(e))
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.asks, before_asks)
 
-    def test_invalid_numeric_update_is_not_silently_applied(self):
-        e = self.event(101, 102, bids=[["not-a-price", "2"]])
+    def test_invalid_numeric_update_is_rejected_without_mutation(self):
+        e = self.event(101, 102, bids=[["not-a-price", "2"]], previous=101)
         self.stream.last_update_id = 101
-        with self.assertRaises((ValueError, TypeError)):
-            self.stream._apply_event(e)
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        self.assertFalse(self.stream._apply_event(e))
+        self.assertEqual(self.stream.last_update_id, 101)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
+    def test_nonfinite_and_negative_depth_updates_rejected_atomically(self):
+        self.stream.last_update_id = 100
+        invalid_cases = [
+            ([["99.5", "7.0"]], [["101.0", "NaN"]]),  # valid bid must not apply
+            ([["NaN", "2.0"]], []),
+            ([["99.0", "Infinity"]], []),
+            ([["99.0", "-1.0"]], []),
+            ([["-99.0", "2.0"]], []),
+            ([["99.0", True]], []),
+        ]
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        for bids, asks in invalid_cases:
+            with self.subTest(bids=bids, asks=asks):
+                event = self.event(101, 102, bids=bids, asks=asks, previous=100)
+                self.assertFalse(self.stream._apply_event(event))
+                self.assertEqual(self.stream.last_update_id, 100)
+                self.assertEqual(self.stream.bids, before_bids)
+                self.assertEqual(self.stream.asks, before_asks)
+
+    def test_invalid_snapshot_levels_rejected_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_id = self.stream.last_update_id
+        before_snapshot_count = self.stream.snapshot_count
+        bad_snapshot = {
+            "lastUpdateId": 200,
+            "bids": [["99.0", "1.0"]],
+            "asks": [["NaN", "2.0"]],
+        }
+        with self.assertRaisesRegex(ValueError, "invalid depth levels"):
+            self.stream._load_snapshot(bad_snapshot)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_id)
+        self.assertEqual(self.stream.snapshot_count, before_snapshot_count)
+
+    def test_crossed_snapshot_rejected_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_id = self.stream.last_update_id
+        before_snapshot_count = self.stream.snapshot_count
+        with self.assertRaisesRegex(ValueError, "empty, locked, or crossed"):
+            self.stream._load_snapshot({
+                "lastUpdateId": 200,
+                "bids": [["101.0", "2.0"]],
+                "asks": [["100.0", "3.0"]],
+            })
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_id)
+        self.assertEqual(self.stream.snapshot_count, before_snapshot_count)
+
+    def test_empty_side_snapshot_rejected_without_mutation(self):
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        before_id = self.stream.last_update_id
+        with self.assertRaisesRegex(ValueError, "empty, locked, or crossed"):
+            self.stream._load_snapshot({
+                "lastUpdateId": 200,
+                "bids": [["100.0", "2.0"]],
+                "asks": [],
+            })
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+        self.assertEqual(self.stream.last_update_id, before_id)
+
+    def test_crossed_live_update_rejected_without_mutation(self):
+        self.stream.last_update_id = 100
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        event = self.event(101, 101, bids=[["102.0", "1.0"]], previous=100)
+        self.assertFalse(self.stream._apply_event(event))
+        self.assertEqual(self.stream.last_update_id, 100)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
+    def test_live_update_that_removes_all_asks_rejected_atomically(self):
+        self.stream.last_update_id = 100
+        before_bids = dict(self.stream.bids)
+        before_asks = dict(self.stream.asks)
+        event = self.event(101, 101, asks=[["101.0", "0"], ["102.0", "0"]], previous=100)
+        self.assertFalse(self.stream._apply_event(event))
+        self.assertEqual(self.stream.last_update_id, 100)
+        self.assertEqual(self.stream.bids, before_bids)
+        self.assertEqual(self.stream.asks, before_asks)
+
+    def test_api_fails_closed_if_book_is_crossed(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = time.time()
+        self.stream.bids = {102.0: 2.0}
+        self.stream.asks = {101.0: 3.0}
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
     def test_stale_book_is_not_returned(self):
         self.stream.connected = True
         self.stream.synchronized = True
         self.stream.last_book_update_at = time.time() - 10
+        self.stream.last_book_update_monotonic = time.monotonic() - 10
         self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_monotonic_clock_rejects_stale_book_after_wall_clock_rollback(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = 1000.0
+        self.stream.last_book_update_monotonic = 490.0
+        with patch("app.market_data.backend_stream.time.time", return_value=1.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=500.0
+        ):
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+            status = asyncio.run(self.stream.get_status())
+            self.assertTrue(status["stale"])
+            self.assertEqual(status["last_book_update_age_seconds"], 10.0)
+
+    def test_delayed_event_receipt_does_not_refresh_stale_book(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_update_id = 100
+        event = self.event(101, 101, bids=[["99.5", "1.0"]], previous=100)
+        event["_received_monotonic"] = 480.0
+        with patch("app.market_data.backend_stream.time.monotonic", return_value=500.0):
+            self.assertTrue(self.stream._apply_event(event))
+            self.assertEqual(self.stream.last_book_update_monotonic, 480.0)
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+            status = asyncio.run(self.stream.get_status())
+            self.assertTrue(status["stale"])
+            self.assertEqual(status["last_book_update_age_seconds"], 20.0)
 
     def test_duplicate_event_does_not_refresh_stale_book(self):
         self.stream.connected = True
         self.stream.synchronized = True
         old_progress = time.time() - 10
+        old_progress_monotonic = time.monotonic() - 10
         self.stream.last_book_update_at = old_progress
+        self.stream.last_book_update_monotonic = old_progress_monotonic
         self.assertTrue(self.stream._apply_event(self.event(90, 100)))
         self.assertEqual(self.stream.last_book_update_at, old_progress)
+        self.assertEqual(self.stream.last_book_update_monotonic, old_progress_monotonic)
         self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
     def test_progressing_event_refreshes_book_and_returns_age(self):
         self.stream.connected = True
         self.stream.synchronized = True
         self.stream.last_book_update_at = None
-        event = self.event(101, 101, bids=[["99.5", "1.0"]])
+        event = self.event(101, 101, bids=[["99.5", "1.0"]], previous=100)
         self.assertTrue(self.stream._apply_event(event))
         book = asyncio.run(self.stream.get_order_book())
         self.assertIsNotNone(book)
@@ -126,6 +297,144 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertIsNotNone(self.stream.last_update_id)
 
 
+class _L12FakeWebsocket:
+    def __init__(self, events, stop_event=None):
+        self.events = events
+        self.stop_event = stop_event
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for event in self.events:
+            await asyncio.sleep(0)
+            yield json.dumps(event)
+        if self.stop_event is not None:
+            self.stop_event.set()
+
+
+class _L12FakeConnection:
+    def __init__(self, websocket):
+        self.websocket = websocket
+
+    async def __aenter__(self):
+        return self.websocket
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class BinanceInitialBridgeReconnectTests(unittest.IsolatedAsyncioTestCase):
+    def _event(self, U, u, pu=None):
+        event = {"U": U, "u": u, "b": [], "a": []}
+        if pu is not None:
+            event["pu"] = pu
+        return event
+
+    def _snapshot(self, update_id, bid_qty=1.0):
+        return {
+            "lastUpdateId": update_id,
+            "bids": [["100.0", str(bid_qty)]],
+            "asks": [["101.0", "1.0"]],
+        }
+
+    async def _run_two_connection_recovery(self, first_event):
+        stream = BinanceOrderBookStream("BTCUSDT")
+        original_sleep = asyncio.sleep
+
+        async def fast_sleep(_seconds):
+            await original_sleep(0)
+
+        first_ws = _L12FakeWebsocket([first_event])
+        second_ws = _L12FakeWebsocket(
+            [self._event(200, 201, pu=199)],
+            stop_event=stream._stop_event,
+        )
+        connections = [_L12FakeConnection(first_ws), _L12FakeConnection(second_ws)]
+        snapshot_fetch = AsyncMock(side_effect=[
+            self._snapshot(100),
+            self._snapshot(200, bid_qty=4.0),
+        ])
+        with patch(
+            "app.market_data.backend_stream.websockets.connect",
+            side_effect=connections,
+        ) as connect_mock, patch.object(
+            stream, "_fetch_snapshot", new=snapshot_fetch
+        ), patch(
+            "app.market_data.backend_stream.asyncio.sleep", new=fast_sleep
+        ):
+            await asyncio.wait_for(stream._run_forever(), timeout=2.0)
+
+        self.assertEqual(connect_mock.call_count, 2)
+        self.assertEqual(snapshot_fetch.await_count, 2)
+        self.assertTrue(stream.synchronized)
+        self.assertEqual(stream.last_update_id, 201)
+        self.assertEqual(stream.bids[100.0], 4.0)
+
+    async def test_closed_websocket_before_snapshot_bridge_reconnects(self):
+        await self._run_two_connection_recovery(self._event(98, 99, pu=97))
+
+    async def test_forward_gap_at_snapshot_plus_one_reconnects(self):
+        # For Futures, U=L+1 does not satisfy the documented U<=L<=u bridge.
+        await self._run_two_connection_recovery(self._event(101, 101, pu=100))
+
+
+
+def test_lifespan_does_not_start_binance_depth_when_public_feed_disabled(monkeypatch):
+    async def run():
+        fake_database = SimpleNamespace(
+            start=AsyncMock(),
+            close=AsyncMock(),
+            write_heartbeat=AsyncMock(),
+            connected=False,
+        )
+        fake_repository = SimpleNamespace(
+            engine_state=AsyncMock(),
+            system_log=AsyncMock(),
+        )
+        fake_stream = MagicMock()
+        fake_stream.start = AsyncMock()
+        fake_stream.stop = AsyncMock()
+        fake_stream.get_status = AsyncMock(return_value={"last_error": "disabled"})
+        fake_stream.get_order_book = AsyncMock(return_value=None)
+        fake_manager = MagicMock()
+        fake_manager.start = AsyncMock()
+        fake_manager.stop = AsyncMock()
+        fake_worker = MagicMock()
+        fake_worker.restore_state = AsyncMock(return_value=False)
+        fake_worker.start = AsyncMock()
+        fake_worker.stop = AsyncMock()
+        fake_worker.risk_control_state = {"active": False}
+        fake_runtime = MagicMock()
+        fake_runtime.stop = AsyncMock()
+
+        monkeypatch.setattr(main, "database", fake_database)
+        monkeypatch.setattr(main, "repository", fake_repository)
+        monkeypatch.setattr(main, "settings", SimpleNamespace(
+            binance_public_enabled=False,
+            bybit_public_enabled=False,
+            delta_public_enabled=False,
+            bybit_public_symbol="BTCUSDT",
+            delta_public_symbol="BTCUSD",
+        ))
+        monkeypatch.setattr(main, "BinanceOrderBookStream", lambda symbol: fake_stream)
+        monkeypatch.setattr(main, "ExchangeConnectionManager", lambda adapters: fake_manager)
+        monkeypatch.setattr(main, "PaperPersistenceWorker", lambda repository: fake_worker)
+        monkeypatch.setattr(main, "ControlledPaperSession", lambda config: MagicMock())
+        monkeypatch.setattr(main, "NineLayerDecisionEngine", lambda config: MagicMock())
+        monkeypatch.setattr(main, "AutonomousPaperRuntime", lambda *args, **kwargs: fake_runtime)
+        monkeypatch.setattr(main, "set_runtime", lambda runtime: None)
+        monkeypatch.setattr(main, "set_persistence_enqueue", lambda enqueue: None)
+
+        async with main.lifespan(main.app):
+            fake_stream.start.assert_not_awaited()
+            fake_manager.start.assert_awaited_once()
+            book = main.app.state.unified_market_data.get_book("binance", "BTCUSDT")
+            # Disabled feeds may be represented as no book or an explicitly invalid book.
+            assert book is None or (book["synchronized"] is False and book["stale"] is True)
+
+    asyncio.run(run())
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -136,6 +445,11 @@ import pytest
 from fastapi import HTTPException
 from app.services.imbalance_detector import OrderBookImbalanceDetector
 from app import main
+
+
+def test_main_module_has_asyncio_runtime_for_bridge_lifecycle():
+    assert main.asyncio is asyncio
+    assert isinstance(main.asyncio.Event(), asyncio.Event)
 
 class StubUnifiedBooks:
     def __init__(self, book):
@@ -181,6 +495,60 @@ def test_layer1_api_invalid_book_returns_422(monkeypatch):
         asyncio.run(main.analyze_imbalance("bybit", "BTCUSDT", 10))
     assert exc.value.status_code == 422
 
+
+def test_binance_bridge_snapshot_updates_unified_book_and_disconnect_invalidates():
+    engine = UnifiedMarketDataEngine()
+    stream = BinanceOrderBookStream("BTCUSDT")
+    stream.connected = True
+    stream._load_snapshot({
+        "lastUpdateId": 100,
+        "bids": [["100.0", "2.0"], ["99.0", "3.0"]],
+        "asks": [["101.0", "4.0"], ["102.0", "5.0"]],
+    })
+    bridge = {"U": 100, "u": 101, "b": [["100.0", "0"], ["99.5", "7.0"]], "a": [["101.0", "6.0"]]}
+    assert stream._apply_snapshot_bridge(bridge)
+    key = asyncio.run(main._bridge_binance_book_once(stream, engine, None))
+    book = engine.get_book("binance", "BTCUSDT")
+    assert key == (101, 1)
+    assert book["synchronized"] is True
+    assert book["best_bid"] == 99.5
+    assert book["best_ask"] == 101.0
+    with patch("app.market_data.unified_engine.time.monotonic", return_value=time.monotonic() + 2.0):
+        key2 = asyncio.run(main._bridge_binance_book_once(stream, engine, key))
+        book2 = engine.get_book("binance", "BTCUSDT")
+        assert key2 == key
+        assert book2["age_seconds"] >= 1.9
+    live = {"U": 102, "u": 102, "pu": 101, "b": [["99.5", "0"], ["99.4", "8.0"]], "a": []}
+    assert stream._apply_event(live)
+    key = asyncio.run(main._bridge_binance_book_once(stream, engine, key))
+    assert key == (102, 1)
+    assert engine.get_book("binance", "BTCUSDT")["best_bid"] == 99.4
+    stream.connected = False
+    stream.synchronized = False
+    key = asyncio.run(main._bridge_binance_book_once(stream, engine, key))
+    book = engine.get_book("binance", "BTCUSDT")
+    assert key is None
+    assert book["synchronized"] is False
+    assert book["bids"] == []
+
+
+def test_snapshot_timestamp_is_fresh_even_without_bridge_delta():
+    stream = BinanceOrderBookStream("BTCUSDT")
+    stream.connected = True
+    stream._load_snapshot({
+        "lastUpdateId": 100,
+        "bids": [["100.0", "2.0"]],
+        "asks": [["101.0", "4.0"]],
+    })
+    event = {"U": 100, "u": 100, "b": [], "a": []}
+    assert stream._apply_snapshot_bridge(event)
+    book = asyncio.run(stream.get_order_book())
+    assert book is not None
+    assert book["last_update_id"] == 100
+
+def test_binance_depth_bridge_uses_read_only_live_public_endpoints():
+    assert REST_BASE_URL == "https://fapi.binance.com"
+    assert WEBSOCKET_BASE_URL == "wss://fstream.binance.com/public"
 
 def test_layer1_api_unsupported_exchange_returns_400(monkeypatch):
     setup_layer1_api(monkeypatch, valid_normalized_book())
