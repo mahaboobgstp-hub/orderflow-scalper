@@ -187,6 +187,10 @@ Unified-engine public-trade dispatch must treat any topic beginning with `public
 
 Public exchange adapter status records expose `connection_attempt_count` (incremented before each WebSocket connection attempt), `successful_connection_count` (incremented only after the connection context opens), `connected_duration_seconds` (current successful session uptime, null when disconnected), and `last_connection_duration_seconds` (duration of the most recently ended successful session). Epoch timestamps `last_connection_attempt_at`, `last_connected_at`, `last_disconnect_at`, and `last_reconnect_at` support audit correlation. Existing `reconnect_count` remains the retry-loop counter and is not interchangeable with successful connection count. The Feed Monitor shows attempts, successful connections, current uptime, and prior session duration separately; older adapter payloads show unavailable values instead of claiming zero activity. Deterministic tests cover initial status, connection success, disconnect duration, reconnect timestamps, and the real adapter loop with a mocked WebSocket.
 
+## Primary Binance demo stream last-session duration
+
+The primary Binance demo depth stream exposes both current connected uptime and `last_connection_duration_seconds`. When an established connection ends, its duration is retained for diagnostics and `connected_at` is cleared; subsequent disconnect handling without an active connection cannot overwrite the last completed session. The value remains null until an established session has ended. Deterministic tests use explicit timestamps to verify retention, repeated disconnect handling, and replacement by a later completed session.
+
 
 ## Non-string feed topic guard
 
