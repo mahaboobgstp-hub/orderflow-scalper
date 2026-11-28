@@ -105,3 +105,14 @@
 - Fixed both to `from __future__ import annotations`. Commits: `577d9762` (models) and `cae96497` (store). No full-suite results are inferred from this fix.
 - The run was not automatically re-triggered by subsequent connector-authored commits. Added `workflow_dispatch` to the focused CI workflow. Manual trigger is available at Actions → TradeBridge Focused CI → Run workflow → select `feature/tradebridge-chat-execution`. It runs compile and focused tests only, with read-only permissions; no secrets or deployment steps.
 - Actual first CI evidence: `46170027385` failed during compile; test step was skipped. The syntax fixes are committed, but rerun CI remains pending manual dispatch.
+
+
+## Run 14 — authenticated preview and approval routes (2026-11-28)
+
+- Added an isolated FastAPI router under `/api/tradebridge`, mounted on the existing backend app. The service is initialized during lifespan and shares its own in-memory signal/preview store.
+- `POST /preview` is control-token authenticated, fetches trusted Demo snapshots server-side, uses server mark price for the preview entry, constructs the nine-layer signal, and validates quantity, exchange filters, notional, spread, leverage, SL/TP geometry, margin, freshness and risk before storing an immutable preview.
+- `POST /preview/{preview_id}/authorize` requires the exact `TAKE POSITION` phrase and SHA-256 trade hash, refreshes market/account/rules and revalidates risk before one-time approval. This route only authorizes the preview; it never submits an order.
+- `GET /preview/{preview_id}`, `DELETE /preview/{preview_id}`, and `GET /audit` are authenticated. Delete cancels only the local preview; audit output is limited to the store's safe events.
+- Execution, exchange order status/cancel, persistent idempotency, durable audit, and MCP tools are not implemented. In-memory preview state is not crash-safe. Routes are disabled by default until `TRADEBRIDGE_ENABLED` is configured; no credentials, orders, or live execution were used.
+- Added `test_tradebridge_routes.py` (10 tests) for authenticated preview, server-mark pricing, disabled config, stale data, stop risk, exact approval/hash, stale approval, duplicate signal, local cancellation, and invalid confirmation. Focused workflow includes this suite.
+- Local route harness with mocked provider and simplified dependency stubs: **10 passed**; compile checks passed. This is not a full-repository test run and not GitHub Actions. The existing focused CI failure still needs a manual rerun because this connector cannot dispatch workflows.

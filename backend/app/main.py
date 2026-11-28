@@ -30,6 +30,7 @@ from app.services.autonomous_paper_runtime import AutonomousPaperRuntime
 from app.services.trade_management import TradeManagementEngine, TradeManagementConfig
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 from app.services.controlled_paper_session import ControlledPaperSession
+from app.tradebridge.routes import router as tradebridge_router, TradeBridgePreviewService
 import logging
 import os
 import time
@@ -39,6 +40,7 @@ logger=logging.getLogger('orderflow-scalper')
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.tradebridge_preview_service=TradeBridgePreviewService()
     app.state.monitoring_service=MonitoringService()
     app.state.database=database
     await database.start()
@@ -503,6 +505,7 @@ async def paper_reset(request:PaperResetRequest):
 
 # Operator controls (API-only state; autonomous engine integration is not yet enabled)
 app.include_router(operator_control_router)
+app.include_router(tradebridge_router)
 
 # Infrastructure readiness summary. This endpoint is diagnostic and never enables execution.
 @app.get("/api/infrastructure/status")

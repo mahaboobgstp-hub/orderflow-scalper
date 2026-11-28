@@ -44,4 +44,4 @@ jobs:
         working-directory: backend
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: pytest -q tests/test_tradebridge_foundation.py tests/test_tradebridge_risk.py tests/test_tradebridge_snapshot_provider.py
+        run: pytest -q tests/test_tradebridge_foundation.py tests/test_tradebridge_risk.py tests/test_tradebridge_snapshot_provider.py tests/test_tradebridge_routes.py
