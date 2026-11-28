@@ -318,6 +318,7 @@ test("feed, exchange, adapter, and primary counters normalize safely", () => {
       snapshot_count: "0x10",
       connection_attempt_count: 4,
       invalid_depth_message_count: -2,
+      error_count: "3",
     },
     unified_market_data: {
       exchanges: { binance: { messages_received: "9" }, malformed: { messages_received: {} } },
@@ -335,6 +336,7 @@ test("feed, exchange, adapter, and primary counters normalize safely", () => {
   assert.equal(normalized.primary.snapshot_count, 0);
   assert.equal(normalized.primary.connection_attempt_count, 4);
   assert.equal(normalized.primary.invalid_depth_message_count, 0);
+  assert.equal(normalized.primary.error_count, 3);
   assert.equal(normalized.exchangeStats.binance.messages_received, 9);
   assert.equal(normalized.exchangeStats.malformed.messages_received, 0);
   assert.equal(normalized.feeds["binance:BTCUSDT"].messages_received, 12);
