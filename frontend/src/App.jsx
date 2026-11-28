@@ -250,6 +250,7 @@ export default function App() {
         <div className="list-row"><b>Depth events received</b><span>{displayDiagnosticCounter(primary,"messages_received")}</span></div>
         <div className="list-row"><b>Rejected depth messages</b><span>{displayDiagnosticCounter(primary,"invalid_depth_message_count")}</span></div>
         <div className="list-row"><b>Depth buffer overflow recoveries</b><span className={primary.snapshot_buffer_overflow_count?"negative":""}>{displayDiagnosticCounter(primary,"snapshot_buffer_overflow_count")}</span></div>
+        <div className="list-row"><b>Primary stream errors</b><span className={primary.error_count>0?"negative":""}>{displayDiagnosticCounter(primary,"error_count")}</span></div>
         <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
         <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
       </div>
