@@ -21,6 +21,18 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install
+      - name: Run frontend unit tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Scan frontend source for persistent control-token storage
+        working-directory: frontend
+        run: node ../scripts/check-control-token-storage.mjs src
+
       - name: Build Vite frontend
         working-directory: frontend
         run: npm run build
+      - name: Scan production bundle for persistent control-token storage
+        working-directory: frontend
+        run: node ../scripts/check-control-token-storage.mjs dist
+
