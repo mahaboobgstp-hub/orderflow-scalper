@@ -211,3 +211,18 @@ close), a later `stop()` call preserves that reason and timestamp while still
 leaving synchronization invalidated. This avoids shutdown cleanup overwriting the
 last observed runtime event in diagnostics. Deterministic tests cover both an
 active-session stop and stop after an already-recorded disconnect.
+
+
+## Render deployment prerequisite for live-feed evidence
+
+Both the checked-in `render.yaml` on `main` and on
+`feature/observability-trader-transparency` explicitly set
+`BINANCE_PUBLIC_WS_ENABLED`, `BYBIT_PUBLIC_WS_ENABLED`, and
+`DELTA_PUBLIC_WS_ENABLED` to `false`. The Render dashboard's runtime
+environment was not inspected, so these blueprint values may or may not be
+overridden in the deployed service. Until that is verified, a Render service
+running with the blueprint defaults cannot produce secondary public WebSocket
+feed observations. Phase A therefore requires a separate staging service or
+an explicitly authorized staging-only environment configuration for public,
+read-only market-data streams. Keep production unchanged; do not enable order
+execution, controlled paper sessions, or alter risk settings.
