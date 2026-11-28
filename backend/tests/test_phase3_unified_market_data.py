@@ -88,6 +88,22 @@ class Tests(unittest.TestCase):
   self.assertEqual(status["invalid_symbol_message_count"],2)
   self.assertEqual(status["feeds"],{})
   self.assertEqual(status["trade_streams"],{})
+ def test_non_string_topic_rejected_and_counted_without_state_mutation(self):
+  messages=(
+   {"topic":None,"data":{"p":"101","v":"2","S":"Buy"}},
+   {"topic":7,"data":{"p":"101","v":"2","S":"Buy"}},
+   {"topic":["publicTrade.BTCUSDT"],"data":[{"p":"101","v":"2","S":"Buy"}]},
+   {"topic":{"name":"publicTrade.BTCUSDT"},"data":[{"p":"101","v":"2","S":"Buy"}]},
+  )
+  for message in messages:
+   with self.subTest(topic_type=type(message["topic"]).__name__):
+    self.assertIsNone(self.e.process("bybit",message))
+  status=self.e.get_status()
+  self.assertEqual(status["invalid_symbol_message_count"],len(messages))
+  self.assertEqual(status["books"],{})
+  self.assertEqual(status["feeds"],{})
+  self.assertEqual(status["trade_streams"],{})
+  self.assertEqual(status["exchanges"],{})
  def test_single_symbol_default_fallback_is_retained(self):
   message={"e":"aggTrade","p":"101","q":"2","m":False}
   result=self.e.process("binance",message,default_symbol="BTCUSDT")
