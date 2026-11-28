@@ -13,7 +13,7 @@ class PublicExchangeAdapter(ABC):
         self.name=name; self.enabled=enabled; self.url=url; self.symbol=symbol.upper(); self.on_message=on_message
         self.connected=False; self.last_message_at=None; self.last_message_monotonic=None; self.last_error=None; self.reconnect_count=0
         self.connection_attempt_count=0; self.successful_connection_count=0
-        self.connected_at=None; self.last_connected_at=None; self.last_connection_attempt_at=None
+        self.connected_at=None; self.connected_monotonic=None; self.last_connected_at=None; self.last_connection_attempt_at=None
         self.last_disconnect_at=None; self.last_reconnect_at=None; self.last_connection_duration_seconds=None
         self._task=None; self._stop=asyncio.Event()
     @abstractmethod
@@ -36,19 +36,25 @@ class PublicExchangeAdapter(ABC):
         self.connection_attempt_count+=1
         self.last_connection_attempt_at=now
 
-    def _record_connection_success(self, now=None):
+    def _record_connection_success(self, now=None, monotonic_now=None):
         now=time.time() if now is None else now
-        self.connected=True; self.connected_at=now; self.last_connected_at=now
+        monotonic_now=time.monotonic() if monotonic_now is None else monotonic_now
+        self.connected=True; self.connected_at=now; self.connected_monotonic=monotonic_now; self.last_connected_at=now
         self.successful_connection_count+=1
         if self.successful_connection_count>1: self.last_reconnect_at=now
         self.last_error=None
 
-    def _record_connection_end(self, now=None):
+    def _record_connection_end(self, now=None, monotonic_now=None):
         now=time.time() if now is None else now
-        if self.connected_at is not None:
+        monotonic_now=time.monotonic() if monotonic_now is None else monotonic_now
+        if self.connected_monotonic is not None:
+            self.last_connection_duration_seconds=max(0.0,monotonic_now-self.connected_monotonic)
+            self.last_disconnect_at=now
+        elif self.connected_at is not None:
+            # Compatibility fallback for legacy states without monotonic anchors.
             self.last_connection_duration_seconds=max(0.0,now-self.connected_at)
             self.last_disconnect_at=now
-        self.connected=False; self.connected_at=None
+        self.connected=False; self.connected_at=None; self.connected_monotonic=None
 
     async def _run(self):
         delay=1
@@ -79,7 +85,13 @@ class PublicExchangeAdapter(ABC):
     async def status(self):
         now=time.time(); monotonic_now=time.monotonic()
         age=None if self.last_message_monotonic is None else round(max(0.0,monotonic_now-self.last_message_monotonic),3)
-        connected_duration=None if not self.connected or self.connected_at is None else round(max(0.0,now-self.connected_at),3)
+        connected_duration=None
+        if self.connected and self.connected_monotonic is not None:
+            connected_duration=max(0.0,monotonic_now-self.connected_monotonic)
+        elif self.connected and self.connected_at is not None:
+            # Compatibility fallback for legacy states without monotonic anchors.
+            connected_duration=max(0.0,now-self.connected_at)
+        connected_duration=round(connected_duration,3) if connected_duration is not None else None
         return {"exchange":self.name,"enabled":self.enabled,"connected":self.connected,"symbol":self.symbol,
             "last_message_age_seconds":age,"connection_attempt_count":self.connection_attempt_count,
             "successful_connection_count":self.successful_connection_count,"connected_duration_seconds":connected_duration,
