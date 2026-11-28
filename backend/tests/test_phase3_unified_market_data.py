@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from app.market_data.unified_engine import UnifiedMarketDataEngine
 class Tests(unittest.TestCase):
  def setUp(self): self.e=UnifiedMarketDataEngine()
@@ -36,4 +37,34 @@ class Tests(unittest.TestCase):
  def test_stale(self):
   self.e.process("bybit",{"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["10","1"]],"a":[["11","1"]]}})
   self.e.stale_after_seconds=0; self.assertTrue(self.e.get_book("bybit","BTCUSDT")["stale"])
+ def test_binance_unbridged_depth_does_not_mutate_or_refresh_book(self):
+  raw={"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"b":[["100","1"]],"a":[["101","2"]]}
+  with patch("app.market_data.unified_engine.time.time",return_value=10.0):
+   result=self.e.process("binance",raw)
+  book=self.e.get_book("binance","BTCUSDT")
+  status=self.e.get_status()
+  self.assertEqual(result,{"type":"book_delta","synchronized":False})
+  self.assertFalse(book["synchronized"])
+  self.assertTrue(book["stale"])
+  self.assertEqual(book["bids"],[])
+  self.assertEqual(book["asks"],[])
+  self.assertIsNone(book["sequence"])
+  self.assertIsNone(book["received_timestamp_ms"])
+  self.assertEqual(status["exchanges"]["binance"]["messages_received"],1)
+ def test_binance_trade_does_not_refresh_book_freshness(self):
+  book=self.e.book("binance","BTCUSDT")
+  book.bids={100.0:1.0}; book.asks={101.0:1.0}
+  book.synchronized=True; book.received_ts=100000; book.exchange_ts=100000
+  raw={"e":"aggTrade","s":"BTCUSDT","p":"101","q":"2","m":False,"T":200000}
+  with patch("app.market_data.unified_engine.time.time",return_value=200.0):
+   result=self.e.process("binance",raw)
+  with patch("app.market_data.unified_engine.time.time",return_value=201.0):
+   current=self.e.get_book("binance","BTCUSDT")
+   status=self.e.get_status()
+  self.assertEqual(result["type"],"trade")
+  self.assertEqual(current["received_timestamp_ms"],100000)
+  self.assertEqual(current["age_seconds"],101.0)
+  self.assertTrue(current["stale"])
+  self.assertEqual(status["exchanges"]["binance"]["messages_received"],1)
+  self.assertEqual(status["exchanges"]["binance"]["last_message_age_seconds"],1.0)
 if __name__=="__main__":unittest.main()
