@@ -1,6 +1,7 @@
 import asyncio
 import time
 import unittest
+from unittest.mock import patch
 
 from app.market_data.backend_stream import BinanceOrderBookStream
 
@@ -106,21 +107,26 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.stream.connected = True
         self.stream.synchronized = True
         self.stream.last_book_update_at = time.time() - 10
+        self.stream.last_book_update_monotonic = time.monotonic() - 10
         self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
     def test_duplicate_event_does_not_refresh_stale_book(self):
         self.stream.connected = True
         self.stream.synchronized = True
         old_progress = time.time() - 10
+        old_progress_monotonic = time.monotonic() - 10
         self.stream.last_book_update_at = old_progress
+        self.stream.last_book_update_monotonic = old_progress_monotonic
         self.assertTrue(self.stream._apply_event(self.event(90, 100)))
         self.assertEqual(self.stream.last_book_update_at, old_progress)
+        self.assertEqual(self.stream.last_book_update_monotonic, old_progress_monotonic)
         self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
     def test_progressing_event_refreshes_book_and_returns_age(self):
         self.stream.connected = True
         self.stream.synchronized = True
         self.stream.last_book_update_at = None
+        self.stream.last_book_update_monotonic = None
         event = self.event(101, 101, bids=[["99.5", "1.0"]], previous=100)
         self.assertTrue(self.stream._apply_event(event))
         book = asyncio.run(self.stream.get_order_book())
@@ -133,20 +139,64 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertFalse(self.stream.synchronized)
         self.assertIsNotNone(self.stream.last_update_id)
 
+    def test_primary_feed_freshness_and_uptime_use_monotonic_clock(self):
+        with patch("app.market_data.backend_stream.time.time", return_value=1000.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=10.0
+        ):
+            self.stream._record_connection_success(now=1000.0, monotonic_now=10.0)
+            self.stream._load_snapshot({
+                "lastUpdateId": 100,
+                "bids": [["100.0", "2.0"]],
+                "asks": [["101.0", "3.0"]],
+            })
+            self.stream.last_event_at = 1000.0
+            self.stream.last_event_monotonic = 10.0
+            self.stream._record_synchronized(now=1000.0, monotonic_now=10.0)
+
+        # A backward wall-clock jump must not make feed ages appear to be zero.
+        with patch("app.market_data.backend_stream.time.time", return_value=900.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=11.0
+        ):
+            status = asyncio.run(self.stream.get_status())
+
+        self.assertTrue(status["healthy"])
+        self.assertEqual(status["last_event_age_seconds"], 1.0)
+        self.assertEqual(status["last_book_update_age_seconds"], 1.0)
+        self.assertEqual(status["last_sync_age_seconds"], 1.0)
+        self.assertEqual(status["connected_duration_seconds"], 1.0)
+        self.assertEqual(status["synchronized_duration_seconds"], 1.0)
+
+    def test_primary_book_rejection_uses_monotonic_age_after_clock_rollback(self):
+        with patch("app.market_data.backend_stream.time.time", return_value=1000.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=10.0
+        ):
+            self.stream.connected = True
+            self.stream.synchronized = True
+            self.stream.last_update_id = 100
+            self.stream.last_book_update_at = 1000.0
+            self.stream.last_book_update_monotonic = 10.0
+
+        # Four monotonic seconds exceeds the configured three-second cutoff,
+        # even though wall-clock time has moved backward.
+        with patch("app.market_data.backend_stream.time.time", return_value=900.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=14.0
+        ):
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
     def test_primary_connection_session_duration_is_retained_after_disconnect(self):
-        self.stream._record_connection_success(now=100.0)
-        self.stream._record_disconnect("network_closed", now=112.25)
+        self.stream._record_connection_success(now=100.0, monotonic_now=20.0)
+        self.stream._record_disconnect("network_closed", now=112.25, monotonic_now=32.25)
         self.assertFalse(self.stream.connected)
         self.assertIsNone(self.stream.connected_at)
         self.assertEqual(self.stream.last_connection_duration_seconds, 12.25)
 
         # A second disconnect without a live session must not overwrite the
         # completed session duration.
-        self.stream._record_disconnect("stop_requested", now=130.0)
+        self.stream._record_disconnect("stop_requested", now=130.0, monotonic_now=50.0)
         self.assertEqual(self.stream.last_connection_duration_seconds, 12.25)
 
-        self.stream._record_connection_success(now=200.0)
-        self.stream._record_disconnect("reconnect_closed", now=205.0)
+        self.stream._record_connection_success(now=200.0, monotonic_now=100.0)
+        self.stream._record_disconnect("reconnect_closed", now=205.0, monotonic_now=105.0)
         self.assertEqual(self.stream.last_connection_duration_seconds, 5.0)
         status = asyncio.run(self.stream.get_status())
         self.assertIsNone(status["connected_duration_seconds"])
@@ -154,7 +204,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
 
 
     def test_stop_preserves_actual_disconnect_reason_and_timestamp(self):
-        self.stream._record_disconnect("sequence_gap", now=123.0)
+        self.stream._record_disconnect("sequence_gap", now=123.0, monotonic_now=50.0)
         self.stream.last_connection_duration_seconds = 6.5
 
         asyncio.run(self.stream.stop())
@@ -167,7 +217,11 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(self.stream.last_connection_duration_seconds, 6.5)
 
     def test_stop_records_disconnect_for_active_session(self):
-        self.stream._record_connection_success(now=time.time() - 5.0)
+        wall_now = time.time()
+        monotonic_now = time.monotonic()
+        self.stream._record_connection_success(
+            now=wall_now - 5.0, monotonic_now=monotonic_now - 5.0
+        )
 
         asyncio.run(self.stream.stop())
 
