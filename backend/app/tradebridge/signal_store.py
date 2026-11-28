@@ -1,10 +1,9 @@
 """Thread-safe in-memory signal/preview registry with one-time approval semantics.
+
 Persistence is intentionally not implemented here; this store is a safety boundary
 for a single process and is not sufficient for a multi-instance execution service.
 """
 from __future__
-
-
 from datetime import datetime, timezone
 from copy import deepcopy
 from threading import RLock
