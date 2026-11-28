@@ -177,3 +177,8 @@ Per-symbol message freshness is keyed only after validating feed identity. The u
 ## Strict exchange-topic shape validation
 
 The unified feed identity resolver accepts only recognized topic shapes: `publicTrade.<symbol>` and `orderbook.<positive-depth>.<symbol>`. Order-book depth must be an ASCII positive integer no greater than 1000; extra topic segments, nonnumeric depth, zero depth, and malformed trade topics are rejected before a book or feed counter is created. The rejected message increments `invalid_symbol_message_count`. This prevents malformed topics from being interpreted as a valid symbol by taking the final segment or silently appending extra segments to a symbol. Deterministic tests cover invalid depth, zero depth, extra order-book segments, and extra public-trade segments.
+
+
+## Malformed public-trade topic prefix rejection
+
+Unified-engine public-trade dispatch must treat any topic beginning with `publicTrade` as identity-bearing, not only topics with the expected dot separator. If the topic is malformed (for example, `publicTradeBTCUSDT`), the resolver rejects it rather than falling back to the adapter's configured default symbol. This also applies to list-valued trade frames: each malformed item is rejected and cannot create a feed counter or trade stream. Deterministic tests cover both scalar and array payloads.
