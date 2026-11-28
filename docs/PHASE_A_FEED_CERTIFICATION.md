@@ -246,3 +246,8 @@ manual clock adjustments distorting uptime or making a completed session appear
 longer/shorter. The previous wall-clock duration is retained only as a
 compatibility fallback for legacy diagnostic states without monotonic anchors.
 Deterministic tests simulate wall-clock rollback while monotonic time advances.
+
+
+## Secondary public-feed normal close diagnostics
+
+If a public adapter's WebSocket async iterator completes normally without an explicit stop request, the adapter records `WebSocket stream ended unexpectedly` in its cumulative error counter before the reconnect backoff. This captures clean remote closes (which may not raise an exception) as operational events. Explicit stop/break requests are not counted as errors. A deterministic mocked test verifies one normal stream close increments the error counter, retains the disconnect/session duration, and reconnects without forwarding error frames.
