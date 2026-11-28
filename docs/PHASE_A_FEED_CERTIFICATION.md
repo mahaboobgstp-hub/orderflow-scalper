@@ -226,3 +226,8 @@ feed observations. Phase A therefore requires a separate staging service or
 an explicitly authorized staging-only environment configuration for public,
 read-only market-data streams. Keep production unchanged; do not enable order
 execution, controlled paper sessions, or alter risk settings.
+
+
+## Public-adapter message age uses a monotonic clock
+
+Per-adapter `last_message_age_seconds` is calculated from a monotonic timestamp captured when a WebSocket message is received, not by subtracting wall-clock timestamps. This keeps freshness diagnostics stable across system clock corrections (NTP or manual adjustments). Epoch timestamps remain reserved for lifecycle audit fields. Deterministic regression coverage simulates a wall clock moving backward while monotonic time advances and confirms the message age remains positive and accurate.
