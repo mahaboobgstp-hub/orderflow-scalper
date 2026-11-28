@@ -371,3 +371,18 @@ test("public adapter lifecycle counters normalize while uptime durations remain 
   assert.equal(malformed.adapterList[0].connection_attempt_count, 0);
   assert.equal(malformed.adapterList[0].successful_connection_count, 0);
 });
+
+test("primary Binance stream last-session duration is preserved and legacy omission stays unavailable", () => {
+  const normalized = normalizeFeedMonitorPayload({
+    primary_binance_demo_stream: {
+      connected: false,
+      connected_duration_seconds: null,
+      last_connection_duration_seconds: 6.75,
+    },
+  });
+  assert.equal(normalized.primary.last_connection_duration_seconds, 6.75);
+  const legacy = normalizeFeedMonitorPayload({
+    primary_binance_demo_stream: { connected: false },
+  });
+  assert.equal(Object.hasOwn(legacy.primary, "last_connection_duration_seconds"), false);
+});
