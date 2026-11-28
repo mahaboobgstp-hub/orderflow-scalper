@@ -53,12 +53,16 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
             "asks": [["101", "3"]],
         }
         bridge = {"U": 99, "u": 100, "pu": 98, "b": [], "a": []}
-        with patch("app.market_data.backend_stream.time.time", return_value=1000.0):
+        with patch("app.market_data.backend_stream.time.time", return_value=1000.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=10.0
+        ):
             stream._record_connection_success()
             stream._load_snapshot(snapshot)
             self.assertTrue(stream._apply_snapshot_bridge(bridge))
         self.assertTrue(stream.synchronized)
-        with patch("app.market_data.backend_stream.time.time", return_value=1002.0):
+        with patch("app.market_data.backend_stream.time.time", return_value=1002.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=12.0
+        ):
             status = asyncio.run(stream.get_status())
             book = asyncio.run(stream.get_order_book())
         self.assertTrue(status["healthy"])
@@ -66,7 +70,9 @@ class BinanceDepthEventIntegrityTests(unittest.TestCase):
         self.assertEqual(status["last_book_update_age_seconds"], 2.0)
         self.assertIsNotNone(book)
         self.assertEqual(book["age_seconds"], 2.0)
-        with patch("app.market_data.backend_stream.time.time", return_value=1004.1):
+        with patch("app.market_data.backend_stream.time.time", return_value=1004.1), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=14.1
+        ):
             expired = asyncio.run(stream.get_status())
             self.assertTrue(expired["stale"])
             self.assertIsNone(asyncio.run(stream.get_order_book()))
