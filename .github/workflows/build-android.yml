@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - "frontend/**"
+      - "scripts/**"
       - ".github/workflows/build-android.yml"
 
 permissions:
