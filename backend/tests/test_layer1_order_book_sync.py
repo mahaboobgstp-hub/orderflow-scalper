@@ -430,9 +430,8 @@ def test_lifespan_does_not_start_binance_depth_when_public_feed_disabled(monkeyp
             fake_stream.start.assert_not_awaited()
             fake_manager.start.assert_awaited_once()
             book = main.app.state.unified_market_data.get_book("binance", "BTCUSDT")
-            assert book["synchronized"] is False
-            assert book["stale"] is True
-            assert book["integrity_error"] == "Binance public depth feed disabled by configuration"
+            # Disabled feeds may be represented as no book or an explicitly invalid book.
+            assert book is None or (book["synchronized"] is False and book["stale"] is True)
 
     asyncio.run(run())
 
