@@ -256,9 +256,12 @@ export default function App() {
         {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=>{
           const state=messageState(x);
           const stateClass=state==="FRESH"?"paper":["STALE","DISCONNECTED"].includes(state)?"bad":"";
+          const connectedFor=typeof x.connected_duration_seconds==="number"&&Number.isFinite(x.connected_duration_seconds)&&x.connected_duration_seconds>=0?x.connected_duration_seconds+"s":"--";
+          const lastSession=typeof x.last_connection_duration_seconds==="number"&&Number.isFinite(x.last_connection_duration_seconds)&&x.last_connection_duration_seconds>=0?x.last_connection_duration_seconds+"s":"--";
           return <div className="event-row full" key={x.exchange}>
           <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+stateClass}>{state}</span>
-          <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??0}</small>
+          <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??"--"}</small>
+          <small>Connection attempts / successes {x.connection_attempt_count??"--"} / {x.successful_connection_count??"--"} · Current uptime {connectedFor} · Last session {lastSession}</small>
           <small>Error: {x.last_error||"None"}</small>
         </div>;
         })}
