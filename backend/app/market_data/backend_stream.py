@@ -147,8 +147,21 @@ class BinanceOrderBookStream:
             self.recovery_count += 1
             self.last_recovery_at = now
 
-    def _apply_snapshot_bridge(self, event: dict[str, Any]) -> bool:
-        """Apply the first event bridging the REST snapshot before marking the book synced."""
+    def _apply_snapshot_bridge(
+        self,
+        event: dict[str, Any],
+        *,
+        collector_task: asyncio.Task | None = None,
+    ) -> bool:
+        """Apply a snapshot bridge only while its WebSocket collector is active."""
+        # Recheck collector state inside the lock-protected bridge application.
+        # The caller's earlier check occurs before awaiting the book lock; the
+        # collector may terminate while that lock is contended.
+        if collector_task is not None and collector_task.done():
+            self.synchronized = False
+            self.synchronized_since = None
+            self.last_error = self.last_error or "WebSocket ended during snapshot synchronization"
+            return False
         if not self._event_bridges_snapshot(event):
             return False
         # The first buffered event is validated by U/u snapshot overlap, not pu.
@@ -327,7 +340,14 @@ class BinanceOrderBookStream:
 
                     if self._event_bridges_snapshot(event):
                         async with self._lock:
-                            if not self._apply_snapshot_bridge(event):
+                            if not self._apply_snapshot_bridge(
+                                event, collector_task=collector_task
+                            ):
+                                if collector_task.done():
+                                    self.last_error = self.last_error or (
+                                        "WebSocket ended during snapshot synchronization"
+                                    )
+                                    return
                                 self.sequence_gap_count += 1
                                 self.last_error = (
                                     "Snapshot bridge event failed continuity validation; "
