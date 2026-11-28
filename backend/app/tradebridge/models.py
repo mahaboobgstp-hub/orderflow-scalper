@@ -1,7 +1,6 @@
 """Strict TradeBridge signal, preview, and exact-approval schemas."""
 from __future__ import annotations
 
-
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
@@ -13,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class Direction(str, Enum):
     LONG = "LONG"
-    SHORT"
+    SHORT = "SHORT"
 
 
 class PreviewStatus(str, Enum):
@@ -22,7 +21,7 @@ class PreviewStatus(str, Enum):
     SUBMITTING = "SUBMITTING"
     EXECUTED = "EXECUTED"
     FAILED = "FAILED"
-    CANCELLED
+    CANCELLED = "CANCELLED"
 
 
 def _require_aware(value: datetime, field_name: str) -> datetime:
