@@ -11,7 +11,7 @@ logger=logging.getLogger(__name__)
 class PublicExchangeAdapter(ABC):
     def __init__(self,name,enabled,url,symbol="BTCUSDT",on_message:Callable[[str,Any],None]|None=None):
         self.name=name; self.enabled=enabled; self.url=url; self.symbol=symbol.upper(); self.on_message=on_message
-        self.connected=False; self.last_message_at=None; self.last_error=None; self.reconnect_count=0
+        self.connected=False; self.last_message_at=None; self.last_message_monotonic=None; self.last_error=None; self.reconnect_count=0
         self.connection_attempt_count=0; self.successful_connection_count=0
         self.connected_at=None; self.last_connected_at=None; self.last_connection_attempt_at=None
         self.last_disconnect_at=None; self.last_reconnect_at=None; self.last_connection_duration_seconds=None
@@ -61,7 +61,7 @@ class PublicExchangeAdapter(ABC):
                     await self._on_connected(ws); await self._subscribe(ws)
                     async for msg in ws:
                         if self._stop.is_set(): break
-                        self.last_message_at=time.time(); await self._heartbeat(ws)
+                        self.last_message_at=time.time(); self.last_message_monotonic=time.monotonic(); await self._heartbeat(ws)
                         if isinstance(msg,bytes): msg=msg.decode("utf-8",errors="replace")
                         try:
                             parsed=json.loads(msg)
@@ -77,8 +77,8 @@ class PublicExchangeAdapter(ABC):
             if not self._stop.is_set():
                 self.reconnect_count+=1; await asyncio.sleep(delay); delay=min(delay*2,30)
     async def status(self):
-        now=time.time()
-        age=None if self.last_message_at is None else round(now-self.last_message_at,3)
+        now=time.time(); monotonic_now=time.monotonic()
+        age=None if self.last_message_monotonic is None else round(max(0.0,monotonic_now-self.last_message_monotonic),3)
         connected_duration=None if not self.connected or self.connected_at is None else round(max(0.0,now-self.connected_at),3)
         return {"exchange":self.name,"enabled":self.enabled,"connected":self.connected,"symbol":self.symbol,
             "last_message_age_seconds":age,"connection_attempt_count":self.connection_attempt_count,
