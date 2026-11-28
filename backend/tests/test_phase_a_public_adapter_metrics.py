@@ -88,7 +88,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
                 with patch("app.exchanges.public_adapters.time.time", side_effect=[50.0, 51.0, 52.0, 53.0, 54.0]):
                     with patch("app.exchanges.public_adapters.time.monotonic", return_value=100.0):
                         await adapter._run()
-                    return await adapter.status()
+                        return await adapter.status()
 
         status = asyncio.run(run())
         self.assertEqual(status["connection_attempt_count"], 1)
