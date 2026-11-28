@@ -233,3 +233,14 @@ execution, controlled paper sessions, or alter risk settings.
 ## Public-adapter message age uses a monotonic clock
 
 Per-adapter `last_message_age_seconds` is calculated from a monotonic timestamp captured when a WebSocket message is received, not by subtracting wall-clock timestamps. This keeps freshness diagnostics stable across system clock corrections (NTP or manual adjustments). Epoch timestamps remain reserved for lifecycle audit fields. Deterministic regression coverage simulates a wall clock moving backward while monotonic time advances and confirms the message age remains positive and accurate.
+
+
+## Public-adapter connection uptime uses monotonic time
+
+Secondary public exchange adapters now use monotonic anchors for both active
+connection uptime and the last completed connection-session duration. Wall-clock
+connection timestamps remain unchanged for audit correlation. This avoids NTP or
+manual clock adjustments distorting uptime or making a completed session appear
+longer/shorter. The previous wall-clock duration is retained only as a
+compatibility fallback for legacy diagnostic states without monotonic anchors.
+Deterministic tests simulate wall-clock rollback while monotonic time advances.
