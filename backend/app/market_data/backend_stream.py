@@ -57,6 +57,7 @@ class BinanceOrderBookStream:
         self.synchronized = False
         self.last_error: str | None = None
         self.connected_at: float | None = None
+        self.last_connection_duration_seconds: float | None = None
         self.last_event_at: float | None = None
         # Timestamp only when a depth update advances the book sequence.
         self.last_book_update_at: float | None = None
@@ -130,9 +131,14 @@ class BinanceOrderBookStream:
         self.last_book_update_at = None
         self.last_error = None
 
-    def _record_disconnect(self, reason: str):
-        now = time.time()
+    def _record_disconnect(self, reason: str, now: float | None = None):
+        now = time.time() if now is None else now
+        # Retain the completed session length for diagnostics. Clear connected_at
+        # so repeated shutdown/reconnect handling cannot double-count a session.
+        if self.connected and self.connected_at is not None:
+            self.last_connection_duration_seconds = max(0.0, now - self.connected_at)
         self.connected = False
+        self.connected_at = None
         self.synchronized = False
         self.synchronized_since = None
         self.last_disconnect_at = now
@@ -669,6 +675,10 @@ class BinanceOrderBookStream:
             "last_update_id": self.last_update_id,
             "last_error": self.last_error,
             "connected_duration_seconds": round(connected_duration, 3) if connected_duration is not None else None,
+            "last_connection_duration_seconds": (
+                round(self.last_connection_duration_seconds, 3)
+                if self.last_connection_duration_seconds is not None else None
+            ),
             "synchronized_duration_seconds": round(synchronized_duration, 3) if synchronized_duration is not None else None,
             "last_event_age_seconds": round(event_age, 3) if event_age is not None else None,
             "last_book_update_age_seconds": round(book_age, 3) if book_age is not None else None,
