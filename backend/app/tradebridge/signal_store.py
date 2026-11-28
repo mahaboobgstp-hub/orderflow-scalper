@@ -2,13 +2,16 @@
 Persistence is intentionally not implemented here; this store is a safety boundary
 for a single process and is not sufficient for a multi-instance execution service.
 """
-from __future__ import annotations
+from __future__
+
+
 from datetime import datetime, timezone
 from copy import deepcopy
 from threading import RLock
 from typing import Any
 import re
 from .models import OpportunitySignal, PreviewStatus, TakePositionAuthorization, TradePreview
+
 
 
 class SignalStore:
@@ -74,6 +77,7 @@ class SignalStore:
     def get_preview(self, preview_id: str) -> TradePreview | None:
         with self._lock:
             return self._previews.get(preview_id)
+
 
     def authorize(self, authorization: TakePositionAuthorization, now: datetime | None = None) -> TradePreview:
         current = self._utc(now)
