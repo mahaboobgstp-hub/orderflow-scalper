@@ -5,14 +5,14 @@ from unittest.mock import patch
 from app.exchanges.public_adapters import PublicExchangeAdapter
 
 
-class TestPublicAdapter(PublicExchangeAdapter):
+class StubPublicAdapter(PublicExchangeAdapter):
     async def _subscribe(self, websocket):
         return
 
 
 class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
     def setUp(self):
-        self.adapter = TestPublicAdapter("test", True, "wss://example.invalid", "BTCUSDT")
+        self.adapter = StubPublicAdapter("test", True, "wss://example.invalid", "BTCUSDT")
 
     def test_initial_status_exposes_zero_counters_and_unknown_uptime(self):
         with patch("app.exchanges.public_adapters.time.time", return_value=100.0):
