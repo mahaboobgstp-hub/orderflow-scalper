@@ -149,6 +149,44 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(adapter.last_error, "subscription rejected")
         self.assertEqual(received, [{"retCode": 0, "retMsg": "OK"}])
 
+    def test_unexpected_normal_stream_close_is_counted_before_reconnect(self):
+        adapter = self.adapter
+        received = []
+
+        class FakeWebsocket:
+            async def __aiter__(self):
+                yield '{"type":"test"}'
+
+        class FakeConnect:
+            async def __aenter__(self):
+                return FakeWebsocket()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def stop_after_backoff(delay):
+            adapter._stop.set()
+
+        async def run():
+            with patch("app.exchanges.public_adapters.websockets.connect", return_value=FakeConnect()):
+                with patch("app.exchanges.public_adapters.asyncio.sleep", side_effect=stop_after_backoff):
+                    with patch("app.exchanges.public_adapters.time.time", side_effect=[10.0, 11.0, 12.0, 13.0, 14.0]):
+                        with patch("app.exchanges.public_adapters.time.monotonic", side_effect=[100.0, 101.0, 102.0, 103.0]):
+                            adapter.on_message = lambda exchange, payload: received.append(payload)
+                            await adapter._run()
+                            return await adapter.status()
+
+        status = asyncio.run(run())
+        self.assertEqual(status["connection_attempt_count"], 1)
+        self.assertEqual(status["successful_connection_count"], 1)
+        self.assertEqual(status["reconnect_count"], 1)
+        self.assertEqual(status["error_count"], 1)
+        self.assertEqual(status["last_error"], "WebSocket stream ended unexpectedly")
+        self.assertEqual(status["last_disconnect_at"], 13.0)
+        self.assertEqual(status["last_connection_duration_seconds"], 2.0)
+        self.assertFalse(status["connected"])
+        self.assertEqual(received, [{"type": "test"}])
+
     def test_run_records_actual_connect_and_message_lifecycle(self):
         adapter = self.adapter
 
