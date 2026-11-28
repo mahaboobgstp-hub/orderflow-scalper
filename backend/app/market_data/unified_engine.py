@@ -57,8 +57,7 @@ class UnifiedMarketDataEngine:
     def resolve_symbol(self, data, topic, default_symbol):
         raw_symbol = data.get("s")
         if raw_symbol is None or raw_symbol == "":
-            raw_symbol = data.get("symbol"
-            )
+            raw_symbol = data.get("symbol")
         explicit_symbol = None
         if raw_symbol is not None and raw_symbol != "":
             explicit_symbol = self.normalize_symbol(raw_symbol)
