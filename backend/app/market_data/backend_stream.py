@@ -48,6 +48,8 @@ class BinanceOrderBookStream:
         self.last_event_at: float | None = None
         # Timestamp only when a depth update advances the book sequence.
         self.last_book_update_at: float | None = None
+        # Monotonic freshness clock: wall-clock adjustments cannot revive stale depth.
+        self.last_book_update_monotonic: float | None = None
         self.last_sync_at: float | None = None
         self.last_disconnect_at: float | None = None
         self.messages_received = 0
@@ -114,6 +116,7 @@ class BinanceOrderBookStream:
         self.synchronized_since = None
         self.last_event_at = None
         self.last_book_update_at = None
+        self.last_book_update_monotonic = None
         self.last_error = None
 
     def _record_disconnect(self, reason: str):
@@ -200,6 +203,8 @@ class BinanceOrderBookStream:
             async def collect_events():
                 async for message in websocket:
                     event = json.loads(message)
+                    if isinstance(event, dict):
+                        event["_received_monotonic"] = time.monotonic()
                     self.messages_received += 1
                     self.last_event_at = time.time()
                     await event_queue.put(event)
@@ -392,6 +397,7 @@ class BinanceOrderBookStream:
         self.last_update_id = raw_update_id
         # A REST snapshot is fresh even if the first bridging event has u == lastUpdateId.
         self.last_book_update_at = time.time()
+        self.last_book_update_monotonic = time.monotonic()
 
         self.synchronized = False
         self.snapshot_count += 1
@@ -490,6 +496,16 @@ class BinanceOrderBookStream:
         # A progressing, accepted depth event—not mere message receipt—refreshes
         # the book's usable-data freshness clock.
         self.last_book_update_at = time.time()
+        received_at = event.get("_received_monotonic")
+        now_monotonic = time.monotonic()
+        if (
+            isinstance(received_at, bool)
+            or not isinstance(received_at, (int, float))
+            or not math.isfinite(received_at)
+            or received_at > now_monotonic
+        ):
+            received_at = now_monotonic
+        self.last_book_update_monotonic = received_at
 
         return True
 
@@ -514,9 +530,9 @@ class BinanceOrderBookStream:
         sync_age = max(0.0, now - self.last_sync_at) if self.last_sync_at is not None else None
         recovery_age = max(0.0, now - self.last_recovery_at) if self.last_recovery_at is not None else None
         book_age = (
-            max(0.0, now - self.last_book_update_at)
-            if self.last_book_update_at is not None
-            else None
+            max(0.0, time.monotonic() - self.last_book_update_monotonic)
+            if self.last_book_update_monotonic is not None
+            else (max(0.0, now - self.last_book_update_at) if self.last_book_update_at is not None else None)
         )
         stale = (
             not self.connected
@@ -570,9 +586,9 @@ class BinanceOrderBookStream:
 
         async with self._lock:
             age_seconds = (
-                max(0.0, time.time() - self.last_book_update_at)
-                if self.last_book_update_at is not None
-                else None
+                max(0.0, time.monotonic() - self.last_book_update_monotonic)
+                if self.last_book_update_monotonic is not None
+                else (max(0.0, time.time() - self.last_book_update_at) if self.last_book_update_at is not None else None)
             )
             if (
                 not self.connected
