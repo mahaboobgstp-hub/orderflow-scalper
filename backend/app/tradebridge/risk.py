@@ -1,11 +1,5 @@
-"""Fail-closed, server-side TradeBridge market and account risk validation.
-
-This module is side-effect free: it never places orders, calls an exchange, reads
-credentials, or enables execution. It validates a proposed preview against trusted
-server-supplied quote, exchange rules, account risk, and configuration.
-"""
+"""Fail-closed, server-side TradeBridge market and account risk validation."""
 from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -98,35 +92,23 @@ def _step_aligned(value: Decimal, step: Decimal) -> bool:
     return step > 0 and value % step == 0
 
 
-def validate_preview_risk(
-    preview: Any,
-    quote: MarketQuote,
-    rules: SymbolRules,
-    account: AccountRisk,
-    config: Any,
-    *,
-    now: datetime | None = None,
-) -> ValidatedPreview:
-    """Validate against server-supplied market/account data and hard-coded limits.
+def validate_preview_risk(preview: Any, quote: MarketQuote, rules: SymbolRules,
+                         account: AccountRisk, config: Any, *,
+                         now: datetime | None = None) -> ValidatedPreview:
+    """Validate using trusted server quote, filters and account snapshot.
 
-    The caller must obtain quote, symbol filters, and account figures from the
-    backend/exchange integration; never accept these fields from a client request.
+    Callers must not accept these snapshots from the ChatGPT/client request.
+    This function is side-effect-free and never places an order.
     """
-    now_utc = _aware(now or datetime.now(timezone.utc), "now")
-    quote_age = _age_seconds(
-        now_utc, _aware(quote.updated_at, "quote.updated_at"),
-        "Market quote", MAX_QUOTE_AGE_SECONDS,
-    )
-    account_age = _age_seconds(
-        now_utc, _aware(account.updated_at, "account.updated_at"),
-        "Account risk snapshot", MAX_ACCOUNT_AGE_SECONDS,
-    )
-    rules_age = _age_seconds(
-        now_utc, _aware(rules.updated_at, "exchange_rules.updated_at"),
-        "Exchange rules", MAX_RULES_AGE_SECONDS,
-    )
-
+    current = _aware(now or datetime.now(timezone.utc), "now")
+    quote_age = _age_seconds(current, _aware(quote.updated_at, "quote.updated_at"),
+                             "Market quote", MAX_QUOTE_AGE_SECONDS)
+    account_age = _age_seconds(current, _aware(account.updated_at, "account.updated_at"),
+                               "Account risk snapshot", MAX_ACCOUNT_AGE_SECONDS)
+    rules_age = _age_seconds(current, _aware(rules.updated_at, "exchange_rules.updated_at"),
+                             "Exchange rules", MAX_RULES_AGE_SECONDS)
     config.validate()
+
     symbol = str(getattr(preview, "symbol", "")).strip().upper()
     raw_direction = getattr(preview, "direction", "")
     direction = str(getattr(raw_direction, "value", raw_direction)).strip().upper()
@@ -141,20 +123,18 @@ def validate_preview_risk(
     quantity = _decimal(preview.quantity, "quantity")
     entry = _decimal(preview.entry_reference, "entry reference")
     stop = _decimal(preview.stop_loss_price, "stop loss")
-    take_profit_raw = getattr(preview, "take_profit_price", None)
-    take_profit = None if take_profit_raw is None else _decimal(take_profit_raw, "take profit")
+    raw_tp = getattr(preview, "take_profit_price", None)
+    take_profit = None if raw_tp is None else _decimal(raw_tp, "take profit")
     leverage = int(getattr(preview, "leverage", 1))
-    slippage_bound = _decimal(getattr(preview, "max_slippage_bps", 0), "slippage bound")
+    slip_bound = _decimal(getattr(preview, "max_slippage_bps", 0), "slippage bound")
 
     if min(mark, bid, ask) <= 0 or bid > ask:
         raise TradeBridgeRiskError("Quote is invalid or crossed.")
-    mid = (bid + ask) / Decimal(2)
-    spread_bps = (ask - bid) / mid * Decimal(10000)
+    spread_bps = (ask - bid) / ((bid + ask) / 2) * Decimal(10000)
     if spread_bps > MAX_SPREAD_BPS:
         raise TradeBridgeRiskError("Market spread exceeds the preview safety limit.")
 
-    configured_max_quantity = _decimal(config.max_order_quantity, "configured max quantity")
-    if quantity <= 0 or quantity > configured_max_quantity:
+    if quantity <= 0 or quantity > _decimal(config.max_order_quantity, "configured max quantity"):
         raise TradeBridgeRiskError("Quantity exceeds the configured safety bounds.")
     min_qty = _decimal(rules.min_quantity, "exchange minimum quantity")
     max_qty = _decimal(rules.max_quantity, "exchange maximum quantity")
@@ -165,15 +145,14 @@ def validate_preview_risk(
         raise TradeBridgeRiskError("Quantity violates exchange quantity filters.")
 
     tick = _decimal(rules.tick_size, "exchange tick size")
-    order_prices = [stop] + ([take_profit] if take_profit is not None else [])
-    if tick <= 0 or not all(_step_aligned(price, tick) for price in order_prices):
+    prices = [stop] + ([take_profit] if take_profit is not None else [])
+    if tick <= 0 or not all(_step_aligned(p, tick) for p in prices):
         raise TradeBridgeRiskError("Stop/take-profit price violates exchange tick-size rules.")
-
     notional = quantity * mark
-    minimum_notional = _decimal(rules.min_notional_usdt, "exchange minimum notional")
-    if minimum_notional < 0:
+    min_notional = _decimal(rules.min_notional_usdt, "exchange minimum notional")
+    if min_notional < 0:
         raise TradeBridgeRiskError("Exchange minimum notional is invalid.")
-    if notional < minimum_notional:
+    if notional < min_notional:
         raise TradeBridgeRiskError("Order notional is below the exchange minimum.")
     if notional > _decimal(config.max_order_notional_usdt, "configured max notional"):
         raise TradeBridgeRiskError("Order notional exceeds the configured safety cap.")
@@ -181,9 +160,8 @@ def validate_preview_risk(
         raise TradeBridgeRiskError("Leverage exceeds the configured safety cap.")
 
     entry_slippage = abs(entry - mark) / mark * Decimal(10000)
-    if entry_slippage > slippage_bound:
+    if entry_slippage > slip_bound:
         raise TradeBridgeRiskError("Entry price is outside the approved slippage bound.")
-
     if direction == "LONG":
         if stop >= mark or (take_profit is not None and take_profit <= mark):
             raise TradeBridgeRiskError("Long stop/take-profit geometry invalid at current mark.")
@@ -191,15 +169,13 @@ def validate_preview_risk(
         raise TradeBridgeRiskError("Short stop/take-profit geometry invalid at current mark.")
 
     equity = _decimal(account.equity_usdt, "account equity")
-    available_margin = _decimal(account.available_margin_usdt, "available margin")
+    margin_available = _decimal(account.available_margin_usdt, "available margin")
     current_risk = _decimal(account.current_open_risk_usdt, "current open risk")
-    if equity <= 0 or not 0 <= available_margin <= equity or current_risk < 0:
+    if equity <= 0 or not 0 <= margin_available <= equity or current_risk < 0:
         raise TradeBridgeRiskError("Account risk snapshot is invalid.")
-    if (
-        isinstance(account.open_positions_count, bool)
-        or not isinstance(account.open_positions_count, int)
-        or account.open_positions_count < 0
-    ):
+    if (isinstance(account.open_positions_count, bool)
+            or not isinstance(account.open_positions_count, int)
+            or account.open_positions_count < 0):
         raise TradeBridgeRiskError("Open-position count is invalid.")
     if account.open_positions_count >= int(config.max_open_positions):
         raise TradeBridgeRiskError("Maximum open-position limit reached.")
@@ -207,7 +183,7 @@ def validate_preview_risk(
         raise TradeBridgeRiskError("Existing portfolio risk already exceeds the risk cap.")
 
     margin = notional / Decimal(leverage)
-    if margin > available_margin:
+    if margin > margin_available:
         raise TradeBridgeRiskError("Insufficient available margin for this preview.")
     stop_risk = abs(mark - stop) * quantity
     if stop_risk > equity * PER_TRADE_RISK_FRACTION:
@@ -215,17 +191,5 @@ def validate_preview_risk(
     if current_risk + stop_risk > equity * TOTAL_RISK_FRACTION:
         raise TradeBridgeRiskError("Proposed stop risk exceeds portfolio risk cap.")
 
-    return ValidatedPreview(
-        symbol=symbol,
-        direction=direction,
-        quantity=quantity,
-        mark_price=mark,
-        notional_usdt=notional,
-        required_margin_usdt=margin,
-        stop_risk_usdt=stop_risk,
-        quote_age_seconds=quote_age,
-        account_age_seconds=account_age,
-        exchange_rules_age_seconds=rules_age,
-        spread_bps=spread_bps,
-        entry_slippage_bps=entry_slippage,
-    )
+    return ValidatedPreview(symbol, direction, quantity, mark, notional, margin, stop_risk,
+                            quote_age, account_age, rules_age, spread_bps, entry_slippage)
