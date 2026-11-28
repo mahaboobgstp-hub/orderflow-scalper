@@ -105,6 +105,11 @@ class PublicExchangeAdapter(ABC):
                             if self.on_message: self.on_message(self.name,parsed)
                         except (json.JSONDecodeError,TypeError) as err:
                             self._record_error("Message parse error: "+str(err))
+                    # Normal WebSocket iterator completion is a close signal too.
+                    # Unless stop was requested, count it before reconnecting so
+                    # graceful remote closes are visible in cumulative diagnostics.
+                    if not self._stop.is_set():
+                        self._record_error("WebSocket stream ended unexpectedly")
             except asyncio.CancelledError: raise
             except Exception as exc:
                 self._record_error(exc); logger.warning("%s websocket disconnected: %s",self.name,exc)
