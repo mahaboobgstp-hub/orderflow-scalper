@@ -104,6 +104,48 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(disconnected["last_connection_duration_seconds"], 3.5)
         self.assertEqual(disconnected["last_disconnect_at"], 90.0)
 
+    def test_exchange_native_error_frame_shapes_are_classified(self):
+        cases = [
+            ({"success": False, "ret_msg": "subscription rejected"}, "subscription rejected"),
+            ({"code": -1121, "msg": "Invalid symbol."}, "Exchange error -1121: Invalid symbol."),
+            ({"retCode": 10001, "retMsg": "Invalid request"}, "Exchange retCode 10001: Invalid request"),
+            ({"type": "error", "message": "channel unavailable"}, "Exchange error: channel unavailable"),
+            ({"retCode": 0, "retMsg": "OK"}, None),
+            ({"code": 0, "msg": "ok"}, None),
+        ]
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.adapter._exchange_error_message(payload), expected)
+
+    def test_run_counts_native_exchange_error_frames_but_not_success_ack(self):
+        adapter = self.adapter
+
+        class FakeWebsocket:
+            async def __aiter__(self):
+                yield '{"code":-1121,"msg":"Invalid symbol."}'
+                yield '{"retCode":10001,"retMsg":"Invalid request"}'
+                yield '{"type":"error","message":"channel unavailable"}'
+                yield '{"success":false,"ret_msg":"subscription rejected"}'
+                yield '{"retCode":0,"retMsg":"OK"}'
+                adapter._stop.set()
+
+        class FakeConnect:
+            async def __aenter__(self):
+                return FakeWebsocket()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def run():
+            with patch("app.exchanges.public_adapters.websockets.connect", return_value=FakeConnect()):
+                with patch("app.exchanges.public_adapters.time.time", side_effect=[10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0]):
+                    with patch("app.exchanges.public_adapters.time.monotonic", side_effect=[100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0]):
+                        await adapter._run()
+
+        asyncio.run(run())
+        self.assertEqual(adapter.error_count, 4)
+        self.assertEqual(adapter.last_error, "subscription rejected")
+
     def test_run_records_actual_connect_and_message_lifecycle(self):
         adapter = self.adapter
 
