@@ -76,3 +76,18 @@
 - Feature branch remains PR-less; commit-associated Actions run list is empty. Combined status still shows the two Vercel build-rate-limit failures (no deployment was triggered).
 - PR #11 current head `8c6625f1`: 4/4 workflows completed successfully. PR #15 current head `235dc37d`: 6/6 workflows completed successfully; both Vercel status contexts are success on this PR head. Main remains `4603a5ee` and has no commit-associated workflow runs returned.
 - Local focused validation: 26 tests passed; py_compile passed. The tests cover 26 validator cases; no full backend test run is claimed.
+
+
+## Run 13 — read-only Demo snapshot provider (2026-11-28)
+
+- Added `backend/app/tradebridge/snapshot_provider.py`, which obtains market mark price, best bid/ask, exchange symbol rules, account snapshot, and all open orders through the existing Binance Demo client. It does not submit orders.
+- Added read-only public client methods for `/fapi/v1/premiumIndex` (mark), `/fapi/v1/ticker/bookTicker` (best bid/ask), and signed `/fapi/v1/openOrders` (all open orders). Open-orders responses are type-checked as a list.
+- Provider fails closed if TradeBridge is disabled, configuration/endpoint validation fails, market data requests exceed 2 seconds, account snapshot requests exceed 5 seconds, symbol metadata is not an active USDT perpetual or filters are missing/malformed, any open order exists, or any nonzero position exists (existing protective-stop risk is not reconciled).
+- Snapshot timestamps are receipt timestamps; market/account network duration is bounded before risk validation. This is not exchange-source timestamp proof and must be improved/reconciled before order submission.
+- Added `backend/tests/test_tradebridge_snapshot_provider.py`: **18 tests** covering parsing, symbol/quote mismatches, malformed/nonpositive data, exchange filters, positions/open orders, account margin sanity, provider disabled, and endpoint mismatch.
+- Local isolated harness: **16 passed** and compileall passed. The harness used stubs for existing config/client/risk dependencies; this is not the full repository test run. (Two additional tests are authored for the upstream branch but were not included in the harness.)
+- Commit sequence: `c8afe52b` (provider), `c35ac4a1` (tests), `cf5f2d84` (Demo client public/account-read methods). Branch remains `feature/tradebridge-chat-execution`; no PR and no Actions run. No credentials, orders, live execution, or deployment used.
+
+### Remaining
+- Provider is not yet wired to FastAPI preview routes. The next safe step is an authenticated, read-only preview endpoint that invokes this provider and risk validator and stores only a preview; approval and order submission must remain unavailable until persistent idempotency and explicit Testnet execution gates are implemented.
+- TradeBridge remains disabled by default. No open order or position data is interpreted as zero risk unless the complete snapshots are present and verified.
