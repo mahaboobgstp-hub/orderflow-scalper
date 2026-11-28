@@ -91,3 +91,9 @@
 ### Remaining
 - Provider is not yet wired to FastAPI preview routes. The next safe step is an authenticated, read-only preview endpoint that invokes this provider and risk validator and stores only a preview; approval and order submission must remain unavailable until persistent idempotency and explicit Testnet execution gates are implemented.
 - TradeBridge remains disabled by default. No open order or position data is interpreted as zero risk unless the complete snapshots are present and verified.
+
+
+### Run 13 CI follow-up
+
+- Added `.github/workflows/tradebridge-focused.yml`, a branch-scoped, read-only GitHub Actions workflow. It triggers only on the TradeBridge feature branch for relevant paths (and on PRs to main), installs backend requirements + pytest, compiles the TradeBridge modules and Demo client, then runs the three focused TradeBridge suites. Workflow permissions are `contents: read`; it does not use secrets, deploy, or submit orders.
+- The new workflow commit is `0bda9218`. Its run status is checked separately; local tests do not substitute for CI.
