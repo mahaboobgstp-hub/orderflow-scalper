@@ -283,6 +283,7 @@ test("diagnostic counter strings require decimal integer notation", () => {
 test("missing diagnostic counters display unavailable instead of zero", () => {
   assert.equal(displayDiagnosticCounter({}, "connection_attempt_count"), "--");
   assert.equal(displayDiagnosticCounter(null, "reconnect_count"), "--");
+  assert.equal(displayDiagnosticCounter({}, "error_count"), "--");
   assert.equal(displayDiagnosticCounter({ snapshot_count: null }, "snapshot_count"), 0);
   assert.equal(displayDiagnosticCounter({ sequence_gap_count: "004" }, "sequence_gap_count"), 4);
   assert.equal(displayDiagnosticCounter({ messages_received: "1e2" }, "messages_received"), 0);
@@ -324,8 +325,8 @@ test("feed, exchange, adapter, and primary counters normalize safely", () => {
     },
     exchange_connections: {
       exchanges: [
-        { reconnect_count: "3", messages_received: "5" },
-        { reconnect_count: -1, messages_received: "NaN" },
+        { reconnect_count: "3", messages_received: "5", error_count: "2" },
+        { reconnect_count: -1, messages_received: "NaN", error_count: -1 },
       ],
     },
   });
@@ -340,7 +341,9 @@ test("feed, exchange, adapter, and primary counters normalize safely", () => {
   assert.equal(normalized.feeds.malformed.messages_received, 0);
   assert.equal(normalized.adapterList[0].reconnect_count, 3);
   assert.equal(normalized.adapterList[0].messages_received, 5);
+  assert.equal(normalized.adapterList[0].error_count, 2);
   assert.equal(normalized.adapterList[1].reconnect_count, 0);
+  assert.equal(normalized.adapterList[1].error_count, 0);
   assert.equal(normalized.adapterList[1].messages_received, 0);
 });
 

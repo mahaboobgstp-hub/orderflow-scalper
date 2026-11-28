@@ -20,6 +20,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["connection_attempt_count"], 0)
         self.assertEqual(status["successful_connection_count"], 0)
         self.assertEqual(status["reconnect_count"], 0)
+        self.assertEqual(status["error_count"], 0)
         self.assertIsNone(status["connected_duration_seconds"])
         self.assertIsNone(status["last_connection_duration_seconds"])
         self.assertIsNone(status["last_connection_attempt_at"])
@@ -63,6 +64,22 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["connected_duration_seconds"], 2.0)
         self.assertEqual(status["last_connection_duration_seconds"], 1.0)
 
+    def test_error_counter_is_cumulative_and_last_error_clears_on_success(self):
+        self.adapter._record_error("subscription rejected")
+        self.adapter._record_error("malformed frame")
+        with patch("app.exchanges.public_adapters.time.time", return_value=20.0):
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=30.0):
+                failed = asyncio.run(self.adapter.status())
+        self.assertEqual(failed["error_count"], 2)
+        self.assertEqual(failed["last_error"], "malformed frame")
+
+        self.adapter._record_connection_success(now=21.0, monotonic_now=31.0)
+        with patch("app.exchanges.public_adapters.time.time", return_value=22.0):
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=32.0):
+                recovered = asyncio.run(self.adapter.status())
+        self.assertEqual(recovered["error_count"], 2)
+        self.assertIsNone(recovered["last_error"])
+
     def test_message_age_uses_monotonic_clock_when_wall_clock_moves_backward(self):
         self.adapter.last_message_at = 110.0
         self.adapter.last_message_monotonic = 100.0
@@ -92,6 +109,8 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
 
         class FakeWebsocket:
             async def __aiter__(self):
+                yield '{"success":false,"ret_msg":"subscription rejected"}'
+                yield "not-json"
                 yield '{"type":"test"}'
                 adapter._stop.set()
 
@@ -104,8 +123,8 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
 
         async def run():
             with patch("app.exchanges.public_adapters.websockets.connect", return_value=FakeConnect()):
-                with patch("app.exchanges.public_adapters.time.time", side_effect=[50.0, 51.0, 52.0, 53.0, 54.0]):
-                    with patch("app.exchanges.public_adapters.time.monotonic", side_effect=[100.0, 101.0, 102.0, 103.0]):
+                with patch("app.exchanges.public_adapters.time.time", side_effect=[50.0, 51.0, 52.0, 53.0, 54.0, 55.0, 56.0]):
+                    with patch("app.exchanges.public_adapters.time.monotonic", side_effect=[100.0, 101.0, 102.0, 103.0, 104.0, 105.0]):
                         await adapter._run()
                         return await adapter.status()
 
@@ -117,6 +136,8 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["last_disconnect_at"], 53.0)
         self.assertEqual(status["last_connection_duration_seconds"], 2.0)
         self.assertEqual(status["last_message_age_seconds"], 2.0)
+        self.assertEqual(status["error_count"], 2)
+        self.assertIn("Message parse error", status["last_error"])
         self.assertIsNone(status["connected_duration_seconds"])
         self.assertFalse(status["connected"])
 

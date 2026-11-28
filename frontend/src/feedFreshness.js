@@ -41,6 +41,7 @@ const FEED_DIAGNOSTIC_COUNTER_FIELDS = [
   "messages_received",
   "connection_attempt_count",
   "successful_connection_count",
+  "error_count",
   "reconnect_count",
   "recovery_count",
   "snapshot_count",

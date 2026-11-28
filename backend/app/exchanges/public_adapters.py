@@ -11,7 +11,7 @@ logger=logging.getLogger(__name__)
 class PublicExchangeAdapter(ABC):
     def __init__(self,name,enabled,url,symbol="BTCUSDT",on_message:Callable[[str,Any],None]|None=None):
         self.name=name; self.enabled=enabled; self.url=url; self.symbol=symbol.upper(); self.on_message=on_message
-        self.connected=False; self.last_message_at=None; self.last_message_monotonic=None; self.last_error=None; self.reconnect_count=0
+        self.connected=False; self.last_message_at=None; self.last_message_monotonic=None; self.last_error=None; self.error_count=0; self.reconnect_count=0
         self.connection_attempt_count=0; self.successful_connection_count=0
         self.connected_at=None; self.connected_monotonic=None; self.last_connected_at=None; self.last_connection_attempt_at=None
         self.last_disconnect_at=None; self.last_reconnect_at=None; self.last_connection_duration_seconds=None
@@ -35,6 +35,10 @@ class PublicExchangeAdapter(ABC):
         now=time.time() if now is None else now
         self.connection_attempt_count+=1
         self.last_connection_attempt_at=now
+
+    def _record_error(self, error):
+        self.error_count += 1
+        self.last_error = str(error)
 
     def _record_connection_success(self, now=None, monotonic_now=None):
         now=time.time() if now is None else now
@@ -72,13 +76,13 @@ class PublicExchangeAdapter(ABC):
                         try:
                             parsed=json.loads(msg)
                             if isinstance(parsed,dict) and parsed.get("success") is False:
-                                self.last_error=str(parsed.get("ret_msg") or parsed.get("error") or parsed)
+                                self._record_error(parsed.get("ret_msg") or parsed.get("error") or parsed)
                             if self.on_message: self.on_message(self.name,parsed)
                         except (json.JSONDecodeError,TypeError) as err:
-                            self.last_error="Message parse error: "+str(err)
+                            self._record_error("Message parse error: "+str(err))
             except asyncio.CancelledError: raise
             except Exception as exc:
-                self.last_error=str(exc); logger.warning("%s websocket disconnected: %s",self.name,exc)
+                self._record_error(exc); logger.warning("%s websocket disconnected: %s",self.name,exc)
             finally: self._record_connection_end()
             if not self._stop.is_set():
                 self.reconnect_count+=1; await asyncio.sleep(delay); delay=min(delay*2,30)
@@ -98,7 +102,7 @@ class PublicExchangeAdapter(ABC):
             "last_connection_duration_seconds":self.last_connection_duration_seconds,
             "last_connection_attempt_at":self.last_connection_attempt_at,"last_connected_at":self.last_connected_at,
             "last_disconnect_at":self.last_disconnect_at,"last_reconnect_at":self.last_reconnect_at,
-            "reconnect_count":self.reconnect_count,"last_error":self.last_error,
+            "reconnect_count":self.reconnect_count,"error_count":self.error_count,"last_error":self.last_error,
             "purpose":"public feed connection and normalized data callback"}
 
 class BinancePublicAdapter(PublicExchangeAdapter):

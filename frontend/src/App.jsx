@@ -263,7 +263,7 @@ export default function App() {
           <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+stateClass}>{state}</span>
           <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??"--"}</small>
           <small>Connection attempts / successes {x.connection_attempt_count??"--"} / {x.successful_connection_count??"--"} · Current uptime {connectedFor} · Last session {lastSession}</small>
-          <small>Error: {x.last_error||"None"}</small>
+          <small>Errors {displayDiagnosticCounter(x,"error_count")} · Last error: {x.last_error||"None"}</small>
         </div>;
         })}
       </div>
