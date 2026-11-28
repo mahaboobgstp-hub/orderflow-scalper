@@ -119,6 +119,8 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
 
     def test_run_counts_native_exchange_error_frames_but_not_success_ack(self):
         adapter = self.adapter
+        received = []
+        adapter.on_message = lambda exchange, payload: received.append(payload)
 
         class FakeWebsocket:
             async def __aiter__(self):
@@ -145,6 +147,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         asyncio.run(run())
         self.assertEqual(adapter.error_count, 4)
         self.assertEqual(adapter.last_error, "subscription rejected")
+        self.assertEqual(received, [{"retCode": 0, "retMsg": "OK"}])
 
     def test_run_records_actual_connect_and_message_lifecycle(self):
         adapter = self.adapter
