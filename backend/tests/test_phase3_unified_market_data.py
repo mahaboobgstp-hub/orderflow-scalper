@@ -19,6 +19,49 @@ class Tests(unittest.TestCase):
  def test_trade(self):
   x=self.e.process("bybit",{"topic":"publicTrade.BTCUSDT","data":[{"s":"BTCUSDT","p":"101","v":"2","S":"Buy"}]})
   self.assertEqual(x["side"],"buy")
+
+ def test_public_trade_topic_resolves_missing_payload_symbol(self):
+  message={"topic":"publicTrade.ETHUSDT","data":{"p":"2020","v":"1","S":"Sell"}}
+  with patch("app.market_data.unified_engine.time.time",return_value=100.0):
+   result=self.e.process("bybit",message)
+  self.assertEqual(result["symbol"],"ETHUSDT")
+  status=self.e.get_status()
+  self.assertEqual(status["feeds"]["bybit:ETHUSDT"]["messages_received"],1)
+  self.assertNotIn("bybit:BTCUSDT",status["feeds"])
+  self.assertEqual(status["invalid_symbol_message_count"],0)
+
+ def test_topic_and_payload_symbol_conflict_is_rejected_and_counted(self):
+  message={"topic":"publicTrade.BTCUSDT","data":{"s":"ETHUSDT","p":"2020","v":"1","S":"Sell"}}
+  result=self.e.process("bybit",message)
+  status=self.e.get_status()
+  self.assertIsNone(result)
+  self.assertEqual(status["invalid_symbol_message_count"],1)
+  self.assertEqual(status["feeds"],{})
+  self.assertEqual(status["trade_streams"],{})
+
+ def test_malformed_explicit_symbol_is_rejected_and_counted(self):
+  message={"topic":"publicTrade.BTCUSDT","data":{"s":123,"p":"2020","v":"1","S":"Sell"}}
+  result=self.e.process("bybit",message)
+  status=self.e.get_status()
+  self.assertIsNone(result)
+  self.assertEqual(status["invalid_symbol_message_count"],1)
+  self.assertEqual(status["feeds"],{})
+
+ def test_orderbook_topic_resolves_missing_payload_symbol(self):
+  snapshot={"topic":"orderbook.50.ETHUSDT","type":"snapshot","data":{"b":[["2000","2"]],"a":[["2001","3"]],"u":1}}
+  result=self.e.process("bybit",snapshot)
+  book=self.e.get_book("bybit","ETHUSDT")
+  self.assertTrue(book["synchronized"])
+  self.assertEqual(book["best_bid"],2000.0)
+  self.assertEqual(result["type"],"book_snapshot")
+  self.assertEqual(self.e.get_status()["invalid_symbol_message_count"],0)
+
+ def test_single_symbol_default_fallback_is_retained(self):
+  message={"e":"aggTrade","p":"101","q":"2","m":False}
+  result=self.e.process("binance",message,default_symbol="BTCUSDT")
+  self.assertEqual(result["symbol"],"BTCUSDT")
+  self.assertEqual(self.e.get_status()["feeds"]["binance:BTCUSDT"]["messages_received"],1)
+  self.assertEqual(self.e.get_status()["invalid_symbol_message_count"],0)
  def test_binance_diff_unsynced(self):
   x=self.e.process("binance",{"e":"depthUpdate","s":"BTCUSDT","U":1,"u":2,"b":[["10","1"]],"a":[["11","2"]]})
   self.assertFalse(x["synchronized"])
