@@ -101,6 +101,7 @@ class PublicExchangeAdapter(ABC):
                             exchange_error = self._exchange_error_message(parsed)
                             if exchange_error:
                                 self._record_error(exchange_error)
+                                continue
                             if self.on_message: self.on_message(self.name,parsed)
                         except (json.JSONDecodeError,TypeError) as err:
                             self._record_error("Message parse error: "+str(err))
