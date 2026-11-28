@@ -29,18 +29,20 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
 
     def test_success_and_disconnect_record_attempts_and_session_duration(self):
         self.adapter._record_connection_attempt(now=10.0)
-        self.adapter._record_connection_success(now=11.0)
+        self.adapter._record_connection_success(now=11.0, monotonic_now=100.0)
         with patch("app.exchanges.public_adapters.time.time", return_value=13.5):
-            connected = asyncio.run(self.adapter.status())
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=102.5):
+                connected = asyncio.run(self.adapter.status())
         self.assertEqual(connected["connection_attempt_count"], 1)
         self.assertEqual(connected["successful_connection_count"], 1)
         self.assertEqual(connected["connected_duration_seconds"], 2.5)
         self.assertIsNone(connected["last_connection_duration_seconds"])
         self.assertIsNone(connected["last_reconnect_at"])
 
-        self.adapter._record_connection_end(now=14.0)
+        self.adapter._record_connection_end(now=14.0, monotonic_now=103.0)
         with patch("app.exchanges.public_adapters.time.time", return_value=15.0):
-            disconnected = asyncio.run(self.adapter.status())
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=103.5):
+                disconnected = asyncio.run(self.adapter.status())
         self.assertFalse(disconnected["connected"])
         self.assertIsNone(disconnected["connected_duration_seconds"])
         self.assertEqual(disconnected["last_connection_duration_seconds"], 3.0)
@@ -48,12 +50,13 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
 
     def test_successful_reconnect_records_second_attempt_and_reconnect_time(self):
         self.adapter._record_connection_attempt(now=10.0)
-        self.adapter._record_connection_success(now=11.0)
-        self.adapter._record_connection_end(now=12.0)
+        self.adapter._record_connection_success(now=11.0, monotonic_now=100.0)
+        self.adapter._record_connection_end(now=12.0, monotonic_now=101.0)
         self.adapter._record_connection_attempt(now=20.0)
-        self.adapter._record_connection_success(now=21.0)
+        self.adapter._record_connection_success(now=21.0, monotonic_now=200.0)
         with patch("app.exchanges.public_adapters.time.time", return_value=23.0):
-            status = asyncio.run(self.adapter.status())
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=202.0):
+                status = asyncio.run(self.adapter.status())
         self.assertEqual(status["connection_attempt_count"], 2)
         self.assertEqual(status["successful_connection_count"], 2)
         self.assertEqual(status["last_reconnect_at"], 21.0)
@@ -67,6 +70,22 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
             with patch("app.exchanges.public_adapters.time.monotonic", return_value=101.5):
                 status = asyncio.run(self.adapter.status())
         self.assertEqual(status["last_message_age_seconds"], 1.5)
+
+
+    def test_connected_and_completed_session_uptime_use_monotonic_clock_when_wall_clock_moves_backward(self):
+        self.adapter._record_connection_success(now=110.0, monotonic_now=100.0)
+        with patch("app.exchanges.public_adapters.time.time", return_value=90.0):
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=101.5):
+                connected = asyncio.run(self.adapter.status())
+        self.assertEqual(connected["connected_duration_seconds"], 1.5)
+
+
+        self.adapter._record_connection_end(now=90.0, monotonic_now=103.5)
+        with patch("app.exchanges.public_adapters.time.time", return_value=91.0):
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=104.0):
+                disconnected = asyncio.run(self.adapter.status())
+        self.assertEqual(disconnected["last_connection_duration_seconds"], 3.5)
+        self.assertEqual(disconnected["last_disconnect_at"], 90.0)
 
     def test_run_records_actual_connect_and_message_lifecycle(self):
         adapter = self.adapter
@@ -86,7 +105,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         async def run():
             with patch("app.exchanges.public_adapters.websockets.connect", return_value=FakeConnect()):
                 with patch("app.exchanges.public_adapters.time.time", side_effect=[50.0, 51.0, 52.0, 53.0, 54.0]):
-                    with patch("app.exchanges.public_adapters.time.monotonic", return_value=100.0):
+                    with patch("app.exchanges.public_adapters.time.monotonic", side_effect=[100.0, 101.0, 102.0, 103.0]):
                         await adapter._run()
                         return await adapter.status()
 
@@ -97,7 +116,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["last_connected_at"], 51.0)
         self.assertEqual(status["last_disconnect_at"], 53.0)
         self.assertEqual(status["last_connection_duration_seconds"], 2.0)
-        self.assertEqual(status["last_message_age_seconds"], 0.0)
+        self.assertEqual(status["last_message_age_seconds"], 2.0)
         self.assertIsNone(status["connected_duration_seconds"])
         self.assertFalse(status["connected"])
 
