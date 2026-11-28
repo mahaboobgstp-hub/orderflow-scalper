@@ -335,3 +335,31 @@ test("feed, exchange, adapter, and primary counters normalize safely", () => {
   assert.equal(normalized.adapterList[1].reconnect_count, 0);
   assert.equal(normalized.adapterList[1].messages_received, 0);
 });
+
+test("public adapter lifecycle counters normalize while uptime durations remain separate", () => {
+  const normalized = normalizeFeedMonitorPayload({
+    exchange_connections: {
+      exchanges: [{
+        exchange: "bybit",
+        connection_attempt_count: "4",
+        successful_connection_count: "3",
+        reconnect_count: "2",
+        connected_duration_seconds: 12.5,
+        last_connection_duration_seconds: 8.25,
+      }],
+    },
+  });
+  const adapter = normalized.adapterList[0];
+  assert.equal(adapter.connection_attempt_count, 4);
+  assert.equal(adapter.successful_connection_count, 3);
+  assert.equal(adapter.reconnect_count, 2);
+  assert.equal(adapter.connected_duration_seconds, 12.5);
+  assert.equal(adapter.last_connection_duration_seconds, 8.25);
+  const malformed = normalizeFeedMonitorPayload({
+    exchange_connections: {
+      exchanges: [{ connection_attempt_count: "1e2", successful_connection_count: -1 }],
+    },
+  });
+  assert.equal(malformed.adapterList[0].connection_attempt_count, 0);
+  assert.equal(malformed.adapterList[0].successful_connection_count, 0);
+});
