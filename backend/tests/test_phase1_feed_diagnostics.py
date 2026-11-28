@@ -29,6 +29,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertFalse(status["connected"])
         self.assertFalse(status["synchronized"])
         self.assertEqual(status["messages_received"], 0)
+        self.assertEqual(status["error_count"], 0)
         self.assertEqual(status["snapshot_count"], 0)
         self.assertEqual(status["sequence_gap_count"], 0)
         self.assertEqual(status["invalid_depth_message_count"], 0)
@@ -44,6 +45,20 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["successful_connection_count"], 0)
         self.assertEqual(status["reconnect_count"], 0)
         self.assertEqual(status["recovery_count"], 0)
+
+    def test_primary_error_counter_accumulates_and_last_error_clears_on_success(self):
+        self.stream._record_error("snapshot request failed")
+        self.stream._record_error("depth continuity rejected")
+        failed = asyncio.run(self.stream.get_status())
+        self.assertEqual(failed["error_count"], 2)
+        self.assertEqual(failed["last_error"], "depth continuity rejected")
+
+        self.stream._record_connection_success(now=10.0, monotonic_now=20.0)
+        with patch("app.market_data.backend_stream.time.time", return_value=11.0):
+            with patch("app.market_data.backend_stream.time.monotonic", return_value=20.5):
+                recovered = asyncio.run(self.stream.get_status())
+        self.assertEqual(recovered["error_count"], 2)
+        self.assertIsNone(recovered["last_error"])
 
     def test_primary_stale_cutoff_normalizes_invalid_values(self):
         for invalid in (None, "", "invalid", float("nan"), float("inf"), float("-inf"), 0, -1, True, False):
@@ -225,6 +240,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
                     "snapshot_count": 1, "sequence_gap_count": 0,
                     "invalid_depth_message_count": 0,
                     "snapshot_buffer_overflow_count": 0,
+                    "error_count": 3,
                 }
 
         class FakeExchanges:
@@ -262,6 +278,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
             "last_recovery_age_seconds", "last_book_update_age_seconds", "messages_received", "snapshot_count",
             "sequence_gap_count", "invalid_depth_message_count",
             "snapshot_buffer_overflow_count",
+            "error_count",
             "snapshot_limit",
         ):
             self.assertIn(field, primary)
@@ -273,6 +290,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["fresh_message_feed_count"], 1)
         self.assertEqual(payload["summary"]["exchange_adapter_count"], 3)
         self.assertEqual(payload["summary"]["feed_errors"], 2)
+        self.assertEqual(primary["error_count"], 3)
 
     def test_healthy_feed_count_requires_fresh_synchronized_book(self):
         class FakeUnified:
@@ -477,6 +495,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         queues = asyncio.run(run_collector())
         self.assertEqual(self.stream.messages_received, 2)
         self.assertEqual(self.stream.invalid_depth_message_count, 2)
+        self.assertEqual(self.stream.error_count, 2)
         for queue in queues:
             self.assertIsNone(queue.get_nowait())
             self.assertTrue(queue.empty())
@@ -510,6 +529,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(self.stream.messages_received, 2)
         self.assertEqual(self.stream.last_error, "Malformed Binance depth JSON frame")
         self.assertEqual(self.stream.invalid_depth_message_count, 1)
+        self.assertEqual(self.stream.error_count, 1)
 
     def test_collector_signals_normal_websocket_end(self):
         class FakeWebSocket:
@@ -559,6 +579,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         queue = asyncio.run(run_collector())
         self.assertEqual(self.stream.messages_received, 3)
         self.assertEqual(self.stream.snapshot_buffer_overflow_count, 1)
+        self.assertEqual(self.stream.error_count, 1)
         self.assertEqual(queue.qsize(), 1)
         self.assertIsNone(queue.get_nowait())
         self.assertTrue(queue.empty())
@@ -724,6 +745,7 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         queue = asyncio.run(run_collector())
         self.assertEqual(self.stream.messages_received, 3)
         self.assertEqual(self.stream.snapshot_buffer_overflow_count, 1)
+        self.assertEqual(self.stream.error_count, 1)
         self.assertEqual(queue.qsize(), 1)
         self.assertIsNone(queue.get_nowait())
         self.assertTrue(queue.empty())
