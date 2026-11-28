@@ -40,6 +40,9 @@ export function normalizeFeedMonitorPayload(rawPayload) {
     summary.safety = "PUBLIC FEEDS ONLY";
   }
   const unified = asRecord(payload.unified_market_data);
+  if (Object.hasOwn(unified, "invalid_symbol_message_count")) {
+    unified.invalid_symbol_message_count = normalizeDiagnosticCounter(unified.invalid_symbol_message_count);
+  }
   const exchangeConnections = asRecord(payload.exchange_connections);
   const adapterList = asArray(exchangeConnections.exchanges).map(asRecord);
   const books = Object.fromEntries(
