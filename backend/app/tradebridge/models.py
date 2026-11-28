@@ -1,5 +1,6 @@
 """Strict TradeBridge signal, preview, and exact-approval schemas."""
-from __future__ import annotations
+from __future__
+
 
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -8,6 +9,7 @@ import hashlib
 import json
 import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 
 
 class Direction(str, Enum):
@@ -42,9 +44,9 @@ def _decimal_finite(value: Decimal, field_name: str) -> Decimal:
         raise ValueError(f"{field_name} must be finite.")
     return value
 
-
 class OpportunitySignal(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
 
     signal_id: str = Field(min_length=8, max_length=128)
     symbol: str
@@ -97,6 +99,7 @@ class OpportunitySignal(BaseModel):
             raise ValueError("Signal lifetime must not exceed 300 seconds.")
         return self
 
+
     def is_fresh(self, now: datetime | None = None) -> bool:
         now = now or datetime.now(timezone.utc)
         if now.tzinfo is None or now.utcoffset() is None:
@@ -107,6 +110,7 @@ class OpportunitySignal(BaseModel):
 
 class TradePreview(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
 
     preview_id: str = Field(min_length=8, max_length=128)
     signal_id: str = Field(min_length=8, max_length=128)
@@ -134,6 +138,7 @@ class TradePreview(BaseModel):
     @classmethod
     def validate_finite_required(cls, value: Decimal, info) -> Decimal:
         return _decimal_finite(value, info.field_name)
+
 
     @field_validator("take_profit_price")
     @classmethod
