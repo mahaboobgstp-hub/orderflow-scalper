@@ -1,67 +1,47 @@
-# OrderFlow Scalper — Release Readiness Snapshot
+# OrderFlow Scalper — Release Readiness
 
-**Audit date:** 26 November 2026  
-**Target:** Android app + observable, controlled paper/demo session  
-**Execution safety:** PAPER/DEMO only. Real exchange order execution must remain disabled.
+**Updated:** 28 Nov 2026, 05:52 IST  
+**Main:** `4603a5ee256d6f038d94aaa6e9855441f56942f7`  
+**Mode:** PAPER/DEMO only. Real exchange execution must stay disabled.
 
-## Highest-priority release blocker
+## Current highest-priority blocker
 
-The Android branch still contains a **placeholder research dashboard** with hard-coded illustrative order-book values and explicitly says its backend is not connected. The existing APK is a shell artifact—not the monitoring app needed to watch live feeds, scanner decisions, all nine layers, risk gates, positions, stops, trailing exits, and paper P&L. The mobile UI must be integrated with the validated feature code and deployed backend before device demo.
+Mainline feed integrity: unbridged Binance depth updates mutate an unsynchronized book and refresh its book timestamp; trade events also refresh book freshness. The book is rejected by strategy gates, but diagnostics/freshness semantics are unsafe. Run 11 isolates a fix on a feature branch. The separate PR #15 contains a Binance snapshot-bridge integration but is unmerged and has no live recovery certification.
 
-## Current branch/PR audit
+## Current release gates
 
-| PR | Head / base | Status | CI evidence |
-|---|---|---|---|
-| #1 Layer 1 snapshot bridge | `fix/layer1-binance-snapshot-bridge` → `main` | Open, non-draft; separate feed fix | Focused sync checks passed; backend checks failed on this head |
-| #8 Transparency/feed/runtime bundle | `feature/observability-trader-transparency` → `main` | Open, non-draft; 53 commits | Previous head had 5 green checks; **feed freshness hardening passed all five checks on code commit `85b3941f330989b43fcda4db3c820d97de3fee16`**; the later release-checklist document commit is docs-only and may trigger a fresh CI run |
-| #9 Central Risk Engine | `feature/phase-e-risk-engine` → `main` | Open, draft; 75 commits | 5 checks green (backend, Layer 9, combined paper, frontend build, infrastructure) |
-| #10 Absorption/liquidity hardening | `feature/phase-f-absorption-liquidity` → #9 branch | Open, draft; 8 commits | 2 checks green (backend and focused Layer 2) |
-| #7 pytest CI fix | `fix/infra-pytest-dependency-20261126` → `main` | Open, draft | Backend infrastructure check green |
-| #2–#6 validation/fix PRs | Multiple separate `main` branches | Open and overlapping | Several validation branches are green; branch overlap requires consolidation |
+- [x] Scanner, nine-layer decision engine, risk controls, paper engine, trade management, and persistence code exist.
+- [x] Main recorded CI set: 7/7 green (26 Nov).
+- [x] PR #11 latest Actions: 4/4 green.
+- [x] PR #15 latest Actions: 6/6 green.
+- [x] PR #9 Phase E: 5/5 green (branch 75 ahead / 65 behind main).
+- [x] PR #10 Phase F: 2/2 green (stacked on #9).
+- [x] PR #14 recovery: 4/4 green (2 ahead / 1 behind main).
+- [x] PR #13 L1/L2 validation: 4/4 green (6 ahead / 1 behind main).
+- [x] PR #7 infrastructure fix: 1/1 green (1 ahead / 65 behind main).
+- [x] Run 11 freshness fix and regression tests committed on `fix/unified-book-message-freshness-run11`.
+- [ ] Run 11 regression tests executed in CI (not run; see audit).
+- [ ] Binance snapshot bridge integrated into mainline; verified with real feed and reconnect recovery.
+- [ ] Consolidate stale/overlapping L1/L2, observability, Phase E/F, and recovery branches.
+- [ ] Live feed certification: synchronization, sequence continuity, stale rejection, reconnect/resnapshot, sustained uptime.
+- [ ] Nine-layer traces, scanner and paper entry/exit lifecycle verified with real feed data.
+- [ ] Phase E risk gates and emergency halt verified in runtime.
+- [ ] Phase F absorption/liquidity behavior and empirical calibration validated.
+- [ ] Fixed SL, trailing SL, trailing TP, exit persistence and restart recovery demonstrated.
+- [ ] Supabase runtime records and restart recovery verified (last audit: 12 tables, 0 rows).
+- [ ] Mobile UI connected to real backend; placeholder shell replaced; token storage remains memory-only.
+- [ ] Dependency lockfile/reproducible build; pin Capacitor asset tooling; APK credential-storage gate.
+- [ ] Fresh APK artifact: manifest/package, signing, hash and install checks verified.
+- [ ] Physical Android device tests: login, background/foreground, network/reconnect, feed monitor, scanner, decision trace, positions, stops, risk monitor, emergency halt.
+- [ ] Controlled paper validation: 100 closed trades over ≥14 days; after-fee metrics, regime coverage, no unmanaged positions or duplicate entries.
 
-**Do not merge the stack yet.** #8 and #9 both target `main`; #10 is stacked on #9; separate Layer 1/2 fixes and validation PRs overlap. Reconcile exact commit/file overlap and choose a single integration order. PR #8 contains a pytest-install fix, but the separate #7 PR remains open.
+## Deployment state
 
-## Feed safety hardening just committed to PR #8
+- Primary Vercel production READY at `ba0cdb9`, 80 commits behind main.
+- Secondary production READY at `13e16ee`, 153 commits behind main.
+- Latest observed PR #11 previews READY only on older `70542d1`; current head `e525094` is not deployment-verified.
+- No deployments were triggered.
+- Render inspection pending workspace confirmation.
+- No APK release approval. Existing APK remains a shell/placeholder artifact and has not been installed on a physical device.
 
-- Freshness now tracks **accepted order-book sequence progress**, not merely received WebSocket messages.
-- Diagnostics add `last_book_update_age_seconds` while preserving `last_event_age_seconds` for message-receipt monitoring.
-- The read-only order-book endpoint refuses disconnected, unsynchronized, never-progressed, or stale books.
-- Regression tests cover stale-book rejection, duplicate events not refreshing freshness, and valid sequence progress restoring book availability.
-
-The latest PR #8 head has CI running. This code has not yet been certified by those checks or by live exchange observation.
-
-## CI and deployment snapshot
-
-- PR #8, earlier head: backend, combined-paper, Layer 1 sync, frontend build, and infrastructure checks were green. The new commits are pending CI.
-- PR #9: all five recorded checks passed on its current head.
-- PR #10: both recorded checks passed on its current head (424 backend tests + 15 subtests were reported in its validation history).
-- Vercel preview/production checks for current PR heads are blocked by the Hobby deployment quota (over 100 deployments/day). Older commits have READY deployments; these are **not** the current PR heads. No current feature-head deployment is certified.
-- Do not trigger additional deployment attempts until quota recovers and deployment is explicitly approved.
-
-## Android artifact verification (shell only)
-
-- `android-remote-shell` head: `f55a42484a211b4bb54d25b27275b6b86f7cbbaa`
-- GitHub Actions build-apk: completed successfully (25 Nov 2026).
-- Artifact: `OrderFlow-Scalper-Remote-Shell-APK`, ID `15000014500`, ZIP size 3,455,290 bytes, expires 9 Dec 2026.
-- Artifact ZIP was downloaded and verified to contain `app-debug.apk` (3,836,358 bytes). APK SHA-256: `3ed5da427fed87cf0f35d8b8a118777e542567e48e06e7bff3717fe49d518afb`.
-- APK package manifest was not inspected (Android inspection tools unavailable in this runtime), and it has **not** been installed or tested on a physical phone.
-- Shell config points to `https://orderflow-scalper-ivory.vercel.app`; the app code on this branch remains illustrative placeholder data. Do not use this APK for the planned paper demo.
-
-## Release checklist
-
-- [x] Core code and deterministic test coverage exist for scanner, nine-layer engine, trade management, risk, absorption/liquidity, and paper lifecycle.
-- [x] Current PR #9 risk-engine CI green.
-- [x] Current PR #10 absorption/liquidity CI green.
-- [x] Android shell APK build exists and its artifact ZIP was verified.
-- [ ] PR #8 freshness hardening CI green.
-- [ ] Consolidate feature and validation branches into one reviewed integration branch without losing fixes.
-- [ ] Live public feed certification: freshness, synchronization, sequence continuity, reconnect/resnapshot, and sustained uptime checkpoints.
-- [ ] Validate scanner, nine-layer traces, lifecycle, fixed/trailing SL and trailing TP, risk blockers, persistence/restart recovery, and mobile telemetry with real feed data.
-- [ ] Verify backend/frontend integration and API configuration, then deploy the reviewed integration build (requires approval and available deployment quota).
-- [ ] Build APK from integrated monitoring app; verify artifact/package/signature and release notes.
-- [ ] Physical Android install test: app launch, login/session, network switching, background/foreground, reconnect, live dashboard, scanner/decision traces, paper positions, risk monitor, emergency halt.
-- [ ] Controlled paper validation: 100 closed trades over at least 14 days, with after-fee metrics and no unmanaged positions or unintended duplicate entries. This is a validation target, not a profitability guarantee.
-
-## Next action
-
-Finish and review the PR #8 freshness change/CI, then perform branch consolidation. The placeholder Android shell cannot be promoted to the release APK until it is replaced or connected to the real monitoring frontend.
+See [Run 11 audit](RELEASE_AUDIT_RUN11.md) for commit-level and branch details.
