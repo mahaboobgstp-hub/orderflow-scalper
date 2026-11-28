@@ -627,6 +627,78 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(self.stream.synchronized_since)
         self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
+    def test_snapshot_bridge_rechecks_collector_after_lock_wait(self):
+        frame = '{"e":"depthUpdate","s":"BTCUSDT","U":100,"u":101,"pu":99,"b":[["99.5","1"]],"a":[]}'
+        snapshot = {
+            "lastUpdateId": 100,
+            "bids": [["100", "2"]],
+            "asks": [["101", "3"]],
+        }
+        collector_release = asyncio.Event()
+        iterator_finished = asyncio.Event()
+        collector_tasks = []
+        original_create_task = asyncio.create_task
+
+        class RaceLock:
+            def __init__(self):
+                self.enter_count = 0
+
+            async def __aenter__(self):
+                self.enter_count += 1
+                if self.enter_count == 2:
+                    # Simulate the collector ending while the consumer waits
+                    # to reacquire the book lock after its pre-lock check.
+                    collector_release.set()
+                    await iterator_finished.wait()
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeWebSocket:
+            def __aiter__(self):
+                async def iterate():
+                    try:
+                        yield frame
+                        await collector_release.wait()
+                    finally:
+                        iterator_finished.set()
+                return iterate()
+
+        class FakeConnection:
+            async def __aenter__(self):
+                return FakeWebSocket()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        def capture_collector_task(coro):
+            task = original_create_task(coro)
+            collector_tasks.append(task)
+            return task
+
+        async def run_connection():
+            self.stream._lock = RaceLock()
+            with patch("app.market_data.backend_stream.websockets.connect", return_value=FakeConnection()), \
+                 patch.object(self.stream, "_fetch_snapshot", new=AsyncMock(return_value=snapshot)), \
+                 patch("app.market_data.backend_stream.asyncio.create_task", side_effect=capture_collector_task):
+                await self.stream._connect_and_sync()
+
+        asyncio.run(run_connection())
+        self.assertEqual(len(collector_tasks), 1)
+        self.assertTrue(collector_tasks[0].done())
+        self.assertFalse(self.stream.synchronized)
+        self.assertIsNone(self.stream.synchronized_since)
+        self.assertEqual(self.stream.last_update_id, 100)
+        self.assertEqual(self.stream.bids, {100.0: 2.0})
+        self.assertEqual(self.stream.asks, {101.0: 3.0})
+        self.assertEqual(self.stream.sequence_gap_count, 0)
+        self.assertEqual(
+            self.stream.last_error,
+            "WebSocket ended during snapshot synchronization",
+        )
+        self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
     def test_snapshot_buffer_is_bounded_and_overflow_forces_recovery(self):
         self.assertEqual(SNAPSHOT_BUFFER_MAX_EVENTS, 1000)
 
