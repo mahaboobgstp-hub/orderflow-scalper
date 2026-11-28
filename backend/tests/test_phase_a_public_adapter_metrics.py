@@ -60,6 +60,14 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["connected_duration_seconds"], 2.0)
         self.assertEqual(status["last_connection_duration_seconds"], 1.0)
 
+    def test_message_age_uses_monotonic_clock_when_wall_clock_moves_backward(self):
+        self.adapter.last_message_at = 110.0
+        self.adapter.last_message_monotonic = 100.0
+        with patch("app.exchanges.public_adapters.time.time", return_value=90.0):
+            with patch("app.exchanges.public_adapters.time.monotonic", return_value=101.5):
+                status = asyncio.run(self.adapter.status())
+        self.assertEqual(status["last_message_age_seconds"], 1.5)
+
     def test_run_records_actual_connect_and_message_lifecycle(self):
         adapter = self.adapter
 
@@ -78,7 +86,8 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         async def run():
             with patch("app.exchanges.public_adapters.websockets.connect", return_value=FakeConnect()):
                 with patch("app.exchanges.public_adapters.time.time", side_effect=[50.0, 51.0, 52.0, 53.0, 54.0]):
-                    await adapter._run()
+                    with patch("app.exchanges.public_adapters.time.monotonic", side_effect=[100.0, 102.0]):
+                        await adapter._run()
                     return await adapter.status()
 
         status = asyncio.run(run())
