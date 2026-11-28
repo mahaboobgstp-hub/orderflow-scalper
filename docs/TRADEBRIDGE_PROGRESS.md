@@ -97,3 +97,11 @@
 
 - Added `.github/workflows/tradebridge-focused.yml`, a branch-scoped, read-only GitHub Actions workflow. It triggers only on the TradeBridge feature branch for relevant paths (and on PRs to main), installs backend requirements + pytest, compiles the TradeBridge modules and Demo client, then runs the three focused TradeBridge suites. Workflow permissions are `contents: read`; it does not use secrets, deploy, or submit orders.
 - The new workflow commit is `0bda9218`. Its run status is checked separately; local tests do not substitute for CI.
+
+
+### Run 13 — CI failure found and syntax defects fixed
+
+- The first branch-scoped Actions run `46170027385` failed at the compile step before tests ran. Its logs pinpointed invalid Python syntax in `backend/app/tradebridge/models.py` and `signal_store.py`: both contained incomplete `from __future__` statements.
+- Fixed both to `from __future__ import annotations`. Commits: `577d9762` (models) and `cae96497` (store). No full-suite results are inferred from this fix.
+- The run was not automatically re-triggered by subsequent connector-authored commits. Added `workflow_dispatch` to the focused CI workflow. Manual trigger is available at Actions → TradeBridge Focused CI → Run workflow → select `feature/tradebridge-chat-execution`. It runs compile and focused tests only, with read-only permissions; no secrets or deployment steps.
+- Actual first CI evidence: `46170027385` failed during compile; test step was skipped. The syntax fixes are committed, but rerun CI remains pending manual dispatch.
