@@ -68,3 +68,11 @@
 - Updated focused suite includes **26 cases**; local run after this hardening: **26 passed**. Python compilation passed. Full backend suite and GitHub Actions remain unrun.
 - Commits: `027721e3` (hardcoded safety thresholds and snapshot freshness), `ce8635f7` (expanded regression tests). Branch head at this follow-up: `ce8635f7e0c384b15fc20f94f04564832beaeea0`.
 - Risk validator remains isolated and not mounted into FastAPI; trusted quote/account/filter providers and auth routes must be wired before any preview is actionable. No demo orders, credentials, live execution, or deployment were used.
+
+
+## Run 12 final checkpoint — 2026-11-28
+
+- Confirmed the feature branch head is `ca0ed19e7f5c8c720d8fb7c260a6f4f97f16081b`; latest risk code blob `c27f4583`, test blob `ac0c7735`. GitHub confirms the remote test file has 26 test functions and the remote validator contains fixed freshness/risk constants.
+- Feature branch remains PR-less; commit-associated Actions run list is empty. Combined status still shows the two Vercel build-rate-limit failures (no deployment was triggered).
+- PR #11 current head `8c6625f1`: 4/4 workflows completed successfully. PR #15 current head `235dc37d`: 6/6 workflows completed successfully; both Vercel status contexts are success on this PR head. Main remains `4603a5ee` and has no commit-associated workflow runs returned.
+- Local focused validation: 26 tests passed; py_compile passed. The tests cover 26 validator cases; no full backend test run is claimed.
