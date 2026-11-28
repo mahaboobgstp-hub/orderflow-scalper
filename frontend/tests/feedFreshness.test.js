@@ -300,3 +300,38 @@ test("legacy summary without fresh-message counter keeps healthy-count fallback"
   assert.equal(Object.hasOwn(normalized.summary, "fresh_message_feed_count"), false);
   assert.equal(normalized.summary.healthy_feed_count, 2);
 });
+
+test("feed, exchange, adapter, and primary counters normalize safely", () => {
+  const normalized = normalizeFeedMonitorPayload({
+    primary_binance_demo_stream: {
+      messages_received: " 007 ",
+      sequence_gap_count: "1.5",
+      snapshot_count: "0x10",
+      connection_attempt_count: 4,
+      invalid_depth_message_count: -2,
+    },
+    unified_market_data: {
+      exchanges: { binance: { messages_received: "9" }, malformed: { messages_received: {} } },
+      feeds: { "binance:BTCUSDT": { messages_received: "12" }, malformed: { messages_received: "1e2" } },
+    },
+    exchange_connections: {
+      exchanges: [
+        { reconnect_count: "3", messages_received: "5" },
+        { reconnect_count: -1, messages_received: "NaN" },
+      ],
+    },
+  });
+  assert.equal(normalized.primary.messages_received, 7);
+  assert.equal(normalized.primary.sequence_gap_count, 0);
+  assert.equal(normalized.primary.snapshot_count, 0);
+  assert.equal(normalized.primary.connection_attempt_count, 4);
+  assert.equal(normalized.primary.invalid_depth_message_count, 0);
+  assert.equal(normalized.exchangeStats.binance.messages_received, 9);
+  assert.equal(normalized.exchangeStats.malformed.messages_received, 0);
+  assert.equal(normalized.feeds["binance:BTCUSDT"].messages_received, 12);
+  assert.equal(normalized.feeds.malformed.messages_received, 0);
+  assert.equal(normalized.adapterList[0].reconnect_count, 3);
+  assert.equal(normalized.adapterList[0].messages_received, 5);
+  assert.equal(normalized.adapterList[1].reconnect_count, 0);
+  assert.equal(normalized.adapterList[1].messages_received, 0);
+});

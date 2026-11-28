@@ -21,6 +21,28 @@ export function normalizeDiagnosticCounter(rawValue) {
   return Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }
 
+function normalizeCounterRecord(record, fields) {
+  const normalized = { ...asRecord(record) };
+  for (const field of fields) {
+    if (Object.hasOwn(normalized, field)) normalized[field] = normalizeDiagnosticCounter(normalized[field]);
+  }
+  return normalized;
+}
+
+const FEED_DIAGNOSTIC_COUNTER_FIELDS = [
+  "messages_received",
+  "connection_attempt_count",
+  "successful_connection_count",
+  "reconnect_count",
+  "recovery_count",
+  "snapshot_count",
+  "sequence_gap_count",
+  "invalid_depth_message_count",
+  "snapshot_buffer_overflow_count",
+  "invalid_symbol_message_count",
+  "feed_errors",
+];
+
 export function normalizeFeedMonitorPayload(rawPayload) {
   const payload = asRecord(rawPayload);
   const summary = { ...asRecord(payload.summary) };
@@ -44,17 +66,23 @@ export function normalizeFeedMonitorPayload(rawPayload) {
     unified.invalid_symbol_message_count = normalizeDiagnosticCounter(unified.invalid_symbol_message_count);
   }
   const exchangeConnections = asRecord(payload.exchange_connections);
-  const adapterList = asArray(exchangeConnections.exchanges).map(asRecord);
+  const adapterList = asArray(exchangeConnections.exchanges).map((adapter) =>
+    normalizeCounterRecord(adapter, FEED_DIAGNOSTIC_COUNTER_FIELDS),
+  );
   const books = Object.fromEntries(
     Object.entries(asRecord(unified.books)).map(([key, book]) => [key, asRecord(book)]),
   );
   const exchangeStats = Object.fromEntries(
-    Object.entries(asRecord(unified.exchanges)).map(([key, stats]) => [key, asRecord(stats)]),
+    Object.entries(asRecord(unified.exchanges)).map(([key, stats]) => [
+      key, normalizeCounterRecord(stats, FEED_DIAGNOSTIC_COUNTER_FIELDS),
+    ]),
   );
   const feeds = Object.fromEntries(
-    Object.entries(asRecord(unified.feeds)).map(([key, feed]) => [key, asRecord(feed)]),
+    Object.entries(asRecord(unified.feeds)).map(([key, feed]) => [
+      key, normalizeCounterRecord(feed, FEED_DIAGNOSTIC_COUNTER_FIELDS),
+    ]),
   );
-  const primary = asRecord(payload.primary_binance_demo_stream);
+  const primary = normalizeCounterRecord(payload.primary_binance_demo_stream, FEED_DIAGNOSTIC_COUNTER_FIELDS);
   const normalizedPayload = {
     ...payload,
     mode: typeof payload.mode === "string" ? payload.mode : "Unknown",
