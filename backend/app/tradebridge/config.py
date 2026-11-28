@@ -6,7 +6,7 @@ import os
 class TradeBridgeConfig:
     enabled: bool = os.getenv("TRADEBRIDGE_ENABLED", "false").lower() == "true"
     live_execution_enabled: bool = os.getenv("TRADEBRIDGE_LIVE_EXECUTION", "false").lower() == "true"
-    testnet: bool = os.getenv("TRADEBRIDGE_TESTNET", "true").lower() == "true'
+    testnet: bool = os.getenv("TRADEBRIDGE_TESTNET", "true").lower() == "true"
     signal_ttl_seconds: int = int(os.getenv("TRADEBRIDGE_SIGNAL_TTL_SECONDS", "90"))
     max_open_positions: int = int(os.getenv("TRADEBRIDGE_MAX_OPEN_POSITIONS", "1"))
 
@@ -16,5 +16,4 @@ class TradeBridgeConfig:
         if self.max_open_positions < 1:
             raise ValueError("TradeBridge max open positions must be at least 1")
         if self.live_execution_enabled and self.testnet:
-            # Live execution must never be enabled by accident while testnet is selected.
             raise ValueError("Conflicting TradeBridge configuration: live execution enabled while testnet mode is selected")
