@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const tokenLiteral = "['\"]ofs_token['\"]";
 const normalize = (source) => String(source)
+  .replace(/\?\.\s*\(/g, "(")
   .replace(/\?\./g, ".")
   .replace(/\.\s*\[/g, "[")
   .replace(/\b(?:window|globalThis|self)\s*\.\s*localStorage\b/g, "localStorage");
@@ -46,7 +47,7 @@ export function scanSource(source, file = "<source>") {
     for (const match of text.matchAll(reflect)) add(match.index, "Reflect.apply("+(match[1]||match[2]||"unknown")+")");
     const methodAlias = new RegExp("\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + access + "(?:\\s*\\.\\s*bind\\s*\\(\\s*[^)]*\\))?\\s*(?:;|(?=\\n|$))", "g");
     for (const match of text.matchAll(methodAlias)) methodAliases.set(match[1],match[2]||match[3]||"unknown");
-    const destructure = new RegExp("\\b(?:const|let|var)\\s*\\{([^}]+)\\}\\s*=\\s*(?:"+names+")\\b", "g");
+    const destructure = new RegExp("\\b(?:const|let|var)\\s*\\{([^}]+)\\}\\s*=\\s*(?:"+storage+")\\b", "g");
     for (const d of text.matchAll(destructure)) for (const binding of d[1].split(",")) {
       const b=binding.trim().match(/^(getItem|setItem)(?:\s*:\s*([A-Za-z_$][\w$]*))?$/);
       if(b) methodAliases.set(b[2]||b[1],b[1]);
