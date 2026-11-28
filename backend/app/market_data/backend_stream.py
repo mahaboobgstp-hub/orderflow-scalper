@@ -57,11 +57,15 @@ class BinanceOrderBookStream:
         self.synchronized = False
         self.last_error: str | None = None
         self.connected_at: float | None = None
+        self.connected_monotonic: float | None = None
         self.last_connection_duration_seconds: float | None = None
         self.last_event_at: float | None = None
+        self.last_event_monotonic: float | None = None
         # Timestamp only when a depth update advances the book sequence.
         self.last_book_update_at: float | None = None
+        self.last_book_update_monotonic: float | None = None
         self.last_sync_at: float | None = None
+        self.last_sync_monotonic: float | None = None
         self.last_disconnect_at: float | None = None
         self.messages_received = 0
         self.snapshot_count = 0
@@ -74,7 +78,9 @@ class BinanceOrderBookStream:
         self.recovery_count = 0
         self.last_reconnect_at: float | None = None
         self.last_recovery_at: float | None = None
+        self.last_recovery_monotonic: float | None = None
         self.synchronized_since: float | None = None
+        self.synchronized_since_monotonic: float | None = None
         self.last_disconnect_reason: str | None = None
 
         self._task: asyncio.Task | None = None
@@ -123,10 +129,14 @@ class BinanceOrderBookStream:
     def _record_connection_attempt(self):
         self.connection_attempt_count += 1
 
-    def _record_connection_success(self, now: float | None = None):
+    def _record_connection_success(
+        self, now: float | None = None, monotonic_now: float | None = None
+    ):
         now = time.time() if now is None else now
+        monotonic_now = time.monotonic() if monotonic_now is None else monotonic_now
         self.connected = True
         self.connected_at = now
+        self.connected_monotonic = monotonic_now
         self.successful_connection_count += 1
         if self.successful_connection_count > 1:
             self.reconnect_count += 1
@@ -134,30 +144,48 @@ class BinanceOrderBookStream:
         self.synchronized = False
         self.synchronized_since = None
         self.last_event_at = None
+        self.last_event_monotonic = None
         self.last_book_update_at = None
+        self.last_book_update_monotonic = None
         self.last_error = None
 
-    def _record_disconnect(self, reason: str, now: float | None = None):
+    def _record_disconnect(
+        self, reason: str, now: float | None = None, monotonic_now: float | None = None
+    ):
         now = time.time() if now is None else now
-        # Retain the completed session length for diagnostics. Clear connected_at
-        # so repeated shutdown/reconnect handling cannot double-count a session.
-        if self.connected and self.connected_at is not None:
+        monotonic_now = time.monotonic() if monotonic_now is None else monotonic_now
+        # Retain the completed session length using monotonic time while
+        # keeping the wall-clock disconnect timestamp for audit purposes.
+        if self.connected and self.connected_monotonic is not None:
+            self.last_connection_duration_seconds = max(
+                0.0, monotonic_now - self.connected_monotonic
+            )
+        elif self.connected and self.connected_at is not None:
+            # Compatibility fallback for legacy/test states without a monotonic anchor.
             self.last_connection_duration_seconds = max(0.0, now - self.connected_at)
         self.connected = False
         self.connected_at = None
+        self.connected_monotonic = None
         self.synchronized = False
         self.synchronized_since = None
+        self.synchronized_since_monotonic = None
         self.last_disconnect_at = now
         self.last_disconnect_reason = reason
 
-    def _record_synchronized(self, now: float | None = None):
+    def _record_synchronized(
+        self, now: float | None = None, monotonic_now: float | None = None
+    ):
         now = time.time() if now is None else now
+        monotonic_now = time.monotonic() if monotonic_now is None else monotonic_now
         self.synchronized = True
         self.last_sync_at = now
+        self.last_sync_monotonic = monotonic_now
         self.synchronized_since = now
+        self.synchronized_since_monotonic = monotonic_now
         if self.successful_connection_count > 1:
             self.recovery_count += 1
             self.last_recovery_at = now
+            self.last_recovery_monotonic = monotonic_now
 
     def _apply_snapshot_bridge(
         self,
@@ -223,6 +251,7 @@ class BinanceOrderBookStream:
             async for message in websocket:
                 self.messages_received += 1
                 self.last_event_at = time.time()
+                self.last_event_monotonic = time.monotonic()
                 try:
                     event = self._decode_depth_message(message)
                 except ValueError as exc:
@@ -523,6 +552,7 @@ class BinanceOrderBookStream:
         # establishes the freshness baseline even when the first bridge event
         # overlaps the snapshot but carries no newer update ID.
         self.last_book_update_at = time.time()
+        self.last_book_update_monotonic = time.monotonic()
 
         self.synchronized = False
         self.snapshot_count += 1
@@ -622,6 +652,7 @@ class BinanceOrderBookStream:
         # A progressing, accepted depth event—not mere message receipt—refreshes
         # the book's usable-data freshness clock.
         self.last_book_update_at = time.time()
+        self.last_book_update_monotonic = time.monotonic()
 
         return True
 
@@ -643,15 +674,33 @@ class BinanceOrderBookStream:
     # API access methods
     # --------------------------------------------------
 
+    @staticmethod
+    def _elapsed_seconds(
+        wall_anchor: float | None,
+        monotonic_anchor: float | None,
+        wall_now: float,
+        monotonic_now: float,
+    ) -> float | None:
+        if monotonic_anchor is not None:
+            return max(0.0, monotonic_now - monotonic_anchor)
+        if wall_anchor is not None:
+            return max(0.0, wall_now - wall_anchor)
+        return None
+
     async def get_status(self) -> dict[str, Any]:
         now = time.time()
-        event_age = max(0.0, now - self.last_event_at) if self.last_event_at is not None else None
-        sync_age = max(0.0, now - self.last_sync_at) if self.last_sync_at is not None else None
-        recovery_age = max(0.0, now - self.last_recovery_at) if self.last_recovery_at is not None else None
-        book_age = (
-            max(0.0, now - self.last_book_update_at)
-            if self.last_book_update_at is not None
-            else None
+        monotonic_now = time.monotonic()
+        event_age = self._elapsed_seconds(
+            self.last_event_at, self.last_event_monotonic, now, monotonic_now
+        )
+        sync_age = self._elapsed_seconds(
+            self.last_sync_at, self.last_sync_monotonic, now, monotonic_now
+        )
+        recovery_age = self._elapsed_seconds(
+            self.last_recovery_at, self.last_recovery_monotonic, now, monotonic_now
+        )
+        book_age = self._elapsed_seconds(
+            self.last_book_update_at, self.last_book_update_monotonic, now, monotonic_now
         )
         stale = (
             not self.connected
@@ -660,13 +709,17 @@ class BinanceOrderBookStream:
             or book_age > self.stale_after_seconds
         )
         synchronized_duration = (
-            max(0.0, now - self.synchronized_since)
-            if self.synchronized and self.synchronized_since is not None
+            self._elapsed_seconds(
+                self.synchronized_since, self.synchronized_since_monotonic, now, monotonic_now
+            )
+            if self.synchronized
             else None
         )
         connected_duration = (
-            max(0.0, now - self.connected_at)
-            if self.connected and self.connected_at is not None
+            self._elapsed_seconds(
+                self.connected_at, self.connected_monotonic, now, monotonic_now
+            )
+            if self.connected
             else None
         )
         return {
@@ -711,10 +764,11 @@ class BinanceOrderBookStream:
     ) -> dict[str, Any] | None:
 
         async with self._lock:
-            age_seconds = (
-                max(0.0, time.time() - self.last_book_update_at)
-                if self.last_book_update_at is not None
-                else None
+            age_seconds = self._elapsed_seconds(
+                self.last_book_update_at,
+                self.last_book_update_monotonic,
+                time.time(),
+                time.monotonic(),
             )
             if (
                 not self.connected
