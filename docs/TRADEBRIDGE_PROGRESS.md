@@ -58,3 +58,13 @@
 - Risk service is not yet mounted into FastAPI preview/authorization/submit routes; it must be wired to server-trusted quote, exchange filters, and account data, not client-supplied snapshots.
 - No execution, credentials, or live trading path added. No demo order submitted.
 - Persistent idempotency/audit and MCP tools remain unimplemented.
+
+
+## Run 12 follow-up — freshness snapshots and immutable risk policy
+
+- Tightened the risk validator so freshness and risk thresholds are module constants, not function arguments: quote age <= 2s, account snapshot age <= 5s, symbol-filter cache <= 1h, future timestamp skew <= 1s, spread <= 20 bps, per-trade stop risk <= 1% equity, total stop risk <= 2% equity.
+- Added required timestamps to account-risk and exchange-rule snapshots; previews fail closed when either is missing/stale. Rejects existing portfolio risk already above cap and available margin greater than account equity.
+- Price tick alignment now applies to protective stop/take-profit order prices, not the mark/bid/ask/reference fields used for market-order preview.
+- Updated focused suite includes **26 cases**; local run after this hardening: **26 passed**. Python compilation passed. Full backend suite and GitHub Actions remain unrun.
+- Commits: `027721e3` (hardcoded safety thresholds and snapshot freshness), `ce8635f7` (expanded regression tests). Branch head at this follow-up: `ce8635f7e0c384b15fc20f94f04564832beaeea0`.
+- Risk validator remains isolated and not mounted into FastAPI; trusted quote/account/filter providers and auth routes must be wired before any preview is actionable. No demo orders, credentials, live execution, or deployment were used.
