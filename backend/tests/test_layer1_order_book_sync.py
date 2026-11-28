@@ -358,6 +358,11 @@ from fastapi import HTTPException
 from app.services.imbalance_detector import OrderBookImbalanceDetector
 from app import main
 
+
+def test_main_module_has_asyncio_runtime_for_bridge_lifecycle():
+    assert main.asyncio is asyncio
+    assert isinstance(main.asyncio.Event(), asyncio.Event)
+
 class StubUnifiedBooks:
     def __init__(self, book):
         self.book = book
