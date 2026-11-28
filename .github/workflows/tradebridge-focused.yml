@@ -1,6 +1,7 @@
 name: TradeBridge Focused CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feature/tradebridge-chat-execution
