@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import time
 from urllib.parse import urlencode
+from typing import Any
 
 import httpx
 
@@ -29,7 +30,7 @@ class BinanceDemoClient:
         method: str,
         path: str,
         params: dict,
-    ) -> dict:
+    ) -> Any:
         self._require_credentials()
 
         payload = {
@@ -66,7 +67,7 @@ class BinanceDemoClient:
             )
 
         return response.json()
-    async def _public_get(self, path: str, params: dict | None = None) -> dict:
+    async def _public_get(self, path: str, params: dict | None = None) -> Any:
         url = f"{self.base_url}{path}"
 
         async with httpx.AsyncClient(timeout=10) as client:
@@ -92,12 +93,37 @@ class BinanceDemoClient:
             "/fapi/v1/ticker/price",
             {"symbol": symbol.upper()},
         )
+
+    async def get_mark_price(self, symbol: str) -> dict:
+        """Read the current mark-price snapshot from Demo Futures."""
+        return await self._public_get(
+            "/fapi/v1/premiumIndex",
+            {"symbol": symbol.upper()},
+        )
+
+    async def get_book_ticker(self, symbol: str) -> dict:
+        """Read best bid/ask for a symbol; public and side-effect-free."""
+        return await self._public_get(
+            "/fapi/v1/ticker/bookTicker",
+            {"symbol": symbol.upper()},
+        )
     async def get_account(self) -> dict:
         return await self._signed_request(
             "GET",
             "/fapi/v2/account",
             {},
         )
+
+    async def get_open_orders(self) -> list[dict[str, Any]]:
+        """Read all open Demo Futures orders for fail-closed exposure checks."""
+        result = await self._signed_request(
+            "GET",
+            "/fapi/v1/openOrders",
+            {},
+        )
+        if not isinstance(result, list) or any(not isinstance(row, dict) for row in result):
+            raise BinanceDemoError("Demo Futures open-order response is malformed.")
+        return result
 
     async def place_market_order(
         self,
