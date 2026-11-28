@@ -132,3 +132,10 @@
 - Binance Demo client failures return generic 503 messages; signed request detail strings are not echoed. Unexpected network/internal errors remain sanitized and fail closed.
 - Added two regression cases (Demo API exception sanitization and one-time approval with no second refresh). Local mocked harness: **14 passed**; compile checks passed.
 - Branch CI evidence remains **100 passed** on commit `6271dac1`, which includes the initial 10-route suite. This follow-up commit is not yet covered by GitHub Actions; workflow dispatch is unavailable through the connected GitHub tools.
+
+
+### Run 14 follow-up — route exception-order correction
+
+- Reviewed the remote route file after a follow-up patch and caught duplicated exception handlers in preview creation. Removed the redundant/unreachable catches, retained one sanitized Binance Demo 503 path, and separated approval Demo API failures into generic 503 responses.
+- The remote file already contained pending-state and expiry checks. Repeated approval is rejected before any new signed snapshot fetch.
+- Focused mocked local route harness remains **14 passed**. The remote branch's latest correction has not yet been run in GitHub Actions; CI dispatch is not available through the connected GitHub action set.

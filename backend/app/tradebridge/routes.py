@@ -95,11 +95,6 @@ class TradeBridgePreviewService:
         except (SnapshotProviderError, TradeBridgeRiskError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)[:240]) from None
         except BinanceDemoError:
-            raise HTTPException(status_code=503, detail="Demo snapshot unavailable; approval rejected.") from None
-        except Exception:
-            # Fail closed and keep signed API/network details out of the response.
-            raise HTTPException(status_code=503, detail="Trusted Demo snapshots unavailable; approval rejected.") from None
-        except BinanceDemoError:
             raise HTTPException(status_code=503, detail="Demo snapshot unavailable; preview rejected.") from None
         except Exception:
             # Provider/network/internal failures must not leak signed request details.
@@ -141,8 +136,10 @@ class TradeBridgePreviewService:
             )
         except HTTPException:
             raise
-        except (SnapshotProviderError, BinanceDemoError, TradeBridgeRiskError, ValueError) as exc:
+        except (SnapshotProviderError, TradeBridgeRiskError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)[:240]) from None
+        except BinanceDemoError:
+            raise HTTPException(status_code=503, detail="Demo snapshot unavailable; approval rejected.") from None
         except Exception:
             # Fail closed and keep signed API/network details out of the response.
             raise HTTPException(status_code=503, detail="Trusted Demo snapshots unavailable; approval rejected.") from None
