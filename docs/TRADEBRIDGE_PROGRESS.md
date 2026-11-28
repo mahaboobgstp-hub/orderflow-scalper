@@ -116,3 +116,11 @@
 - Execution, exchange order status/cancel, persistent idempotency, durable audit, and MCP tools are not implemented. In-memory preview state is not crash-safe. Routes are disabled by default until `TRADEBRIDGE_ENABLED` is configured; no credentials, orders, or live execution were used.
 - Added `test_tradebridge_routes.py` (10 tests) for authenticated preview, server-mark pricing, disabled config, stale data, stop risk, exact approval/hash, stale approval, duplicate signal, local cancellation, and invalid confirmation. Focused workflow includes this suite.
 - Local route harness with mocked provider and simplified dependency stubs: **10 passed**; compile checks passed. This is not a full-repository test run and not GitHub Actions. The existing focused CI failure still needs a manual rerun because this connector cannot dispatch workflows.
+
+
+### Run 14 follow-up — fail-closed API error handling and expiry fast-path
+
+- Preview and approval routes now convert unexpected provider/network/internal failures into generic 503 responses, preventing signed-query details from leaking to clients.
+- Approval rejects expired previews before fetching account/market snapshots; stale preview approval cannot trigger unnecessary signed requests.
+- Added two focused regression tests for sanitized unexpected provider errors and expired approval without a second provider fetch.
+- Local mock harness: **12 passed**; compile checks passed. Harness uses simplified dependency stubs and does not replace the branch CI run.

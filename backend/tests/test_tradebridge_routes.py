@@ -193,3 +193,34 @@ def test_invalid_confirmation_phrase_rejected_by_schema():
         headers=headers(),
     )
     assert response.status_code == 422
+
+
+
+def test_provider_failure_is_sanitized_and_preview_is_rejected():
+    class FailingProvider:
+        async def fetch(self, symbol):
+            raise RuntimeError("signed_query=private-secret-value")
+    client, _ = setup(provider=FailingProvider())
+    response = client.post("/api/tradebridge/preview", json=payload(), headers=headers())
+    assert response.status_code == 503
+    assert "private-secret-value" not in response.text
+    assert "Trusted Demo snapshots unavailable" in response.text
+
+
+def test_expired_preview_is_rejected_before_another_provider_fetch():
+    provider = ProviderStub()
+    client, service = setup(provider=provider)
+    created = client.post("/api/tradebridge/preview", json=payload(), headers=headers()).json()
+    preview_id = created["preview"]["preview_id"]
+    stored = service.store.get_preview(preview_id)
+    service.store._previews[preview_id] = stored.model_copy(
+        update={"expires_at": datetime.now(timezone.utc)-timedelta(seconds=1)}
+    )
+    response = client.post(
+        f"/api/tradebridge/preview/{preview_id}/authorize",
+        json={"trade_hash": created["trade_hash"], "confirmation_phrase": "TAKE POSITION"},
+        headers=headers(),
+    )
+    assert response.status_code == 409
+    assert provider.calls == 1
+    assert service.store.get_preview(preview_id).status == PreviewStatus.PENDING

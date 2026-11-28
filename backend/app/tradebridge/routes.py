@@ -94,6 +94,9 @@ class TradeBridgePreviewService:
             raise
         except (SnapshotProviderError, BinanceDemoError, TradeBridgeRiskError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)[:240]) from None
+        except Exception:
+            # Provider/network/internal failures must not leak signed request details.
+            raise HTTPException(status_code=503, detail="Trusted Demo snapshots unavailable; preview rejected.") from None
         return {
             "preview": preview.model_dump(mode="json"),
             "trade_hash": preview.trade_hash,
@@ -114,6 +117,8 @@ class TradeBridgePreviewService:
         if preview is None:
             raise HTTPException(status_code=404, detail="Preview not found.")
         now = datetime.now(timezone.utc)
+        if not preview.is_fresh(now):
+            raise HTTPException(status_code=409, detail="Preview has expired; authorization is refused.")
         try:
             quote, rules, account = await self.provider.fetch(preview.symbol)
             validate_preview_risk(preview, quote, rules, account, self.config, now=now)
@@ -129,6 +134,9 @@ class TradeBridgePreviewService:
             raise
         except (SnapshotProviderError, BinanceDemoError, TradeBridgeRiskError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)[:240]) from None
+        except Exception:
+            # Fail closed and keep signed API/network details out of the response.
+            raise HTTPException(status_code=503, detail="Trusted Demo snapshots unavailable; approval rejected.") from None
         return {
             "preview": authorized.model_dump(mode="json"),
             "trade_hash": authorized.trade_hash,
