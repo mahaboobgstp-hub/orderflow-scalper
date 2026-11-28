@@ -224,3 +224,30 @@ def test_expired_preview_is_rejected_before_another_provider_fetch():
     assert response.status_code == 409
     assert provider.calls == 1
     assert service.store.get_preview(preview_id).status == PreviewStatus.PENDING
+
+
+
+def test_demo_api_error_is_sanitized():
+    from app.execution.binance_demo_client import BinanceDemoError
+    class FailingProvider:
+        async def fetch(self, symbol):
+            raise BinanceDemoError("api_key=never-show-this-value")
+    client, _ = setup(provider=FailingProvider())
+    response = client.post("/api/tradebridge/preview", json=payload(), headers=headers())
+    assert response.status_code == 503
+    assert "never-show-this-value" not in response.text
+
+
+def test_approval_is_one_time_and_second_attempt_does_not_refresh():
+    provider = ProviderStub()
+    client, service = setup(provider=provider)
+    created = client.post("/api/tradebridge/preview", json=payload(), headers=headers()).json()
+    pid = created["preview"]["preview_id"]
+    approval = {"trade_hash": created["trade_hash"], "confirmation_phrase": "TAKE POSITION"}
+    first = client.post(f"/api/tradebridge/preview/{pid}/authorize", json=approval, headers=headers())
+    assert first.status_code == 200
+    assert provider.calls == 2
+    second = client.post(f"/api/tradebridge/preview/{pid}/authorize", json=approval, headers=headers())
+    assert second.status_code == 409
+    assert provider.calls == 2
+    assert service.store.get_preview(pid).status == PreviewStatus.APPROVED

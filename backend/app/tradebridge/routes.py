@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.tradebridge.config import TradeBridgeConfig
 from app.tradebridge.models import (
-    Direction, OpportunitySignal, TradePreview, TakePositionAuthorization,
+    Direction, OpportunitySignal, TradePreview, TakePositionAuthorization, PreviewStatus,
 )
 from app.tradebridge.risk import validate_preview_risk, TradeBridgeRiskError
 from app.tradebridge.snapshot_provider import TradeBridgeSnapshotProvider, SnapshotProviderError
@@ -92,8 +92,15 @@ class TradeBridgePreviewService:
             self.store.register_preview(preview, now=now)
         except HTTPException:
             raise
-        except (SnapshotProviderError, BinanceDemoError, TradeBridgeRiskError, ValueError) as exc:
+        except (SnapshotProviderError, TradeBridgeRiskError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)[:240]) from None
+        except BinanceDemoError:
+            raise HTTPException(status_code=503, detail="Demo snapshot unavailable; approval rejected.") from None
+        except Exception:
+            # Fail closed and keep signed API/network details out of the response.
+            raise HTTPException(status_code=503, detail="Trusted Demo snapshots unavailable; approval rejected.") from None
+        except BinanceDemoError:
+            raise HTTPException(status_code=503, detail="Demo snapshot unavailable; preview rejected.") from None
         except Exception:
             # Provider/network/internal failures must not leak signed request details.
             raise HTTPException(status_code=503, detail="Trusted Demo snapshots unavailable; preview rejected.") from None
@@ -116,6 +123,8 @@ class TradeBridgePreviewService:
         preview = self.store.get_preview(preview_id)
         if preview is None:
             raise HTTPException(status_code=404, detail="Preview not found.")
+        if preview.status != PreviewStatus.PENDING:
+            raise HTTPException(status_code=409, detail="Preview is not pending approval.")
         now = datetime.now(timezone.utc)
         if not preview.is_fresh(now):
             raise HTTPException(status_code=409, detail="Preview has expired; authorization is refused.")

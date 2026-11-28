@@ -124,3 +124,11 @@
 - Approval rejects expired previews before fetching account/market snapshots; stale preview approval cannot trigger unnecessary signed requests.
 - Added two focused regression tests for sanitized unexpected provider errors and expired approval without a second provider fetch.
 - Local mock harness: **12 passed**; compile checks passed. Harness uses simplified dependency stubs and does not replace the branch CI run.
+
+
+### Run 14 follow-up — single-use authorization and credential-safe failures
+
+- Authorization now rejects any non-pending preview before making signed snapshot requests, preventing repeated approval attempts from triggering unnecessary account reads.
+- Binance Demo client failures return generic 503 messages; signed request detail strings are not echoed. Unexpected network/internal errors remain sanitized and fail closed.
+- Added two regression cases (Demo API exception sanitization and one-time approval with no second refresh). Local mocked harness: **14 passed**; compile checks passed.
+- Branch CI evidence remains **100 passed** on commit `6271dac1`, which includes the initial 10-route suite. This follow-up commit is not yet covered by GitHub Actions; workflow dispatch is unavailable through the connected GitHub tools.
