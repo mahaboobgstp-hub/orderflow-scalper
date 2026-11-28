@@ -84,8 +84,8 @@
 - Added read-only public client methods for `/fapi/v1/premiumIndex` (mark), `/fapi/v1/ticker/bookTicker` (best bid/ask), and signed `/fapi/v1/openOrders` (all open orders). Open-orders responses are type-checked as a list.
 - Provider fails closed if TradeBridge is disabled, configuration/endpoint validation fails, market data requests exceed 2 seconds, account snapshot requests exceed 5 seconds, symbol metadata is not an active USDT perpetual or filters are missing/malformed, any open order exists, or any nonzero position exists (existing protective-stop risk is not reconciled).
 - Snapshot timestamps are receipt timestamps; market/account network duration is bounded before risk validation. This is not exchange-source timestamp proof and must be improved/reconciled before order submission.
-- Added `backend/tests/test_tradebridge_snapshot_provider.py`: **18 tests** covering parsing, symbol/quote mismatches, malformed/nonpositive data, exchange filters, positions/open orders, account margin sanity, provider disabled, and endpoint mismatch.
-- Local isolated harness: **16 passed** and compileall passed. The harness used stubs for existing config/client/risk dependencies; this is not the full repository test run. (Two additional tests are authored for the upstream branch but were not included in the harness.)
+- Added `backend/tests/test_tradebridge_snapshot_provider.py`: **17 tests** covering parsing, symbol/quote mismatches, malformed/nonpositive data, exchange filters, positions/open orders, account margin sanity, provider disabled, and endpoint mismatch.
+- Local isolated harness: **17 passed** and compileall passed. The isolated harness used stubs for existing config/client/risk dependencies; this is not the full repository test run.
 - Commit sequence: `c8afe52b` (provider), `c35ac4a1` (tests), `cf5f2d84` (Demo client public/account-read methods). Branch remains `feature/tradebridge-chat-execution`; no PR and no Actions run. No credentials, orders, live execution, or deployment used.
 
 ### Remaining
