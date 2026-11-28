@@ -74,7 +74,7 @@ class Tests(unittest.TestCase):
   status=self.e.get_status()
   self.assertEqual(status["invalid_symbol_message_count"],1)
   self.assertEqual(status["feeds"],{})
-  self.assertEqual(status["trade_streams"],{}
+  self.assertEqual(status["trade_streams"],{})
 
  def test_single_symbol_default_fallback_is_retained(self):
   message={"e":"aggTrade","p":"101","q":"2","m":False}
