@@ -167,3 +167,8 @@ The primary Binance snapshot-bridge path rechecks that its WebSocket collector i
 ## Per-symbol unified feed freshness
 
 The unified market-data diagnostics now track message counts and last-message ages independently for each exchange-symbol pair under `unified_market_data.feeds`. Exchange-wide totals remain available in `exchanges` for backward compatibility. The Feed Monitor displays the per-symbol freshness list separately; message freshness is not a proxy for synchronized order-book freshness, and trade activity does not refresh a book's applied-depth timestamp. Per-symbol entries require valid exchange and symbol identity to be classified.
+
+
+## Unified-feed symbol identity validation
+
+Per-symbol message freshness is keyed only after validating feed identity. The unified engine accepts explicit symbol fields as bounded exchange-symbol text; when a symbol is omitted, it may recover identity from recognized Bybit-style `publicTrade.<symbol>` or `orderbook.<depth>.<symbol>` topics. A payload symbol that conflicts with its recognized topic symbol is rejected instead of being attributed to the wrong market. Malformed explicit symbols or malformed identity-bearing topics are rejected and increment `invalid_symbol_message_count`; this counter is exposed in the diagnostics API and Feed Monitor. Single-symbol adapters retain the validated configured-symbol fallback for payloads that omit identity. Tests cover topic recovery for trade and book messages, mismatch rejection, malformed identity rejection, and fallback compatibility.
