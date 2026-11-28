@@ -157,3 +157,8 @@ The live Binance depth consumer must re-check that the book remains synchronized
 ## Diagnostic counter string normalization
 
 Frontend summary counters accept numeric values only when they are safe, nonnegative integers. Legacy string values are accepted only in trimmed decimal integer notation (digits only); hexadecimal, exponent, fractional, signed, negative, blank, boolean, object, and non-finite forms normalize to zero. This avoids JavaScript `Number()` coercions making malformed diagnostic counts look valid.
+
+
+## Snapshot bridge collector-state recheck under lock
+
+The primary Binance snapshot-bridge path rechecks that its WebSocket collector is still active inside the lock-protected bridge application. The consumer's pre-lock check is insufficient because the collector can terminate while the consumer waits to acquire the book lock. If the collector has ended, the bridge is rejected, synchronization remains invalidated, the prior snapshot update ID and levels are preserved, and the termination is not counted as a sequence gap. A deterministic barrier-based test forces the collector to finish during the lock handoff and verifies that the bridge cannot synchronize or mutate the book.
