@@ -172,3 +172,8 @@ The unified market-data diagnostics now track message counts and last-message ag
 ## Unified-feed symbol identity validation
 
 Per-symbol message freshness is keyed only after validating feed identity. The unified engine accepts explicit symbol fields as bounded exchange-symbol text; when a symbol is omitted, it may recover identity from recognized Bybit-style `publicTrade.<symbol>` or `orderbook.<depth>.<symbol>` topics. A payload symbol that conflicts with its recognized topic symbol is rejected instead of being attributed to the wrong market. Malformed explicit symbols or malformed identity-bearing topics are rejected and increment `invalid_symbol_message_count`; this counter is exposed in the diagnostics API and Feed Monitor. Single-symbol adapters retain the validated configured-symbol fallback for payloads that omit identity. Tests cover topic recovery for trade and book messages, mismatch rejection, malformed identity rejection, and fallback compatibility.
+
+
+## Strict exchange-topic shape validation
+
+The unified feed identity resolver accepts only recognized topic shapes: `publicTrade.<symbol>` and `orderbook.<positive-depth>.<symbol>`. Order-book depth must be an ASCII positive integer no greater than 1000; extra topic segments, nonnumeric depth, zero depth, and malformed trade topics are rejected before a book or feed counter is created. The rejected message increments `invalid_symbol_message_count`. This prevents malformed topics from being interpreted as a valid symbol by taking the final segment or silently appending extra segments to a symbol. Deterministic tests cover invalid depth, zero depth, extra order-book segments, and extra public-trade segments.

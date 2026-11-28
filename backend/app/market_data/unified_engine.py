@@ -46,10 +46,18 @@ class UnifiedMarketDataEngine:
     def topic_symbol(cls, topic):
         if not isinstance(topic, str):
             return None
-        if topic.startswith("publicTrade."):
-            candidate = topic.split(".", 1)[1]
-        elif topic.startswith("orderbook."):
-            candidate = topic.rsplit(".", 1)[-1]
+        parts = topic.split(".")
+        if parts[0] == "publicTrade":
+            if len(parts) != 2:
+                return None
+            candidate = parts[1]
+        elif parts[0] == "orderbook":
+            if len(parts) != 3:
+                return None
+            depth = parts[1]
+            if not re.fullmatch(r"[1-9][0-9]{0,3}", depth) or int(depth) > 1000:
+                return None
+            candidate = parts[2]
         else:
             return None
         return cls.normalize_symbol(candidate)

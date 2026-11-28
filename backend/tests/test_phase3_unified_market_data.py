@@ -56,6 +56,26 @@ class Tests(unittest.TestCase):
   self.assertEqual(result["type"],"book_snapshot")
   self.assertEqual(self.e.get_status()["invalid_symbol_message_count"],0)
 
+ def test_malformed_orderbook_topics_are_rejected_before_book_creation(self):
+  topics=("orderbook.invalid.BTCUSDT","orderbook.0.BTCUSDT","orderbook.50.BTCUSDT.EXTRA")
+  for topic in topics:
+   message={"topic":topic,"type":"snapshot","data":{"b":[["100","1"]],"a":[["101","1"]],"u":1}}
+   with self.subTest(topic=topic):
+    self.assertIsNone(self.e.process("bybit",message))
+  status=self.e.get_status()
+  self.assertEqual(status["invalid_symbol_message_count"],len(topics))
+  self.assertEqual(status["books"],{})
+  self.assertEqual(status["feeds"],{})
+  self.assertEqual(status["exchanges"],{})
+
+ def test_malformed_public_trade_topic_extra_segment_is_rejected(self):
+  message={"topic":"publicTrade.BTCUSDT.EXTRA","data":{"p":"101","v":"2","S":"Buy"}}
+  self.assertIsNone(self.e.process("bybit",message))
+  status=self.e.get_status()
+  self.assertEqual(status["invalid_symbol_message_count"],1)
+  self.assertEqual(status["feeds"],{})
+  self.assertEqual(status["trade_streams"],{}
+
  def test_single_symbol_default_fallback_is_retained(self):
   message={"e":"aggTrade","p":"101","q":"2","m":False}
   result=self.e.process("binance",message,default_symbol="BTCUSDT")
