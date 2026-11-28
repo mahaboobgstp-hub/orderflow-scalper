@@ -1,67 +1,81 @@
 # OrderFlow Scalper — Release Readiness Snapshot
 
-**Audit date:** 26 November 2026  
-**Target:** Android app + observable, controlled paper/demo session  
-**Execution safety:** PAPER/DEMO only. Real exchange order execution must remain disabled.
+**Audit date:** 28 November 2026  
+**Target:** Android monitoring APK + observable, controlled paper/demo validation  
+**Execution safety:** PAPER/DEMO only. Real exchange execution must remain disabled.
 
 ## Highest-priority release blocker
 
-The Android branch still contains a **placeholder research dashboard** with hard-coded illustrative order-book values and explicitly says its backend is not connected. The existing APK is a shell artifact—not the monitoring app needed to watch live feeds, scanner decisions, all nine layers, risk gates, positions, stops, trailing exits, and paper P&L. The mobile UI must be integrated with the validated feature code and deployed backend before device demo.
+The current Android artifact is a monitoring candidate, not a release. The APK retrieved and inspected in Run 51 contains dashboard, feed monitor, test center, live activity, positions/trades, watchlist, and controls/settings screens with backend API wiring. However, its manifest and frontend inspection found **debuggable=true**, **allowBackup=true**, and the control token stored in `localStorage`. Release signing has not been verified and no physical-device test has been completed. Harden the token storage/manifest and produce a release-signed APK before distribution.
 
-## Current branch/PR audit
+Live-feed certification remains a separate critical functional gate: a green deterministic synchronization suite is not proof of live sequence continuity, reconnect/resnapshot recovery, or sustained feed health.
 
-| PR | Head / base | Status | CI evidence |
+## Current main and PR audit
+
+Main is `4603a5ee256d6f038d94aaa6e9855441f56942f7`. The main branch protection API reports protection disabled (no required checks). Do not merge without explicit approval and independent review.
+
+| PR | Head / base | Current status | CI / deployment evidence |
 |---|---|---|---|
-| #1 Layer 1 snapshot bridge | `fix/layer1-binance-snapshot-bridge` → `main` | Open, non-draft; separate feed fix | Focused sync checks passed; backend checks failed on this head |
-| #8 Transparency/feed/runtime bundle | `feature/observability-trader-transparency` → `main` | Open, non-draft; 53 commits | Previous head had 5 green checks; **feed freshness hardening passed all five checks on code commit `85b3941f330989b43fcda4db3c820d97de3fee16`**; the later release-checklist document commit is docs-only and may trigger a fresh CI run |
-| #9 Central Risk Engine | `feature/phase-e-risk-engine` → `main` | Open, draft; 75 commits | 5 checks green (backend, Layer 9, combined paper, frontend build, infrastructure) |
-| #10 Absorption/liquidity hardening | `feature/phase-f-absorption-liquidity` → #9 branch | Open, draft; 8 commits | 2 checks green (backend and focused Layer 2) |
-| #7 pytest CI fix | `fix/infra-pytest-dependency-20261126` → `main` | Open, draft | Backend infrastructure check green |
-| #2–#6 validation/fix PRs | Multiple separate `main` branches | Open and overlapping | Several validation branches are green; branch overlap requires consolidation |
+| [#15 — Layer 1/2 integration](https://github.com/mahaboobgstp-hub/orderflow-scalper/pull/15) | `validation/layers1-2-mainline-20261126-run11` → `main` | Open, 74 ahead / 0 behind, 16 files, mergeable | 6/6 Actions green at head `235dc37d`; 2/2 Vercel preview contexts success |
+| [#11 — Phase A diagnostics](https://github.com/mahaboobgstp-hub/orderflow-scalper/pull/11) | `feature/observability-trader-transparency` → `main` | Open, 218 ahead / 2 behind, 17 files | 4/4 Actions green at `8c6625f1`; no commit status contexts returned at this head |
+| [#9 — Phase E risk](https://github.com/mahaboobgstp-hub/orderflow-scalper/pull/9) | `feature/phase-e-risk-engine` → `main` | Open, 75 ahead / 65 behind; mergeability false | 5/5 Actions green; Vercel rate-limited |
+| [#10 — Phase F absorption/liquidity](https://github.com/mahaboobgstp-hub/orderflow-scalper/pull/10) | `feature/phase-f-absorption-liquidity` → #9 | Open, 83 ahead / 65 behind main, stacked; mergeable | 2/2 Actions green at `e867082f`; Vercel rate-limited |
+| [#1 — Layer 1 Binance snapshot bridge](https://github.com/mahaboobgstp-hub/orderflow-scalper/pull/1) | `fix/layer1-binance-snapshot-bridge` → `main` | Open, mergeability false | Previous backend run had 141 passed / 4 failed; current Vercel contexts rate-limited |
+| [#7 — pytest infrastructure fix](https://github.com/mahaboobgstp-hub/orderflow-scalper/pull/7) | `fix/infra-pytest-dependency-20261126` → `main` | Open, draft, 1 commit; mergeable | Vercel contexts success; main infrastructure workflow already installs pytest |
+| [#13/#14 — Layer 1/2 validation duplicates](https://github.com/mahaboobgstp-hub/orderflow-scalper/pulls) | Separate `main)-targeted validation branches | Open, draft, overlapping | CI history green; Vercel contexts are mixed/rate-limited |
+| #2–#6 — older validation/fix branches | Multiple branches → `main` | Open and overlapping | Require reconciliation; do not cherry-pick blindly |
 
-**Do not merge the stack yet.** #8 and #9 both target `main`; #10 is stacked on #9; separate Layer 1/2 fixes and validation PRs overlap. Reconcile exact commit/file overlap and choose a single integration order. PR #8 contains a pytest-install fix, but the separate #7 PR remains open.
+PR #8 transparency/feed/runtime bundle is **merged**, not open. Its latest accepted-book-progress freshness hardening is part of main. The previous checklist incorrectly listed #8 as open and described the main APK as an entirely placeholder dashboard; both statements are corrected here.
 
-## Feed safety hardening just committed to PR #8
+## Branch consolidation recommendation
 
-- Freshness now tracks **accepted order-book sequence progress**, not merely received WebSocket messages.
-- Diagnostics add `last_book_update_age_seconds` while preserving `last_event_age_seconds` for message-receipt monitoring.
-- The read-only order-book endpoint refuses disconnected, unsynchronized, never-progressed, or stale books.
-- Regression tests cover stale-book rejection, duplicate events not refreshing freshness, and valid sequence progress restoring book availability.
+1. Use PR #15 as the current Layer 1/2 integration candidate: it is current with main, has 6/6 Actions green, and its Vercel preview contexts succeeded.
+2. Port only the unique diagnostics work from #11 after file-by-file comparison; do not merge its 218-commit history wholesale because it is diverged by two main commits.
+3. Reconcile Phase E (#9) and Phase F (#10) separately. #9 is 65 behind and currently non-mergeable; #10 is stacked on #9 and also 65 behind. Do not attempt to merge this stack yet.
+4. Review #1 and #13/#14 for duplicate Layer 1/2 changes; #1 is currently non-mergeable.
+5. Preserve existing tests, avoid branch history rewrites, and require user approval before any merge.
 
-The latest PR #8 head has CI running. This code has not yet been certified by those checks or by live exchange observation.
+## Feed safety and Phase A certification
 
-## CI and deployment snapshot
+Main contains the Phase A freshness contract: accepted sequence-progress timestamps are separate from raw message receipt; duplicate/old events must not refresh usable-book freshness; disconnected, unsynchronized, never-progressed, or stale books are unavailable; reconnect/gap recovery requires successful snapshot bridge application.
 
-- PR #8, earlier head: backend, combined-paper, Layer 1 sync, frontend build, and infrastructure checks were green. The new commits are pending CI.
-- PR #9: all five recorded checks passed on its current head.
-- PR #10: both recorded checks passed on its current head (424 backend tests + 15 subtests were reported in its validation history).
-- Vercel preview/production checks for current PR heads are blocked by the Hobby deployment quota (over 100 deployments/day). Older commits have READY deployments; these are **not** the current PR heads. No current feature-head deployment is certified.
-- Do not trigger additional deployment attempts until quota recovers and deployment is explicitly approved.
+CI proves deterministic behavior only. Live certification still requires observed public exchange events, synchronized book, accepted sequence continuity, actual disconnect/gap recovery, and sustained uptime with checkpoints. No live feed certification is claimed.
 
-## Android artifact verification (shell only)
+## Android artifact security and verification (Run 51)
 
-- `android-remote-shell` head: `f55a42484a211b4bb54d25b27275b6b86f7cbbaa`
-- GitHub Actions build-apk: completed successfully (25 Nov 2026).
-- Artifact: `OrderFlow-Scalper-Remote-Shell-APK`, ID `15000014500`, ZIP size 3,455,290 bytes, expires 9 Dec 2026.
-- Artifact ZIP was downloaded and verified to contain `app-debug.apk` (3,836,358 bytes). APK SHA-256: `3ed5da427fed87cf0f35d8b8a118777e542567e48e06e7bff3717fe49d518afb`.
-- APK package manifest was not inspected (Android inspection tools unavailable in this runtime), and it has **not** been installed or tested on a physical phone.
-- Shell config points to `https://orderflow-scalper-ivory.vercel.app`; the app code on this branch remains illustrative placeholder data. Do not use this APK for the planned paper demo.
+- Artifact source: GitHub Actions main build (26 November 2026), run `45835509081`; artifact ID `15124937133`.
+- APK size: 5,266,450 bytes. Package `com.orderflowscalper.app`, version 1.0/code 1, target SDK 34, min SDK 22.
+- APK ZIP integrity and binary manifest parsing passed. SHA-256: `a84e82a7cc4eb460b4d0419283e58f72232bcd0390287155117fd7aa7a682a47`.
+- Observed blockers: `debuggable=true`; `allowBackup=true`; control token in `localStorage`. APK signing was not independently verified with `apksigner`; physical install and device testing remain pending.
+- The monitoring dashboard/API integration is partial, not complete. Watchlist/settings persistence and scanner/strategy integration remain unfinished; live backend connection has not been certified on-device.
+- Run 51 proposed a memory-only token patch and aggregate APK blocker verifier on a local evidence branch. These changes are **not yet applied to the upstream product branch**.
+
+## CI and deployment status
+
+- PR #15: current head Actions 6/6 green; preview contexts success. Preview is not production deployment.
+- PR #11: 4/4 Actions green; Vercel status contexts not returned for its current head.
+- PR #9: 5/5 Actions green; Vercel rate-limit failures.
+- PR #10: 2/2 Actions green; Vercel rate-limit failures.
+- Main and PR #1 currently show Vercel rate-limit failures (“retry in 24 hours”). No deployment was triggered.
+- TradeBridge branch has its own focused workflow. Its first run `46170027385` failed at compile because of invalid `from __future__` statements in models and store; both are fixed in commits `577d9762` and `cae96497`. The tests were skipped on that failed run; a manual workflow dispatch is still required.
 
 ## Release checklist
 
-- [x] Core code and deterministic test coverage exist for scanner, nine-layer engine, trade management, risk, absorption/liquidity, and paper lifecycle.
-- [x] Current PR #9 risk-engine CI green.
-- [x] Current PR #10 absorption/liquidity CI green.
-- [x] Android shell APK build exists and its artifact ZIP was verified.
-- [ ] PR #8 freshness hardening CI green.
-- [ ] Consolidate feature and validation branches into one reviewed integration branch without losing fixes.
-- [ ] Live public feed certification: freshness, synchronization, sequence continuity, reconnect/resnapshot, and sustained uptime checkpoints.
-- [ ] Validate scanner, nine-layer traces, lifecycle, fixed/trailing SL and trailing TP, risk blockers, persistence/restart recovery, and mobile telemetry with real feed data.
-- [ ] Verify backend/frontend integration and API configuration, then deploy the reviewed integration build (requires approval and available deployment quota).
-- [ ] Build APK from integrated monitoring app; verify artifact/package/signature and release notes.
-- [ ] Physical Android install test: app launch, login/session, network switching, background/foreground, reconnect, live dashboard, scanner/decision traces, paper positions, risk monitor, emergency halt.
-- [ ] Controlled paper validation: 100 closed trades over at least 14 days, with after-fee metrics and no unmanaged positions or unintended duplicate entries. This is a validation target, not a profitability guarantee.
+- [x] Core deterministic tests exist for scanner, nine-layer engine, trade lifecycle, risk, absorption/liquidity, and paper persistence.
+- [x] PR #8 freshness/observability hardening merged into main.
+- [x] PR #15 current-head deterministic CI green (6/6) and preview checks successful.
+- [x] PR #11 current-head deterministic CI green (4/4).
+- [x] Phase E #9 and Phase F #10 focused CI green on their respective heads.
+- [x] Main APK artifact retrieved, integrity checked, and manifest/frontend inspected.
+- [ ] Consolidate Layer 1/2 and Phase A diagnostics into a reviewed integration branch without losing changes.
+- [ ] Live public feed certification: snapshot synchronization, sequence continuity, stale invalidation, reconnect/resnapshot, sustained uptime and checkpoint evidence.
+- [ ] Validate scanner, nine-layer trace, trade lifecycle (fixed SL, trailing SL, TP), risk gates, absorption/liquidity, persistence/restart recovery with live feed and deterministic fixtures.
+- [ ] Apply APK security hardening (token not persisted, backup disabled, release debuggable false), verify release signature and artifact checksum.
+- [ ] Complete backend/frontend integration, then deploy the reviewed build (requires explicit approval and available quota).
+- [ ] Build the integrated monitoring APK and verify artifact, package, signing, release notes.
+- [ ] Physical Android install test: launch/login, network changes, background/foreground, reconnect, dashboard, scanner/decision traces, paper positions, risk monitor, emergency halt.
+- [ ] Controlled paper validation: 100 closed trades over at least 14 days, after-fee metrics, adequate regime coverage, no unmanaged positions or unintended duplicate entries. This is a validation target, not a profitability guarantee.
 
 ## Next action
 
-Finish and review the PR #8 freshness change/CI, then perform branch consolidation. The placeholder Android shell cannot be promoted to the release APK until it is replaced or connected to the real monitoring frontend.
+Resolve the Android release security blockers and continue feed certification using PR #15 as the base. Port unique PR #11 diagnostics in a controlled review, then reconcile Phase E/F. No merge or deployment until explicitly approved.
