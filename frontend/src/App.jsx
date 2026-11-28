@@ -238,6 +238,7 @@ export default function App() {
         <div className="list-row"><b>Last depth message age</b><span>{primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s"}</span></div>
         <div className="list-row"><b>Applied book update age</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primary.last_book_update_age_seconds==null?"--":primary.last_book_update_age_seconds+"s"}</span></div>
         <div className="list-row"><b>Connected for</b><span>{primary.connected_duration_seconds==null?"--":primary.connected_duration_seconds+"s"}</span></div>
+        <div className="list-row"><b>Last connection session</b><span>{typeof primary.last_connection_duration_seconds==="number"&&Number.isFinite(primary.last_connection_duration_seconds)&&primary.last_connection_duration_seconds>=0?primary.last_connection_duration_seconds+"s":"--"}</span></div>
         <div className="list-row"><b>Synchronized for</b><span>{primary.synchronized_duration_seconds==null?"--":primary.synchronized_duration_seconds+"s"}</span></div>
         <div className="list-row"><b>Connection attempts / successes</b><span>{displayDiagnosticCounter(primary,"connection_attempt_count")} / {displayDiagnosticCounter(primary,"successful_connection_count")}</span></div>
         <div className="list-row"><b>Reconnects / recoveries</b><span>{displayDiagnosticCounter(primary,"reconnect_count")} / {displayDiagnosticCounter(primary,"recovery_count")}</span></div>
