@@ -280,6 +280,19 @@ test("diagnostic counter strings require decimal integer notation", () => {
   assert.equal(normalizeDiagnosticCounter(" 7 "), 7);
 });
 
+test("unified invalid-symbol diagnostic counter is normalized when present", () => {
+  const normalized = normalizeFeedMonitorPayload({
+    unified_market_data: { invalid_symbol_message_count: "004" },
+  });
+  assert.equal(normalized.unified.invalid_symbol_message_count, 4);
+  const malformed = normalizeFeedMonitorPayload({
+    unified_market_data: { invalid_symbol_message_count: "1e2" },
+  });
+  assert.equal(malformed.unified.invalid_symbol_message_count, 0);
+  const legacy = normalizeFeedMonitorPayload({ unified_market_data: {} });
+  assert.equal(Object.hasOwn(legacy.unified, "invalid_symbol_message_count"), false);
+});
+
 test("legacy summary without fresh-message counter keeps healthy-count fallback", () => {
   const normalized = normalizeFeedMonitorPayload({
     summary: { healthy_feed_count: "2" },
