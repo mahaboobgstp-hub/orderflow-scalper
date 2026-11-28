@@ -60,6 +60,23 @@ class Phase1FeedDiagnosticsTests(unittest.TestCase):
         self.assertEqual(recovered["error_count"], 2)
         self.assertIsNone(recovered["last_error"])
 
+    def test_primary_connection_exception_increments_error_count(self):
+        async def stop_after_backoff(_delay):
+            self.stream._stop_event.set()
+
+        async def run():
+            with patch("app.market_data.backend_stream.websockets.connect", side_effect=RuntimeError("connection refused")), \
+                 patch("app.market_data.backend_stream.asyncio.sleep", new=stop_after_backoff):
+                await self.stream._run_forever()
+
+        asyncio.run(run())
+        status = asyncio.run(self.stream.get_status())
+        self.assertEqual(status["connection_attempt_count"], 1)
+        self.assertEqual(status["error_count"], 1)
+        self.assertEqual(status["last_error"], "connection refused")
+        self.assertFalse(status["connected"])
+
+
     def test_primary_stale_cutoff_normalizes_invalid_values(self):
         for invalid in (None, "", "invalid", float("nan"), float("inf"), float("-inf"), 0, -1, True, False):
             with self.subTest(value=invalid):
