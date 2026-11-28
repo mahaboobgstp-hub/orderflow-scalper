@@ -36,3 +36,25 @@
 4. Add durable audit and idempotency storage; require persistence before multi-instance use.
 5. Implement narrow MCP tools (preview, approve/submit, status/cancel only) and validate with MCP Inspector.
 6. Run CI through a PR only after explicit approval to avoid preview-deployment side effects.
+
+
+## Run 12 — server-side risk validation (2026-11-28)
+
+**Branch head after this increment:** `a875d18422c3de4503bf88fb28ab16da790d6e4b`
+
+### Implemented
+- Added side-effect-free `backend/app/tradebridge/risk.py` for preview validation against server-supplied market quote, exchange filters, and account-risk snapshots. This module never calls an exchange, reads credentials, or submits orders.
+- Fail-closed freshness checks: quote <= 2 seconds, account-risk snapshot <= 5 seconds, exchange symbol rules <= 1 hour; timestamps must be timezone-aware and future clock skew <= 1 second.
+- Hard-coded service risk bounds: spread <= 20 bps; per-trade stop risk <= 1% equity; aggregate stop risk <= 2% equity. Limits are not request fields.
+- Enforces matching symbol, positive/non-crossed quote, quantity bounds and step alignment, stop/TP tick alignment, exchange minimum notional, configured notional/quantity/leverage caps, slippage versus mark, directional stop/TP geometry, position cap, available margin, and account snapshot sanity.
+- Added `backend/tests/test_tradebridge_risk.py` with 26 focused regression tests for passing preview, stale/future data, symbol/quote integrity, spread, step/tick filters, notional, slippage, stop geometry, leverage, positions, margin, per-trade and aggregate risk.
+
+### Local validation
+- Focused test run: **26 passed**.
+- Python compile check for the risk service and test file: passed.
+- This run did not execute the full backend suite or GitHub Actions. Feature branch has no PR; no branch-triggered Actions run was observed.
+
+### Still gated / not yet integrated
+- Risk service is not yet mounted into FastAPI preview/authorization/submit routes; it must be wired to server-trusted quote, exchange filters, and account data, not client-supplied snapshots.
+- No execution, credentials, or live trading path added. No demo order submitted.
+- Persistent idempotency/audit and MCP tools remain unimplemented.
