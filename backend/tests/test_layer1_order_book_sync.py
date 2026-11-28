@@ -237,15 +237,46 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.stream.connected = True
         self.stream.synchronized = True
         self.stream.last_book_update_at = time.time() - 10
+        self.stream.last_book_update_monotonic = time.monotonic() - 10
         self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+
+    def test_monotonic_clock_rejects_stale_book_after_wall_clock_rollback(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_book_update_at = 1000.0
+        self.stream.last_book_update_monotonic = 490.0
+        with patch("app.market_data.backend_stream.time.time", return_value=1.0), patch(
+            "app.market_data.backend_stream.time.monotonic", return_value=500.0
+        ):
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+            status = asyncio.run(self.stream.get_status())
+            self.assertTrue(status["stale"])
+            self.assertEqual(status["last_book_update_age_seconds"], 10.0)
+
+    def test_delayed_event_receipt_does_not_refresh_stale_book(self):
+        self.stream.connected = True
+        self.stream.synchronized = True
+        self.stream.last_update_id = 100
+        event = self.event(101, 101, bids=[["99.5", "1.0"]], previous=100)
+        event["_received_monotonic"] = 480.0
+        with patch("app.market_data.backend_stream.time.monotonic", return_value=500.0):
+            self.assertTrue(self.stream._apply_event(event))
+            self.assertEqual(self.stream.last_book_update_monotonic, 480.0)
+            self.assertIsNone(asyncio.run(self.stream.get_order_book()))
+            status = asyncio.run(self.stream.get_status())
+            self.assertTrue(status["stale"])
+            self.assertEqual(status["last_book_update_age_seconds"], 20.0)
 
     def test_duplicate_event_does_not_refresh_stale_book(self):
         self.stream.connected = True
         self.stream.synchronized = True
         old_progress = time.time() - 10
+        old_progress_monotonic = time.monotonic() - 10
         self.stream.last_book_update_at = old_progress
+        self.stream.last_book_update_monotonic = old_progress_monotonic
         self.assertTrue(self.stream._apply_event(self.event(90, 100)))
         self.assertEqual(self.stream.last_book_update_at, old_progress)
+        self.assertEqual(self.stream.last_book_update_monotonic, old_progress_monotonic)
         self.assertIsNone(asyncio.run(self.stream.get_order_book()))
 
     def test_progressing_event_refreshes_book_and_returns_age(self):
