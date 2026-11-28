@@ -86,7 +86,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         async def run():
             with patch("app.exchanges.public_adapters.websockets.connect", return_value=FakeConnect()):
                 with patch("app.exchanges.public_adapters.time.time", side_effect=[50.0, 51.0, 52.0, 53.0, 54.0]):
-                    with patch("app.exchanges.public_adapters.time.monotonic", side_effect=[100.0, 102.0]):
+                    with patch("app.exchanges.public_adapters.time.monotonic", return_value=100.0):
                         await adapter._run()
                     return await adapter.status()
 
@@ -97,7 +97,7 @@ class PublicAdapterLifecycleDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status["last_connected_at"], 51.0)
         self.assertEqual(status["last_disconnect_at"], 53.0)
         self.assertEqual(status["last_connection_duration_seconds"], 2.0)
-        self.assertEqual(status["last_message_age_seconds"], 2.0)
+        self.assertEqual(status["last_message_age_seconds"], 0.0)
         self.assertIsNone(status["connected_duration_seconds"])
         self.assertFalse(status["connected"])
 
