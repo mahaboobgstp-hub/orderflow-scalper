@@ -21,6 +21,14 @@ export function normalizeDiagnosticCounter(rawValue) {
   return Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }
 
+/** Show missing legacy diagnostics as unavailable rather than a fabricated zero. */
+export function displayDiagnosticCounter(record, field) {
+  if (record === null || typeof record !== "object" || Array.isArray(record) || !Object.hasOwn(record, field)) {
+    return "--";
+  }
+  return normalizeDiagnosticCounter(record[field]);
+}
+
 function normalizeCounterRecord(record, fields) {
   const normalized = { ...asRecord(record) };
   for (const field of fields) {
