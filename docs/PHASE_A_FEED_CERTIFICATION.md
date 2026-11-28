@@ -25,6 +25,7 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | `recovery_count` | Successful snapshot-bridge synchronization events on a later connection. This is not incremented for snapshots alone. |
 | `sequence_gap_count` | Sequence continuity failures detected after synchronization or when snapshot-bridge application fails. |
 | `error_count` | Cumulative primary-feed errors and recovery-triggering events (connection/setup exceptions, malformed frames, buffer overflow, snapshot-bridge failure, sequence gaps, invalid live depth updates, and unexpected stream termination). Successful reconnects/snapshots clear `last_error` but never reset this count. Explicit user stop is not counted. |
+| Secondary adapter exchange-error classification | `success:false`, negative Binance `code`, nonzero Bybit `retCode`, Delta `type:error`, and nonempty generic `error` fields increment the cumulative adapter error counter; successful Bybit acknowledgements with `retCode:0` do not. |
 | `invalid_depth_message_count` | Malformed depth frames or depth payloads rejected before book mutation (including empty bid-and-ask updates). |
 | `last_disconnect_reason` | Most recent observed connection end or recovery-triggering failure. |
 
