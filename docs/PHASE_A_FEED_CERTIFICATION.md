@@ -191,3 +191,8 @@ Public exchange adapter status records expose `connection_attempt_count` (increm
 ## Non-string feed topic guard
 
 The unified market-data engine rejects messages whose explicit `topic` value is not a string before attempting topic dispatch or symbol fallback. This prevents malformed null, numeric, list, or object topic values from raising an attribute error in `startswith` checks or being attributed to a default symbol. Rejections increment `invalid_symbol_message_count` and must not create book, feed, exchange, or trade records. A missing topic remains represented by the empty-string default for supported single-symbol fallback paths. Deterministic tests cover scalar and list-valued payloads with invalid topic types.
+
+
+## Missing primary diagnostics counters are unavailable
+
+The Feed Monitor must not display a fabricated zero when an older API payload omits a primary-stream diagnostic counter. Connection attempts/successes, reconnects/recoveries, snapshots, sequence gaps, received depth messages, invalid-depth messages, and buffer-overflow counts display `--` when the field is absent. If a field is explicitly present but invalid, the existing normalization remains fail-safe and displays `0`. This preserves compatibility without presenting missing telemetry as observed inactivity. Frontend deterministic tests cover absent records/fields, explicit null, decimal numeric strings, and malformed strings.
