@@ -112,7 +112,13 @@ class BinanceOrderBookStream:
 
             self._task = None
 
-        self._record_disconnect("stop_requested")
+        # Only a live session should generate a new disconnect record. If the
+        # connection already ended, preserve the observed reason/timestamp.
+        if self.connected:
+            self._record_disconnect("stop_requested")
+        else:
+            self.synchronized = False
+            self.synchronized_since = None
 
     def _record_connection_attempt(self):
         self.connection_attempt_count += 1

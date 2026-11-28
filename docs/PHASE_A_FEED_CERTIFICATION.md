@@ -200,3 +200,14 @@ The unified market-data engine rejects messages whose explicit `topic` value is 
 ## Missing primary diagnostics counters are unavailable
 
 The Feed Monitor must not display a fabricated zero when an older API payload omits a primary-stream diagnostic counter. Connection attempts/successes, reconnects/recoveries, snapshots, sequence gaps, received depth messages, invalid-depth messages, and buffer-overflow counts display `--` when the field is absent. If a field is explicitly present but invalid, the existing normalization remains fail-safe and displays `0`. This preserves compatibility without presenting missing telemetry as observed inactivity. Frontend deterministic tests cover absent records/fields, explicit null, decimal numeric strings, and malformed strings.
+
+
+## Stop/shutdown diagnostic semantics
+
+A stop request records `stop_requested` as the disconnect reason only when the
+primary WebSocket session is still connected at shutdown. If the stream has
+already recorded an actual disconnect (for example a sequence gap or network
+close), a later `stop()` call preserves that reason and timestamp while still
+leaving synchronization invalidated. This avoids shutdown cleanup overwriting the
+last observed runtime event in diagnostics. Deterministic tests cover both an
+active-session stop and stop after an already-recorded disconnect.

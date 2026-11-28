@@ -153,6 +153,30 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertEqual(status["last_connection_duration_seconds"], 5.0)
 
 
+    def test_stop_preserves_actual_disconnect_reason_and_timestamp(self):
+        self.stream._record_disconnect("sequence_gap", now=123.0)
+        self.stream.last_connection_duration_seconds = 6.5
+
+        asyncio.run(self.stream.stop())
+
+        self.assertFalse(self.stream.connected)
+        self.assertFalse(self.stream.synchronized)
+        self.assertIsNone(self.stream.synchronized_since)
+        self.assertEqual(self.stream.last_disconnect_reason, "sequence_gap")
+        self.assertEqual(self.stream.last_disconnect_at, 123.0)
+        self.assertEqual(self.stream.last_connection_duration_seconds, 6.5)
+
+    def test_stop_records_disconnect_for_active_session(self):
+        self.stream._record_connection_success(now=time.time() - 5.0)
+
+        asyncio.run(self.stream.stop())
+
+        self.assertFalse(self.stream.connected)
+        self.assertIsNone(self.stream.connected_at)
+        self.assertEqual(self.stream.last_disconnect_reason, "stop_requested")
+        self.assertIsNotNone(self.stream.last_disconnect_at)
+        self.assertGreaterEqual(self.stream.last_connection_duration_seconds, 5.0)
+
 if __name__ == "__main__":
     unittest.main()
 
