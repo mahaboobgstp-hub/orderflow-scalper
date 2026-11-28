@@ -212,6 +212,9 @@ class UnifiedMarketDataEngine:
         if not isinstance(raw, dict):
             return None
         topic = raw.get("topic", "")
+        if not isinstance(topic, str):
+            self.invalid_symbol_message_count += 1
+            return None
         data = raw.get("data", raw)
         if isinstance(data, list) and topic.startswith("publicTrade"):
             result = None
