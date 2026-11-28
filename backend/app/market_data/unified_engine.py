@@ -1,6 +1,7 @@
 """Phase 3 exchange-neutral market-data normalization."""
 import time
 import math
+import re
 from dataclasses import dataclass, field
 
 @dataclass
@@ -28,9 +29,52 @@ class UnifiedMarketDataEngine:
             stale_cutoff = 3.0
         self.stale_after_seconds = max(0.1, stale_cutoff)
         self.max_levels=max_levels
-        self.books={}; self.trades={}; self.counts={}; self.last_seen={}; self.feed_counts={}; self.feed_last_seen={}; self.errors={}
+        self.books={}; self.trades={}; self.counts={}; self.last_seen={}; self.feed_counts={}; self.feed_last_seen={}; self.errors={}; self.invalid_symbol_message_count=0
     @staticmethod
     def key(exchange,symbol): return exchange.lower()+":"+symbol.upper()
+
+    @staticmethod
+    def normalize_symbol(value):
+        if not isinstance(value, str):
+            return None
+        symbol = value.strip().upper()
+        if not symbol or len(symbol) > 32 or not re.fullmatch(r"[A-Z0-9][A-Z0-9._/-]{0,31}", symbol):
+            return None
+        return symbol
+
+    @classmethod
+    def topic_symbol(cls, topic):
+        if not isinstance(topic, str):
+            return None
+        if topic.startswith("publicTrade."):
+            candidate = topic.split(".", 1)[1]
+        elif topic.startswith("orderbook."):
+            candidate = topic.rsplit(".", 1)[-1]
+        else:
+            return None
+        return cls.normalize_symbol(candidate)
+
+    def resolve_symbol(self, data, topic, default_symbol):
+        raw_symbol = data.get("s")
+        if raw_symbol is None or raw_symbol == "":
+            raw_symbol = data.get("symbol"
+            )
+        explicit_symbol = None
+        if raw_symbol is not None and raw_symbol != "":
+            explicit_symbol = self.normalize_symbol(raw_symbol)
+            if explicit_symbol is None:
+                return None
+
+        topic_has_symbol = isinstance(topic, str) and (
+            topic.startswith("publicTrade.") or topic.startswith("orderbook.")
+        )
+        topic_symbol = self.topic_symbol(topic)
+        if topic_has_symbol and topic_symbol is None:
+            return None
+        if explicit_symbol and topic_symbol and explicit_symbol != topic_symbol:
+            return None
+        return explicit_symbol or topic_symbol or self.normalize_symbol(default_symbol)
+
     def book(self,exchange,symbol):
         key=self.key(exchange,symbol)
         if key not in self.books: self.books[key]=Book(exchange.lower(),symbol.upper())
@@ -170,7 +214,10 @@ class UnifiedMarketDataEngine:
             return result
         if not isinstance(data, dict):
             return None
-        symbol = str(data.get("s") or data.get("symbol") or default_symbol).upper()
+        symbol = self.resolve_symbol(data, topic, default_symbol)
+        if symbol is None:
+            self.invalid_symbol_message_count += 1
+            return None
         ts = self.as_int(raw.get("ts") or raw.get("E") or raw.get("timestamp") or data.get("ts"))
         book = self.book(ex, symbol)
         try:
@@ -300,4 +347,5 @@ class UnifiedMarketDataEngine:
               for key in sorted(self.feed_counts)}
         return {"phase":3,"engine":"unified_market_data","stale_after_seconds":self.stale_after_seconds,
           "exchanges":{x:{"messages_received":self.counts.get(x,0),"last_message_age_seconds":round(now-self.last_seen[x],3) if x in self.last_seen else None} for x in exchanges},
-          "feeds":feeds,"books":books,"trade_streams":{k:len(v) for k,v in self.trades.items()},"errors":self.errors.copy()}
+          "feeds":feeds,"books":books,"trade_streams":{k:len(v) for k,v in self.trades.items()},"errors":self.errors.copy(),
+          "invalid_symbol_message_count":self.invalid_symbol_message_count}
