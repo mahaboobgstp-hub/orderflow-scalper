@@ -28,7 +28,7 @@ class UnifiedMarketDataEngine:
             stale_cutoff = 3.0
         self.stale_after_seconds = max(0.1, stale_cutoff)
         self.max_levels=max_levels
-        self.books={}; self.trades={}; self.counts={}; self.last_seen={}; self.errors={}
+        self.books={}; self.trades={}; self.counts={}; self.last_seen={}; self.feed_counts={}; self.feed_last_seen={}; self.errors={}
     @staticmethod
     def key(exchange,symbol): return exchange.lower()+":"+symbol.upper()
     def book(self,exchange,symbol):
@@ -140,14 +140,18 @@ class UnifiedMarketDataEngine:
         self.errors.pop(self.key(book.exchange, book.symbol), None)
         return True
 
-    def touch_message(self, ex, ts):
+    def touch_message(self, ex, ts, symbol=None):
         now = time.time()
         self.last_seen[ex] = now
         self.counts[ex] = self.counts.get(ex, 0) + 1
+        if symbol is not None:
+            feed_key = self.key(ex, symbol)
+            self.feed_counts[feed_key] = self.feed_counts.get(feed_key, 0) + 1
+            self.feed_last_seen[feed_key] = now
         return now
 
     def touch(self, ex, b, ts):
-        now = self.touch_message(ex, ts)
+        now = self.touch_message(ex, ts, b.symbol)
         b.exchange_ts = ts
         b.received_ts = int(now * 1000)
         b.stale = False
@@ -173,7 +177,7 @@ class UnifiedMarketDataEngine:
             # Binance diffs without the REST snapshot bridge are never applied here.
             if ex == "binance" and ("b" in data or "a" in data) and ("U" in data or "u" in data):
                 self.invalidate_book(ex, book, "Needs REST snapshot synchronization")
-                self.touch_message(ex, ts)
+                self.touch_message(ex, ts, symbol)
                 return {"type": "book_delta", "synchronized": False, "error": book.error}
 
             if topic.startswith("orderbook."):
@@ -181,7 +185,7 @@ class UnifiedMarketDataEngine:
                 sequence = self.as_int(data.get("u"))
                 if sequence is None or sequence < 0:
                     self.invalidate_book(ex, book, "Invalid order-book sequence")
-                    self.touch_message(ex, ts)
+                    self.touch_message(ex, ts, symbol)
                     return {"type": "parse_error", "error": book.error}
                 if typ == "snapshot":
                     valid = self.update_book(book, data.get("b", []), data.get("a", []), snapshot=True)
@@ -200,7 +204,7 @@ class UnifiedMarketDataEngine:
                     book.sequence = sequence
                     self.touch(ex, book, ts)
                 else:
-                    self.touch_message(ex, ts)
+                    self.touch_message(ex, ts, symbol)
                 return {"type": "book_" + typ, "synchronized": book.synchronized, "error": book.error}
 
             if ex == "delta" and any(k in data for k in ("buy", "sell", "bids", "asks")):
@@ -218,7 +222,7 @@ class UnifiedMarketDataEngine:
                         book.sequence = sequence
                     self.touch(ex, book, ts)
                 else:
-                    self.touch_message(ex, ts)
+                    self.touch_message(ex, ts, symbol)
                 return {"type": "book_snapshot" if snapshot else "book_delta", "synchronized": book.synchronized, "error": book.error}
 
             tape = []
@@ -253,11 +257,11 @@ class UnifiedMarketDataEngine:
                 key = self.key(ex, symbol)
                 self.trades.setdefault(key, []).append(trade)
                 self.trades[key] = self.trades[key][-5000:]
-                self.touch_message(ex, ts)
+                self.touch_message(ex, ts, symbol)
                 return {"type": "trade", "exchange": ex, "symbol": symbol, "price": price, "quantity": quantity, "side": side}
         except (ValueError, TypeError, KeyError, OverflowError) as err:
             self.invalidate_book(ex, book, "Payload parse error: " + str(err))
-            self.touch_message(ex, ts)
+            self.touch_message(ex, ts, symbol)
             return {"type": "parse_error", "error": book.error}
         return None
     def get_book(self,exchange,symbol):
@@ -290,6 +294,10 @@ class UnifiedMarketDataEngine:
               "bid_depth_top10":bid_depth,"ask_depth_top10":ask_depth,
               "imbalance_top10":(bid_depth-ask_depth)/(bid_depth+ask_depth) if bid_depth+ask_depth else None,
               "received_timestamp_ms":b.received_ts,"exchange_timestamp_ms":b.exchange_ts}
+        feeds={key:{"exchange":key.split(":",1)[0],"symbol":key.split(":",1)[1],
+              "messages_received":self.feed_counts.get(key,0),
+              "last_message_age_seconds":round(now-self.feed_last_seen[key],3) if key in self.feed_last_seen else None}
+              for key in sorted(self.feed_counts)}
         return {"phase":3,"engine":"unified_market_data","stale_after_seconds":self.stale_after_seconds,
           "exchanges":{x:{"messages_received":self.counts.get(x,0),"last_message_age_seconds":round(now-self.last_seen[x],3) if x in self.last_seen else None} for x in exchanges},
-          "books":books,"trade_streams":{k:len(v) for k,v in self.trades.items()},"errors":self.errors.copy()}
+          "feeds":feeds,"books":books,"trade_streams":{k:len(v) for k,v in self.trades.items()},"errors":self.errors.copy()}

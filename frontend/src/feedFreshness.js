@@ -48,16 +48,19 @@ export function normalizeFeedMonitorPayload(rawPayload) {
   const exchangeStats = Object.fromEntries(
     Object.entries(asRecord(unified.exchanges)).map(([key, stats]) => [key, asRecord(stats)]),
   );
+  const feeds = Object.fromEntries(
+    Object.entries(asRecord(unified.feeds)).map(([key, feed]) => [key, asRecord(feed)]),
+  );
   const primary = asRecord(payload.primary_binance_demo_stream);
   const normalizedPayload = {
     ...payload,
     mode: typeof payload.mode === "string" ? payload.mode : "Unknown",
     summary,
-    unified_market_data: { ...unified, books, exchanges: exchangeStats },
+    unified_market_data: { ...unified, books, exchanges: exchangeStats, feeds },
     exchange_connections: { ...exchangeConnections, exchanges: adapterList },
     primary_binance_demo_stream: primary,
   };
-  return { payload: normalizedPayload, summary, unified: normalizedPayload.unified_market_data, adapterList, books, exchangeStats, primary };
+  return { payload: normalizedPayload, summary, unified: normalizedPayload.unified_market_data, adapterList, books, exchangeStats, feeds, primary };
 }
 
 export function effectiveFeedStaleCutoff(rawCutoff) {
@@ -127,6 +130,18 @@ export function getPrimaryBookState(primary, staleAfterSeconds) {
   if (primary.healthy === true) return "HEALTHY";
   if (primary.healthy === false) return "UNHEALTHY";
   return "FRESH (LEGACY)";
+}
+
+export function getUnifiedFeedMessageState(feed, staleAfterSeconds) {
+  if (!feed || typeof feed !== "object" || Array.isArray(feed)) return "UNKNOWN";
+  const exchange = feed.exchange;
+  const symbol = feed.symbol;
+  if (typeof exchange !== "string" || !exchange.trim() || typeof symbol !== "string" || !symbol.trim()) return "UNKNOWN";
+  const rawAge = feed.last_message_age_seconds;
+  if (rawAge == null || typeof rawAge === "boolean" || (typeof rawAge === "string" && rawAge.trim() === "")) return "AGE UNKNOWN";
+  const age = Number(rawAge);
+  if (!Number.isFinite(age) || age < 0) return "AGE UNKNOWN";
+  return age <= effectiveFeedStaleCutoff(staleAfterSeconds) ? "FRESH" : "STALE";
 }
 
 export function getUnifiedBookState(book, staleAfterSeconds) {

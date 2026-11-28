@@ -37,6 +37,24 @@ class Tests(unittest.TestCase):
   self.assertAlmostEqual(book["imbalance_top10"],-0.25)
   self.assertIsNotNone(book["age_seconds"])
   self.assertEqual(status["exchanges"]["bybit"]["messages_received"],1)
+  self.assertEqual(status["feeds"]["bybit:BTCUSDT"]["messages_received"],1)
+  self.assertIsNotNone(status["feeds"]["bybit:BTCUSDT"]["last_message_age_seconds"])
+ def test_status_tracks_message_freshness_per_symbol(self):
+  btc={"topic":"publicTrade.BTCUSDT","data":{"s":"BTCUSDT","p":"101","v":"2","S":"Buy"}}
+  eth={"topic":"publicTrade.ETHUSDT","data":{"s":"ETHUSDT","p":"2020","v":"1","S":"Sell"}}
+  with patch("app.market_data.unified_engine.time.time",return_value=100.0):
+   self.e.process("bybit",btc)
+  with patch("app.market_data.unified_engine.time.time",return_value=200.0):
+   self.e.process("bybit",eth)
+  with patch("app.market_data.unified_engine.time.time",return_value=201.0):
+   status=self.e.get_status()
+  self.assertEqual(status["feeds"]["bybit:BTCUSDT"]["messages_received"],1)
+  self.assertEqual(status["feeds"]["bybit:BTCUSDT"]["last_message_age_seconds"],101.0)
+  self.assertEqual(status["feeds"]["bybit:ETHUSDT"]["messages_received"],1)
+  self.assertEqual(status["feeds"]["bybit:ETHUSDT"]["last_message_age_seconds"],1.0)
+  self.assertEqual(status["exchanges"]["bybit"]["messages_received"],2)
+  self.assertEqual(status["exchanges"]["bybit"]["last_message_age_seconds"],1.0)
+
  def test_status_marks_stale_book(self):
   s={"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","1"]],"a":[["101","1"]],"u":1}}
   self.e.process("bybit",s)

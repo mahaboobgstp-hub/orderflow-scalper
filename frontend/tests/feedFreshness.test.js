@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFreshMessageFeed, getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState, normalizeFeedMonitorPayload, normalizeDiagnosticCounter } from "../src/feedFreshness.js";
+import { isFreshMessageFeed, getMessageFeedState, getUnifiedFeedMessageState, getPrimaryBookState, getPrimaryBookDisplayLabel, effectiveFeedStaleCutoff, getUnifiedBookState, normalizeFeedMonitorPayload, normalizeDiagnosticCounter } from "../src/feedFreshness.js";
 
 test("fresh feed accepts finite nonnegative age inside the cutoff", () => {
   assert.equal(isFreshMessageFeed({ enabled: true, connected: true, last_message_age_seconds: 0.25 }, 3), true);
@@ -57,6 +57,17 @@ test("per-adapter state distinguishes disabled, disconnected, and unknown connec
     );
   }
   assert.equal(getMessageFeedState({ connected: true, last_message_age_seconds: 0.1 }, 3), "FRESH");
+});
+
+test("unified per-symbol message freshness distinguishes fresh, stale, and unknown", () => {
+  const valid = { exchange: "binance", symbol: "BTCUSDT", messages_received: 4, last_message_age_seconds: 3 };
+  assert.equal(getUnifiedFeedMessageState(valid, 3), "FRESH");
+  assert.equal(getUnifiedFeedMessageState({ ...valid, last_message_age_seconds: 3.01 }, 3), "STALE");
+  for (const age of [null, undefined, true, Number.NaN, Number.POSITIVE_INFINITY, -1, "invalid", ""]) {
+    assert.equal(getUnifiedFeedMessageState({ ...valid, last_message_age_seconds: age }, 3), "AGE UNKNOWN", `age ${String(age)}`);
+  }
+  assert.equal(getUnifiedFeedMessageState({ symbol: "BTCUSDT", last_message_age_seconds: 0.1 }, 3), "UNKNOWN");
+  assert.equal(getUnifiedFeedMessageState({ exchange: "binance", last_message_age_seconds: 0.1 }, 3), "UNKNOWN");
 });
 
 test("primary book status requires explicit connectivity and synchronization", () => {
@@ -171,15 +182,16 @@ test("monitor payload safely normalizes malformed containers", () => {
     payload: {
       mode: "Unknown",
       summary: { safety: "PUBLIC FEEDS ONLY" },
-      unified_market_data: { books: {}, exchanges: {} },
+      unified_market_data: { books: {}, exchanges: {}, feeds: {} },
       exchange_connections: { exchanges: [] },
       primary_binance_demo_stream: {},
     },
     summary: { safety: "PUBLIC FEEDS ONLY" },
-    unified: { books: {}, exchanges: {} },
+    unified: { books: {}, exchanges: {}, feeds: {} },
     adapterList: [],
     books: {},
     exchangeStats: {},
+    feeds: {},
     primary: {},
   };
   assert.deepEqual(normalizeFeedMonitorPayload(null), empty);
@@ -191,14 +203,14 @@ test("monitor payload safely normalizes malformed containers", () => {
     primary_binance_demo_stream: [],
   });
   assert.deepEqual(malformed.summary, { safety: "PUBLIC FEEDS ONLY" });
-  assert.deepEqual(malformed.unified, { books: {}, exchanges: {} });
+  assert.deepEqual(malformed.unified, { books: {}, exchanges: {}, feeds: {} });
   assert.deepEqual(malformed.adapterList, []);
   assert.deepEqual(malformed.books, {});
   assert.deepEqual(malformed.exchangeStats, {});
   assert.deepEqual(malformed.primary, {});
   assert.deepEqual(malformed.payload.summary, { safety: "PUBLIC FEEDS ONLY" });
   assert.equal(malformed.payload.mode, "Unknown");
-  assert.deepEqual(malformed.payload.unified_market_data, { books: {}, exchanges: {} });
+  assert.deepEqual(malformed.payload.unified_market_data, { books: {}, exchanges: {}, feeds: {} });
   assert.deepEqual(malformed.payload.exchange_connections, { exchanges: [] });
   assert.deepEqual(malformed.payload.primary_binance_demo_stream, {});
 });
@@ -211,6 +223,7 @@ test("monitor payload preserves valid fields while normalizing malformed list en
     unified_market_data: {
       books: { "binance:BTCUSDT": primaryBook, "bad:entry": null },
       exchanges: { binance: { messages_received: 5 }, malformed: null },
+      feeds: { "binance:BTCUSDT": { exchange: "binance", symbol: "BTCUSDT", messages_received: 3, last_message_age_seconds: 0.25 }, malformed: null },
     },
     exchange_connections: {
       exchanges: [{ exchange: "binance", connected: true }, null, ["unexpected"]],
@@ -229,6 +242,9 @@ test("monitor payload preserves valid fields while normalizing malformed list en
   assert.deepEqual(normalized.books["bad:entry"], {});
   assert.equal(normalized.exchangeStats.binance.messages_received, 5);
   assert.deepEqual(normalized.exchangeStats.malformed, {});
+  assert.equal(normalized.feeds["binance:BTCUSDT"].messages_received, 3);
+  assert.equal(normalized.feeds["binance:BTCUSDT"].last_message_age_seconds, 0.25);
+  assert.deepEqual(normalized.feeds.malformed, {});
   assert.equal(normalized.primary.connected, true);
 });
 

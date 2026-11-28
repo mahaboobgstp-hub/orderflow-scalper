@@ -162,3 +162,8 @@ Frontend summary counters accept numeric values only when they are safe, nonnega
 ## Snapshot bridge collector-state recheck under lock
 
 The primary Binance snapshot-bridge path rechecks that its WebSocket collector is still active inside the lock-protected bridge application. The consumer's pre-lock check is insufficient because the collector can terminate while the consumer waits to acquire the book lock. If the collector has ended, the bridge is rejected, synchronization remains invalidated, the prior snapshot update ID and levels are preserved, and the termination is not counted as a sequence gap. A deterministic barrier-based test forces the collector to finish during the lock handoff and verifies that the bridge cannot synchronize or mutate the book.
+
+
+## Per-symbol unified feed freshness
+
+The unified market-data diagnostics now track message counts and last-message ages independently for each exchange-symbol pair under `unified_market_data.feeds`. Exchange-wide totals remain available in `exchanges` for backward compatibility. The Feed Monitor displays the per-symbol freshness list separately; message freshness is not a proxy for synchronized order-book freshness, and trade activity does not refresh a book's applied-depth timestamp. Per-symbol entries require valid exchange and symbol identity to be classified.

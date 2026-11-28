@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getMessageFeedState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState, normalizeFeedMonitorPayload } from "./feedFreshness.js";
+import { getMessageFeedState, getUnifiedFeedMessageState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState, normalizeFeedMonitorPayload } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -217,7 +217,7 @@ export default function App() {
     </>;
   }
   function renderMarketData() {
-    const {payload,summary,unified,adapterList,books,exchangeStats,primary}=normalizeFeedMonitorPayload(marketObs);
+    const {payload,summary,unified,adapterList,books,exchangeStats,feeds,primary}=normalizeFeedMonitorPayload(marketObs);
     const primaryBookState=getPrimaryBookState(primary);
     const primaryBookFresh=primaryBookState==="HEALTHY"||primaryBookState==="FRESH (LEGACY)";
     const messageState=(x)=>getMessageFeedState(x,unified.stale_after_seconds);
@@ -275,6 +275,14 @@ export default function App() {
           <div className="decision-outcome">Integrity: {b.integrity_error||"No error reported"}</div>
         </div>;
         })}
+      </div>
+      <div className="panel"><div className="panel-title"><h2>Per-Symbol Message Freshness</h2></div>
+        {Object.keys(feeds).length===0?<div className="empty-state">No per-symbol message activity has been recorded.</div>:Object.entries(feeds).map(([key,feed])=>{
+          const state=getUnifiedFeedMessageState(feed,unified.stale_after_seconds);
+          const stateClass=state==="FRESH"?"paper":state==="STALE"?"bad":"";
+          return <div className="list-row" key={key}><div><b>{key}</b><small>Messages {feed.messages_received??0} · Last message {feed.last_message_age_seconds==null?"--":feed.last_message_age_seconds+"s ago"}</small></div><span className={"status-chip "+stateClass}>{state}</span></div>;
+        })}
+        <p className="subtle">Message activity is tracked separately for each exchange-symbol pair; trade messages do not refresh book freshness.</p>
       </div>
       <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(exchangeStats).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
         <p className="subtle">This page refreshes with the existing polling cadence. Counts and timestamps are taken from backend diagnostics.</p>
