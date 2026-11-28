@@ -1,0 +1,27 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { normalizeBackendBase, tokenHeaderForBackend } from "../src/tokenSession.js";
+import { scanDirectory, scanSource } from "../../scripts/check-control-token-storage.mjs";
+
+test("backend base normalization trims whitespace and trailing slash",()=>assert.equal(normalizeBackendBase(" https://api.example.test/ "),"https://api.example.test"));
+test("token header is sent only to matching backend",()=>assert.deepEqual(tokenHeaderForBackend(" secret ","https://api.example.test/"," https://api.example.test "),{"X-Control-Token":"secret"}));
+test("token header blocked when backend differs",()=>assert.deepEqual(tokenHeaderForBackend("secret","https://old.test","https://new.test"),{}));
+test("blank token and empty backend never create a header",()=>{assert.deepEqual(tokenHeaderForBackend("  ","https://api.example.test","https://api.example.test"),{});assert.deepEqual(tokenHeaderForBackend("secret","",""),{});});
+test("direct persistent token read and write rejected",()=>assert.equal(scanSource('localStorage.getItem("ofs_token"); localStorage.setItem("ofs_token",token);').length,2));
+test("optional chaining and bracket access rejected",()=>assert.equal(scanSource('localStorage?.["getItem"]?.("ofs_token"); window?.localStorage?.setItem?.("ofs_token",token);').length,2));
+test("token-key alias rejected",()=>assert.equal(scanSource('const credentialKey="ofs_token"; localStorage.getItem(credentialKey); localStorage.setItem(credentialKey,token);').length,2));
+test("chained token-key alias rejected",()=>assert.equal(scanSource('const key="ofs_token"; const key2=key; localStorage.setItem(key2,token);').length,1));
+test("storage alias rejected",()=>assert.equal(scanSource('const storage=window.localStorage; storage.setItem("ofs_token",token);').length,1));
+test("direct method alias rejected",()=>assert.equal(scanSource('const readToken=localStorage.getItem; readToken("ofs_token");').length,1));
+test("bound method alias rejected",()=>assert.equal(scanSource('const readToken=localStorage.getItem.bind(localStorage); readToken("ofs_token");').length,1));
+test("call and apply indirection rejected",()=>assert.equal(scanSource('localStorage.getItem.call(localStorage,"ofs_token"); localStorage.setItem.apply(localStorage,["ofs_token",token]);').length,2));
+test("Reflect.apply indirection rejected",()=>assert.equal(scanSource('Reflect.apply(localStorage.getItem,localStorage,["ofs_token"]);').length,1));
+test("destructured storage methods rejected",()=>assert.equal(scanSource('const {getItem,setItem}=localStorage; getItem("ofs_token"); setItem("ofs_token",token);').length,2));
+test("renamed destructured methods rejected",()=>assert.equal(scanSource('const storage=window.localStorage; const {getItem:readToken,setItem:writeToken}=storage; readToken("ofs_token"); writeToken("ofs_token",token);').length,2));
+test("destructured method with token-key alias rejected",()=>assert.equal(scanSource('const key="ofs_token"; const {setItem:persist}=globalThis.localStorage; persist(key,token);').length,1));
+test("safe non-token preference and legacy token removal allowed",()=>assert.equal(scanSource('localStorage.removeItem("ofs_token"); localStorage.setItem("ofs_api",apiBase); const {setItem}=localStorage; setItem("ofs_api",apiBase);').length,0));
+test("directory scan includes JSX and TS files",()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),"ofs-scan-test-"));try{fs.writeFileSync(path.join(dir,"App.jsx"),'localStorage.setItem("ofs_token",token);');fs.writeFileSync(path.join(dir,"token.ts"),'localStorage.getItem("ofs_token");');assert.equal(scanDirectory(dir).length,2);}finally{fs.rmSync(dir,{recursive:true,force:true});}});
+test("patched App token pattern is scan-clean",()=>assert.equal(scanSource('localStorage.setItem("ofs_api",apiBase); localStorage.removeItem("ofs_token"); const token=""; tokenHeaderForBackend(token,tokenBoundBase,base);').length,0));
