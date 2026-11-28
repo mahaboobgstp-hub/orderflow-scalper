@@ -56,6 +56,7 @@ class BinanceOrderBookStream:
         self.connected = False
         self.synchronized = False
         self.last_error: str | None = None
+        self.error_count = 0
         self.connected_at: float | None = None
         self.connected_monotonic: float | None = None
         self.last_connection_duration_seconds: float | None = None
@@ -126,6 +127,13 @@ class BinanceOrderBookStream:
             self.synchronized = False
             self.synchronized_since = None
             self.synchronized_since_monotonic = None
+
+    def _record_error(self, message: str, *, only_if_missing: bool = False):
+        """Count a primary-feed error/recovery event and retain its latest detail."""
+        if only_if_missing and self.last_error:
+            return
+        self.error_count += 1
+        self.last_error = str(message)
 
     def _record_connection_attempt(self):
         self.connection_attempt_count += 1
@@ -203,7 +211,7 @@ class BinanceOrderBookStream:
             self.synchronized = False
             self.synchronized_since = None
             self.synchronized_since_monotonic = None
-            self.last_error = self.last_error or "WebSocket ended during snapshot synchronization"
+            self._record_error("WebSocket ended during snapshot synchronization", only_if_missing=True)
             return False
         if not self._event_bridges_snapshot(event):
             return False
@@ -259,7 +267,7 @@ class BinanceOrderBookStream:
                     event = self._decode_depth_message(message)
                 except ValueError as exc:
                     self.invalid_depth_message_count += 1
-                    self.last_error = str(exc)
+                    self._record_error(str(exc))
                     logger.warning("Invalid Binance depth frame: %s", exc)
                     break
                 try:
@@ -267,7 +275,7 @@ class BinanceOrderBookStream:
                 except asyncio.QueueFull:
                     overflowed = True
                     self.snapshot_buffer_overflow_count += 1
-                    self.last_error = (
+                    self._record_error(
                         "Depth event buffer overflow; reconnecting for fresh snapshot"
                     )
                     # Never synchronize from a partial buffer after dropping an event.
@@ -294,7 +302,7 @@ class BinanceOrderBookStream:
                     event_queue.put_nowait(None)
                 except asyncio.QueueFull:
                     self.snapshot_buffer_overflow_count += 1
-                    self.last_error = (
+                    self._record_error(
                         "Depth event buffer overflow at stream end; reconnecting for fresh snapshot"
                     )
                     while True:
@@ -318,7 +326,7 @@ class BinanceOrderBookStream:
                 raise
 
             except Exception as exc:
-                self.last_error = str(exc)
+                self._record_error(str(exc))
                 self._record_disconnect(self.last_error)
                 logger.exception("Binance order-book connection failed")
 
@@ -373,7 +381,7 @@ class BinanceOrderBookStream:
                 while not self.synchronized:
                     event = await event_queue.get()
                     if event is None:
-                        self.last_error = self.last_error or "WebSocket ended before snapshot synchronization"
+                        self._record_error("WebSocket ended before snapshot synchronization", only_if_missing=True)
                         return
                     if collector_task.done():
                         # Buffered events from a closed stream cannot establish
@@ -381,7 +389,7 @@ class BinanceOrderBookStream:
                         self.synchronized = False
                         self.synchronized_since = None
                         self.synchronized_since_monotonic = None
-                        self.last_error = self.last_error or "WebSocket ended before snapshot synchronization"
+                        self._record_error("WebSocket ended before snapshot synchronization", only_if_missing=True)
                         return
 
                     if self._event_bridges_snapshot(event):
@@ -390,12 +398,12 @@ class BinanceOrderBookStream:
                                 event, collector_task=collector_task
                             ):
                                 if collector_task.done():
-                                    self.last_error = self.last_error or (
-                                        "WebSocket ended during snapshot synchronization"
+                                    self._record_error(
+                                        "WebSocket ended during snapshot synchronization", only_if_missing=True
                                     )
                                     return
                                 self.sequence_gap_count += 1
-                                self.last_error = (
+                                self._record_error(
                                     "Snapshot bridge event failed continuity validation; "
                                     "reconnecting for a fresh snapshot"
                                 )
@@ -414,7 +422,7 @@ class BinanceOrderBookStream:
                         self.synchronized = False
                         self.synchronized_since = None
                         self.synchronized_since_monotonic = None
-                        self.last_error = self.last_error or "WebSocket stream ended after synchronization"
+                        self._record_error("WebSocket stream ended after synchronization", only_if_missing=True)
                         return
                     if collector_task.done() or not self.synchronized:
                         # Collector termination invalidates synchronization before
@@ -423,7 +431,7 @@ class BinanceOrderBookStream:
                         self.synchronized = False
                         self.synchronized_since = None
                         self.synchronized_since_monotonic = None
-                        self.last_error = self.last_error or "WebSocket stream ended after synchronization"
+                        self._record_error("WebSocket stream ended after synchronization", only_if_missing=True)
                         return
 
                     async with self._lock:
@@ -434,7 +442,7 @@ class BinanceOrderBookStream:
                             self.synchronized = False
                             self.synchronized_since = None
                             self.synchronized_since_monotonic = None
-                            self.last_error = "Order-book sequence gap; reconnecting for snapshot recovery"
+                            self._record_error("Order-book sequence gap; reconnecting for snapshot recovery")
                             logger.warning(
                                 "Order-book sequence gap detected"
                             )
@@ -760,6 +768,7 @@ class BinanceOrderBookStream:
             "last_recovery_at": self.last_recovery_at,
             "last_recovery_age_seconds": round(recovery_age, 3) if recovery_age is not None else None,
             "messages_received": self.messages_received,
+            "error_count": self.error_count,
             "invalid_depth_message_count": self.invalid_depth_message_count,
             "snapshot_buffer_overflow_count": self.snapshot_buffer_overflow_count,
             "snapshot_count": self.snapshot_count,
