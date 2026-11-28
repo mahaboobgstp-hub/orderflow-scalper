@@ -36,6 +36,29 @@ class PublicExchangeAdapter(ABC):
         self.connection_attempt_count+=1
         self.last_connection_attempt_at=now
 
+    @staticmethod
+    def _exchange_error_message(payload):
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("success") is False:
+            detail = payload.get("ret_msg") or payload.get("retMsg") or payload.get("message") or payload.get("error") or payload
+            return str(detail)
+        code = payload.get("code")
+        if isinstance(code, int) and not isinstance(code, bool) and code < 0:
+            detail = payload.get("msg") or payload.get("message")
+            return f"Exchange error {code}: {detail}" if detail else f"Exchange error {code}"
+        ret_code = payload.get("retCode")
+        if isinstance(ret_code, (int, float)) and not isinstance(ret_code, bool) and ret_code != 0:
+            detail = payload.get("retMsg") or payload.get("message")
+            return f"Exchange retCode {ret_code}: {detail}" if detail else f"Exchange retCode {ret_code}"
+        if str(payload.get("type", "")).lower() == "error":
+            detail = payload.get("message") or payload.get("msg") or payload.get("error")
+            return f"Exchange error: {detail}" if detail else "Exchange error frame"
+        error = payload.get("error")
+        if error not in (None, False, "", 0):
+            return f"Exchange error: {error}"
+        return None
+
     def _record_error(self, error):
         self.error_count += 1
         self.last_error = str(error)
@@ -75,8 +98,9 @@ class PublicExchangeAdapter(ABC):
                         if isinstance(msg,bytes): msg=msg.decode("utf-8",errors="replace")
                         try:
                             parsed=json.loads(msg)
-                            if isinstance(parsed,dict) and parsed.get("success") is False:
-                                self._record_error(parsed.get("ret_msg") or parsed.get("error") or parsed)
+                            exchange_error = self._exchange_error_message(parsed)
+                            if exchange_error:
+                                self._record_error(exchange_error)
                             if self.on_message: self.on_message(self.name,parsed)
                         except (json.JSONDecodeError,TypeError) as err:
                             self._record_error("Message parse error: "+str(err))
