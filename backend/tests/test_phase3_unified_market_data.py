@@ -76,6 +76,18 @@ class Tests(unittest.TestCase):
   self.assertEqual(status["feeds"],{})
   self.assertEqual(status["trade_streams"],{})
 
+ def test_malformed_public_trade_prefix_without_delimiter_is_rejected_for_scalar_and_array(self):
+  messages=(
+   {"topic":"publicTradeBTCUSDT","data":{"p":"101","v":"2","S":"Buy"}},
+   {"topic":"publicTradeBTCUSDT","data":[{"p":"101","v":"2","S":"Buy"}]},
+  )
+  for message in messages:
+   with self.subTest(data_type=type(message["data"]).__name__):
+    self.assertIsNone(self.e.process("bybit",message))
+  status=self.e.get_status()
+  self.assertEqual(status["invalid_symbol_message_count"],2)
+  self.assertEqual(status["feeds"],{})
+  self.assertEqual(status["trade_streams"],{})
  def test_single_symbol_default_fallback_is_retained(self):
   message={"e":"aggTrade","p":"101","q":"2","m":False}
   result=self.e.process("binance",message,default_symbol="BTCUSDT")
