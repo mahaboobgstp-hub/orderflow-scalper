@@ -12,6 +12,9 @@ class PublicExchangeAdapter(ABC):
     def __init__(self,name,enabled,url,symbol="BTCUSDT",on_message:Callable[[str,Any],None]|None=None):
         self.name=name; self.enabled=enabled; self.url=url; self.symbol=symbol.upper(); self.on_message=on_message
         self.connected=False; self.last_message_at=None; self.last_error=None; self.reconnect_count=0
+        self.connection_attempt_count=0; self.successful_connection_count=0
+        self.connected_at=None; self.last_connected_at=None; self.last_connection_attempt_at=None
+        self.last_disconnect_at=None; self.last_reconnect_at=None; self.last_connection_duration_seconds=None
         self._task=None; self._stop=asyncio.Event()
     @abstractmethod
     async def _subscribe(self,websocket): pass
@@ -28,12 +31,32 @@ class PublicExchangeAdapter(ABC):
             except asyncio.CancelledError: pass
             self._task=None
         self.connected=False
+    def _record_connection_attempt(self, now=None):
+        now=time.time() if now is None else now
+        self.connection_attempt_count+=1
+        self.last_connection_attempt_at=now
+
+    def _record_connection_success(self, now=None):
+        now=time.time() if now is None else now
+        self.connected=True; self.connected_at=now; self.last_connected_at=now
+        self.successful_connection_count+=1
+        if self.successful_connection_count>1: self.last_reconnect_at=now
+        self.last_error=None
+
+    def _record_connection_end(self, now=None):
+        now=time.time() if now is None else now
+        if self.connected_at is not None:
+            self.last_connection_duration_seconds=max(0.0,now-self.connected_at)
+            self.last_disconnect_at=now
+        self.connected=False; self.connected_at=None
+
     async def _run(self):
         delay=1
         while not self._stop.is_set():
+            self._record_connection_attempt()
             try:
                 async with websockets.connect(self.url,ping_interval=20,ping_timeout=20,close_timeout=5,max_size=2**20) as ws:
-                    self.connected=True; self.last_error=None; delay=1
+                    self._record_connection_success(); delay=1
                     logger.info("%s public websocket connected",self.name)
                     await self._on_connected(ws); await self._subscribe(ws)
                     async for msg in ws:
@@ -50,13 +73,20 @@ class PublicExchangeAdapter(ABC):
             except asyncio.CancelledError: raise
             except Exception as exc:
                 self.last_error=str(exc); logger.warning("%s websocket disconnected: %s",self.name,exc)
-            finally: self.connected=False
+            finally: self._record_connection_end()
             if not self._stop.is_set():
                 self.reconnect_count+=1; await asyncio.sleep(delay); delay=min(delay*2,30)
     async def status(self):
-        age=None if self.last_message_at is None else round(time.time()-self.last_message_at,3)
+        now=time.time()
+        age=None if self.last_message_at is None else round(now-self.last_message_at,3)
+        connected_duration=None if not self.connected or self.connected_at is None else round(max(0.0,now-self.connected_at),3)
         return {"exchange":self.name,"enabled":self.enabled,"connected":self.connected,"symbol":self.symbol,
-            "last_message_age_seconds":age,"reconnect_count":self.reconnect_count,"last_error":self.last_error,
+            "last_message_age_seconds":age,"connection_attempt_count":self.connection_attempt_count,
+            "successful_connection_count":self.successful_connection_count,"connected_duration_seconds":connected_duration,
+            "last_connection_duration_seconds":self.last_connection_duration_seconds,
+            "last_connection_attempt_at":self.last_connection_attempt_at,"last_connected_at":self.last_connected_at,
+            "last_disconnect_at":self.last_disconnect_at,"last_reconnect_at":self.last_reconnect_at,
+            "reconnect_count":self.reconnect_count,"last_error":self.last_error,
             "purpose":"public feed connection and normalized data callback"}
 
 class BinancePublicAdapter(PublicExchangeAdapter):
