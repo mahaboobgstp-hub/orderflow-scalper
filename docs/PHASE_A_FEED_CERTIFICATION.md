@@ -12,6 +12,8 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | Primary Binance stream cutoff normalization | Invalid, non-finite, boolean, or nonpositive values fall back to 3 seconds; positive values below 0.1 seconds clamp to 0.1 seconds. |
 | `last_event_age_seconds` | Age of the most recently received WebSocket depth message (diagnostic only). |
 | `last_book_update_age_seconds` | Age of the most recent validated REST snapshot or accepted live depth event that advanced the order-book sequence; snapshot time is the freshness baseline until a progressing event arrives. |
+
+**Clock contract:** Primary Binance freshness ages (`last_event_age_seconds`, `last_book_update_age_seconds`, `last_sync_age_seconds`, and `last_recovery_age_seconds`) and active/completed connection and synchronization durations use monotonic-clock anchors. The corresponding `*_at` timestamps remain wall-clock audit values. Clock corrections must not make a stale feed appear fresh or distort uptime.
 | `stale` | True when disconnected, unsynchronized, no validated snapshot/live freshness baseline exists, or baseline age exceeds the cutoff. |
 | `fresh` | Logical inverse of `stale`; freshness alone does not imply connectivity or book synchronization. |
 | `healthy` | True only while connected, synchronized, and the applied book is fresh. |
