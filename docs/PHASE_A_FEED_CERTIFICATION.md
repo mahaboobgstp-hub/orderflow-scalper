@@ -24,6 +24,7 @@ The read-only endpoint `GET /api/market-data/status` and consolidated `GET /api/
 | `reconnect_count` | Successful connections after the initial successful connection. |
 | `recovery_count` | Successful snapshot-bridge synchronization events on a later connection. This is not incremented for snapshots alone. |
 | `sequence_gap_count` | Sequence continuity failures detected after synchronization or when snapshot-bridge application fails. |
+| `error_count` | Cumulative primary-feed errors and recovery-triggering events (connection/setup exceptions, malformed frames, buffer overflow, snapshot-bridge failure, sequence gaps, invalid live depth updates, and unexpected stream termination). Successful reconnects/snapshots clear `last_error` but never reset this count. Explicit user stop is not counted. |
 | `invalid_depth_message_count` | Malformed depth frames or depth payloads rejected before book mutation (including empty bid-and-ask updates). |
 | `last_disconnect_reason` | Most recent observed connection end or recovery-triggering failure. |
 
@@ -32,7 +33,7 @@ The read-only order-book endpoint must refuse data when the stream is disconnect
 
 ## Frontend and API contract
 
-Feed Monitor labels connected time separately from synchronized time, shows freshness classification, attempts/successes, reconnect/recovery counts, REST snapshot count, sequence gaps, and last disconnect reason. Missing metrics from an older API payload use safe display fallbacks. The deterministic API contract test calls the consolidated observability route with stubs and asserts the Phase A fields and public-feed-only execution flag.
+Feed Monitor labels connected time separately from synchronized time, shows freshness classification, attempts/successes, reconnect/recovery counts, REST snapshot count, sequence gaps, cumulative primary-feed `error_count` alongside `last_error`, and last disconnect reason. Missing metrics from an older API payload use safe display fallbacks. The deterministic API contract test calls the consolidated observability route with stubs and asserts the Phase A fields and public-feed-only execution flag.
 
 ## Feed summary metric definitions
 
