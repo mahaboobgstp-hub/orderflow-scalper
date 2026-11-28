@@ -32,6 +32,8 @@ class Book:
     error: str | None = None
     exchange_ts: int | None = None
     received_ts: int | None = None
+    # Monotonic receive time is used for bridged Binance depth freshness.
+    received_monotonic: float | None = None
 
     def best_bid(self):
         return max(self.bids) if self.bids else None
@@ -175,6 +177,7 @@ class UnifiedMarketDataEngine:
         book.delta_raw_asks.clear()
         book.synchronized = False
         book.stale = True
+        book.received_monotonic = None
         book.error = reason
         key = self.key(exchange, book.symbol)
         self.errors[key] = reason
@@ -227,6 +230,8 @@ class UnifiedMarketDataEngine:
         book.error = None
         book.exchange_ts = None
         book.received_ts = int(time.time() * 1000)
+        # Preserve the bridge's source age instead of refreshing it at copy time.
+        book.received_monotonic = time.monotonic() - age_value
         self.record_message("binance")
         self.errors.pop(self.key("binance", symbol), None)
         return True
@@ -471,8 +476,14 @@ class UnifiedMarketDataEngine:
         book = self.books.get(self.key(exchange, symbol))
         if book is None:
             return None
-        age = None if book.received_ts is None else max(0, time.time() - book.received_ts / 1000)
-        stale = age is None or age > self.stale_after_seconds or not book.synchronized or book.error is not None
+        if book.received_monotonic is not None:
+            age = time.monotonic() - book.received_monotonic
+        else:
+            age = None if book.received_ts is None else max(0, time.time() - book.received_ts / 1000)
+        stale = (
+            age is None or not math.isfinite(age) or age < 0 or age > self.stale_after_seconds
+            or not book.synchronized or book.error is not None
+        )
         book.stale = stale
         bids = sorted(book.bids.items(), reverse=True)[:self.max_levels]
         asks = sorted(book.asks.items())[:self.max_levels]

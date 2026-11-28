@@ -200,6 +200,36 @@ class Tests(unittest.TestCase):
         self.assertFalse(self.e.apply_binance_bridge_book(bad_levels))
         self.assertFalse(self.e.get_book("binance", "BTCUSDT")["synchronized"])
 
+    def test_binance_bridge_monotonic_age_rejects_after_wall_clock_rollback(self):
+        payload = {
+            "symbol": "BTCUSDT", "last_update_id": 120, "age_seconds": 0.2,
+            "synchronized": True, "stale": False,
+            "bids": [[100.0, 2.0]], "asks": [[101.0, 3.0]],
+        }
+        with patch("app.market_data.unified_engine.time.time", return_value=1000.0), \
+             patch("app.market_data.unified_engine.time.monotonic", return_value=500.0):
+            self.assertTrue(self.e.apply_binance_bridge_book(payload))
+        with patch("app.market_data.unified_engine.time.time", return_value=1.0), \
+             patch("app.market_data.unified_engine.time.monotonic", return_value=503.0):
+            book = self.e.get_book("binance", "BTCUSDT")
+        self.assertTrue(book["stale"])
+        self.assertAlmostEqual(book["age_seconds"], 3.2, places=6)
+
+    def test_binance_bridge_monotonic_freshness_boundary_is_deterministic(self):
+        payload = {
+            "symbol": "BTCUSDT", "last_update_id": 120, "age_seconds": 3.0,
+            "synchronized": True, "stale": False,
+            "bids": [[100.0, 2.0]], "asks": [[101.0, 3.0]],
+        }
+        with patch("app.market_data.unified_engine.time.monotonic", return_value=100.0):
+            self.assertTrue(self.e.apply_binance_bridge_book(payload))
+            book = self.e.get_book("binance", "BTCUSDT")
+        self.assertFalse(book["stale"])
+        self.assertEqual(book["age_seconds"], 3.0)
+        with patch("app.market_data.unified_engine.time.monotonic", return_value=100.0001):
+            book = self.e.get_book("binance", "BTCUSDT")
+        self.assertTrue(book["stale"])
+
     def test_binance_raw_diff_is_never_exposed_as_synchronized_book(self):
         result = self.e.process("binance", {"e": "depthUpdate", "s": "BTCUSDT", "U": 1, "u": 2, "b": [["10", "1"]], "a": [["11", "2"]]})
         book = self.e.get_book("binance", "BTCUSDT")
