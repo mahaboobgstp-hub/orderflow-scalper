@@ -139,6 +139,15 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertFalse(self.stream.synchronized)
         self.assertIsNotNone(self.stream.last_update_id)
 
+    def test_new_connection_clears_previous_synchronization_duration_anchor(self):
+        self.stream.synchronized = True
+        self.stream.synchronized_since = 50.0
+        self.stream.synchronized_since_monotonic = 5.0
+        self.stream._record_connection_success(now=100.0, monotonic_now=10.0)
+        self.assertFalse(self.stream.synchronized)
+        self.assertIsNone(self.stream.synchronized_since)
+        self.assertIsNone(self.stream.synchronized_since_monotonic)
+
     def test_primary_feed_freshness_and_uptime_use_monotonic_clock(self):
         with patch("app.market_data.backend_stream.time.time", return_value=1000.0), patch(
             "app.market_data.backend_stream.time.monotonic", return_value=10.0
@@ -188,6 +197,8 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.stream._record_disconnect("network_closed", now=112.25, monotonic_now=32.25)
         self.assertFalse(self.stream.connected)
         self.assertIsNone(self.stream.connected_at)
+        self.assertIsNone(self.stream.connected_monotonic)
+        self.assertIsNone(self.stream.synchronized_since_monotonic)
         self.assertEqual(self.stream.last_connection_duration_seconds, 12.25)
 
         # A second disconnect without a live session must not overwrite the
@@ -212,6 +223,7 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertFalse(self.stream.connected)
         self.assertFalse(self.stream.synchronized)
         self.assertIsNone(self.stream.synchronized_since)
+        self.assertIsNone(self.stream.synchronized_since_monotonic)
         self.assertEqual(self.stream.last_disconnect_reason, "sequence_gap")
         self.assertEqual(self.stream.last_disconnect_at, 123.0)
         self.assertEqual(self.stream.last_connection_duration_seconds, 6.5)
