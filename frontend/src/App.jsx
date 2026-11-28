@@ -277,6 +277,7 @@ export default function App() {
         })}
       </div>
       <div className="panel"><div className="panel-title"><h2>Per-Symbol Message Freshness</h2></div>
+        <div className="list-row"><b>Rejected symbol identity messages</b><span className={unified.invalid_symbol_message_count?"negative":""}>{unified.invalid_symbol_message_count??0}</span></div>
         {Object.keys(feeds).length===0?<div className="empty-state">No per-symbol message activity has been recorded.</div>:Object.entries(feeds).map(([key,feed])=>{
           const state=getUnifiedFeedMessageState(feed,unified.stale_after_seconds);
           const stateClass=state==="FRESH"?"paper":state==="STALE"?"bad":"";
