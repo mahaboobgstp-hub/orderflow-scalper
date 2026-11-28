@@ -133,6 +133,25 @@ class BinanceOrderBookSynchronizationTests(unittest.TestCase):
         self.assertFalse(self.stream.synchronized)
         self.assertIsNotNone(self.stream.last_update_id)
 
+    def test_primary_connection_session_duration_is_retained_after_disconnect(self):
+        self.stream._record_connection_success(now=100.0)
+        self.stream._record_disconnect("network_closed", now=112.25)
+        self.assertFalse(self.stream.connected)
+        self.assertIsNone(self.stream.connected_at)
+        self.assertEqual(self.stream.last_connection_duration_seconds, 12.25)
+
+        # A second disconnect without a live session must not overwrite the
+        # completed session duration.
+        self.stream._record_disconnect("stop_requested", now=130.0)
+        self.assertEqual(self.stream.last_connection_duration_seconds, 12.25)
+
+        self.stream._record_connection_success(now=200.0)
+        self.stream._record_disconnect("reconnect_closed", now=205.0)
+        self.assertEqual(self.stream.last_connection_duration_seconds, 5.0)
+        status = asyncio.run(self.stream.get_status())
+        self.assertIsNone(status["connected_duration_seconds"])
+        self.assertEqual(status["last_connection_duration_seconds"], 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()
