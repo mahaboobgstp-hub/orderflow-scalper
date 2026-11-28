@@ -11,7 +11,10 @@ logger=logging.getLogger(__name__)
 class PublicExchangeAdapter(ABC):
     def __init__(self,name,enabled,url,symbol="BTCUSDT",on_message:Callable[[str,Any],None]|None=None):
         self.name=name; self.enabled=enabled; self.url=url; self.symbol=symbol.upper(); self.on_message=on_message
-        self.connected=False; self.last_message_at=None; self.last_error=None; self.reconnect_count=0
+        self.connected=False; self.last_message_at=None; self.last_message_monotonic=None; self.last_error=None; self.error_count=0; self.reconnect_count=0
+        self.connection_attempt_count=0; self.successful_connection_count=0
+        self.connected_at=None; self.connected_monotonic=None; self.last_connected_at=None; self.last_connection_attempt_at=None
+        self.last_disconnect_at=None; self.last_reconnect_at=None; self.last_connection_duration_seconds=None
         self._task=None; self._stop=asyncio.Event()
     @abstractmethod
     async def _subscribe(self,websocket): pass
@@ -28,35 +31,108 @@ class PublicExchangeAdapter(ABC):
             except asyncio.CancelledError: pass
             self._task=None
         self.connected=False
+    def _record_connection_attempt(self, now=None):
+        now=time.time() if now is None else now
+        self.connection_attempt_count+=1
+        self.last_connection_attempt_at=now
+
+    @staticmethod
+    def _exchange_error_message(payload):
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("success") is False:
+            detail = payload.get("ret_msg") or payload.get("retMsg") or payload.get("message") or payload.get("error") or payload
+            return str(detail)
+        code = payload.get("code")
+        if isinstance(code, int) and not isinstance(code, bool) and code < 0:
+            detail = payload.get("msg") or payload.get("message")
+            return f"Exchange error {code}: {detail}" if detail else f"Exchange error {code}"
+        ret_code = payload.get("retCode")
+        if isinstance(ret_code, (int, float)) and not isinstance(ret_code, bool) and ret_code != 0:
+            detail = payload.get("retMsg") or payload.get("message")
+            return f"Exchange retCode {ret_code}: {detail}" if detail else f"Exchange retCode {ret_code}"
+        if str(payload.get("type", "")).lower() == "error":
+            detail = payload.get("message") or payload.get("msg") or payload.get("error")
+            return f"Exchange error: {detail}" if detail else "Exchange error frame"
+        error = payload.get("error")
+        if error not in (None, False, "", 0):
+            return f"Exchange error: {error}"
+        return None
+
+    def _record_error(self, error):
+        self.error_count += 1
+        self.last_error = str(error)
+
+    def _record_connection_success(self, now=None, monotonic_now=None):
+        now=time.time() if now is None else now
+        monotonic_now=time.monotonic() if monotonic_now is None else monotonic_now
+        self.connected=True; self.connected_at=now; self.connected_monotonic=monotonic_now; self.last_connected_at=now
+        self.successful_connection_count+=1
+        if self.successful_connection_count>1: self.last_reconnect_at=now
+        self.last_error=None
+
+    def _record_connection_end(self, now=None, monotonic_now=None):
+        now=time.time() if now is None else now
+        monotonic_now=time.monotonic() if monotonic_now is None else monotonic_now
+        if self.connected_monotonic is not None:
+            self.last_connection_duration_seconds=max(0.0,monotonic_now-self.connected_monotonic)
+            self.last_disconnect_at=now
+        elif self.connected_at is not None:
+            # Compatibility fallback for legacy states without monotonic anchors.
+            self.last_connection_duration_seconds=max(0.0,now-self.connected_at)
+            self.last_disconnect_at=now
+        self.connected=False; self.connected_at=None; self.connected_monotonic=None
+
     async def _run(self):
         delay=1
         while not self._stop.is_set():
+            self._record_connection_attempt()
             try:
                 async with websockets.connect(self.url,ping_interval=20,ping_timeout=20,close_timeout=5,max_size=2**20) as ws:
-                    self.connected=True; self.last_error=None; delay=1
+                    self._record_connection_success(); delay=1
                     logger.info("%s public websocket connected",self.name)
                     await self._on_connected(ws); await self._subscribe(ws)
                     async for msg in ws:
                         if self._stop.is_set(): break
-                        self.last_message_at=time.time(); await self._heartbeat(ws)
+                        self.last_message_at=time.time(); self.last_message_monotonic=time.monotonic(); await self._heartbeat(ws)
                         if isinstance(msg,bytes): msg=msg.decode("utf-8",errors="replace")
                         try:
                             parsed=json.loads(msg)
-                            if isinstance(parsed,dict) and parsed.get("success") is False:
-                                self.last_error=str(parsed.get("ret_msg") or parsed.get("error") or parsed)
+                            exchange_error = self._exchange_error_message(parsed)
+                            if exchange_error:
+                                self._record_error(exchange_error)
+                                continue
                             if self.on_message: self.on_message(self.name,parsed)
                         except (json.JSONDecodeError,TypeError) as err:
-                            self.last_error="Message parse error: "+str(err)
+                            self._record_error("Message parse error: "+str(err))
+                    # Normal WebSocket iterator completion is a close signal too.
+                    # Unless stop was requested, count it before reconnecting so
+                    # graceful remote closes are visible in cumulative diagnostics.
+                    if not self._stop.is_set():
+                        self._record_error("WebSocket stream ended unexpectedly")
             except asyncio.CancelledError: raise
             except Exception as exc:
-                self.last_error=str(exc); logger.warning("%s websocket disconnected: %s",self.name,exc)
-            finally: self.connected=False
+                self._record_error(exc); logger.warning("%s websocket disconnected: %s",self.name,exc)
+            finally: self._record_connection_end()
             if not self._stop.is_set():
                 self.reconnect_count+=1; await asyncio.sleep(delay); delay=min(delay*2,30)
     async def status(self):
-        age=None if self.last_message_at is None else round(time.time()-self.last_message_at,3)
+        now=time.time(); monotonic_now=time.monotonic()
+        age=None if self.last_message_monotonic is None else round(max(0.0,monotonic_now-self.last_message_monotonic),3)
+        connected_duration=None
+        if self.connected and self.connected_monotonic is not None:
+            connected_duration=max(0.0,monotonic_now-self.connected_monotonic)
+        elif self.connected and self.connected_at is not None:
+            # Compatibility fallback for legacy states without monotonic anchors.
+            connected_duration=max(0.0,now-self.connected_at)
+        connected_duration=round(connected_duration,3) if connected_duration is not None else None
         return {"exchange":self.name,"enabled":self.enabled,"connected":self.connected,"symbol":self.symbol,
-            "last_message_age_seconds":age,"reconnect_count":self.reconnect_count,"last_error":self.last_error,
+            "last_message_age_seconds":age,"connection_attempt_count":self.connection_attempt_count,
+            "successful_connection_count":self.successful_connection_count,"connected_duration_seconds":connected_duration,
+            "last_connection_duration_seconds":self.last_connection_duration_seconds,
+            "last_connection_attempt_at":self.last_connection_attempt_at,"last_connected_at":self.last_connected_at,
+            "last_disconnect_at":self.last_disconnect_at,"last_reconnect_at":self.last_reconnect_at,
+            "reconnect_count":self.reconnect_count,"error_count":self.error_count,"last_error":self.last_error,
             "purpose":"public feed connection and normalized data callback"}
 
 class BinancePublicAdapter(PublicExchangeAdapter):

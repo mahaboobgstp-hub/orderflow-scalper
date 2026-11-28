@@ -31,6 +31,7 @@ from app.services.trade_management import TradeManagementEngine, TradeManagement
 from app.services.nine_layer_decision_engine import NineLayerDecisionEngine
 from app.services.controlled_paper_session import ControlledPaperSession
 import logging
+import math
 import os
 import time
 
@@ -200,15 +201,12 @@ async def health():
 
 @app.get("/api/database/status")
 async def database_status():
-    # Diagnostic endpoint performs a real DB check and heartbeat write so that
-    # connectivity status is based on an actual write, not only a successful read.
+    # GET diagnostics must remain read-only; check_connection performs a SELECT.
     await database.check_connection()
-    heartbeat_written = False
-    if database.connected:
-        heartbeat_written = await database.write_heartbeat("diagnostic", {"trigger": "database_status_endpoint"})
     result = await database.status(refresh=False)
-    result["heartbeat_write_verified"] = heartbeat_written
-    result["diagnostic_mode"] = "read_and_write"
+    # Preserve the response key for compatibility, but null means no write was attempted.
+    result["heartbeat_write_verified"] = None
+    result["diagnostic_mode"] = "read_only"
     return result
 @app.get("/api/monitoring/diagnostics")
 async def monitoring_diagnostics():
@@ -225,20 +223,169 @@ async def get_order_book():
     book=await app.state.market_stream.get_order_book()
     if book is None: raise HTTPException(status_code=503,detail="Order book is not synchronized yet.")
     return {"symbol":"BTCUSDT","order_book":book}
+def _normalize_feed_stale_after(raw_stale_after):
+    """Normalize diagnostic freshness cutoffs to the engine's safe policy."""
+    try:
+        if isinstance(raw_stale_after, bool):
+            raise ValueError("boolean stale cutoff is invalid")
+        stale_after = float(raw_stale_after)
+    except (TypeError, ValueError, OverflowError):
+        stale_after = 3.0
+    if not math.isfinite(stale_after) or stale_after <= 0:
+        stale_after = 3.0
+    return max(0.1, stale_after)
+
+
+def _is_valid_top_of_book(book):
+    """Validate that a normalized book exposes a finite, positive, non-crossed top of book."""
+    if not isinstance(book, dict):
+        return False
+    raw_bid = book.get("best_bid")
+    raw_ask = book.get("best_ask")
+    if (
+        raw_bid is None or raw_ask is None
+        or isinstance(raw_bid, bool) or isinstance(raw_ask, bool)
+        or (isinstance(raw_bid, str) and not raw_bid.strip())
+        or (isinstance(raw_ask, str) and not raw_ask.strip())
+    ):
+        return False
+    try:
+        bid = float(raw_bid)
+        ask = float(raw_ask)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(bid) and math.isfinite(ask) and bid > 0 and ask > 0 and bid < ask
+
+
+def _is_fresh_synchronized_book(book, stale_after):
+    """Require sync, valid age, and a valid two-sided top of book before counting health."""
+    if not isinstance(book, dict):
+        return False
+    if (
+        book.get("synchronized") is not True
+        or book.get("stale") is not False
+        or book.get("integrity_error")
+        or not _is_valid_top_of_book(book)
+    ):
+        return False
+    raw_age = book.get("age_seconds")
+    if raw_age is None or isinstance(raw_age, bool):
+        return False
+    try:
+        age = float(raw_age)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(age) and 0 <= age <= stale_after
+
+
+def _feed_diagnostics_error_count(exchange_connections):
+    """Count adapter records with explicit errors or malformed status flags.
+
+    Missing enabled is allowed for legacy adapters, but connected must be a
+    literal bool and an explicitly supplied enabled must also be a literal bool.
+    Count each adapter once even if multiple problems are present. Malformed
+    containers count as one diagnostics-schema error.
+    """
+    if not isinstance(exchange_connections, dict):
+        return 1
+    adapters = exchange_connections.get("exchanges", [])
+    if not isinstance(adapters, list):
+        return 1
+
+    errors = 0
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            errors += 1
+            continue
+        invalid_status = type(adapter.get("connected")) is not bool
+        if "enabled" in adapter and type(adapter["enabled"]) is not bool:
+            invalid_status = True
+        if invalid_status or bool(adapter.get("last_error")):
+            errors += 1
+    return errors
+
+
+def _feed_health_counts(exchange_connections, unified_market_data):
+    """Separate message freshness from a fresh, integrity-verified order book.
+
+    Malformed adapter records are ignored. Connection state must be the boolean
+    True to match the frontend freshness classifier; truthy strings/integers
+    are not accepted as proof of connectivity.
+    """
+    exchange_connections = exchange_connections if isinstance(exchange_connections, dict) else {}
+    unified_market_data = unified_market_data if isinstance(unified_market_data, dict) else {}
+    stale_after = _normalize_feed_stale_after(
+        unified_market_data.get("stale_after_seconds", 3.0)
+    )
+    books = unified_market_data.get("books", {})
+    if not isinstance(books, dict):
+        books = {}
+    adapters = exchange_connections.get("exchanges", [])
+    if not isinstance(adapters, list):
+        adapters = []
+    fresh_message_feed_count = 0
+    healthy_feed_count = 0
+
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        # Preserve legacy adapters that omit enabled, but reject malformed
+        # explicit values instead of treating truthy strings/numbers as enabled.
+        enabled = adapter.get("enabled", True)
+        if enabled is not True or adapter.get("connected") is not True:
+            continue
+        age = adapter.get("last_message_age_seconds")
+        if age is None or isinstance(age, bool):
+            continue
+        try:
+            age = float(age)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(age) or age < 0 or age > stale_after:
+            continue
+
+        fresh_message_feed_count += 1
+        exchange = str(adapter.get("exchange", "")).lower()
+        symbol = str(adapter.get("symbol", "")).upper()
+        book = books.get(f"{exchange}:{symbol}")
+        if _is_fresh_synchronized_book(book, stale_after):
+            healthy_feed_count += 1
+
+    return {
+        "fresh_message_feed_count": fresh_message_feed_count,
+        "healthy_feed_count": healthy_feed_count,
+    }
+
+
 @app.get("/api/market-data/observability")
 async def market_data_observability():
     """Read-only consolidated feed diagnostics for the monitoring UI."""
-    unified=app.state.unified_market_data.get_status()
-    primary=await app.state.market_stream.get_status()
-    exchanges=await app.state.exchange_manager.status()
+    unified_raw=app.state.unified_market_data.get_status()
+    unified=unified_raw if isinstance(unified_raw,dict) else {}
+    primary_raw=await app.state.market_stream.get_status()
+    primary=primary_raw if isinstance(primary_raw,dict) else {}
+    exchanges_raw=await app.state.exchange_manager.status()
+    exchanges=exchanges_raw if isinstance(exchanges_raw,dict) else {}
+    raw_adapters=exchanges.get("exchanges",[])
+    adapters=raw_adapters if isinstance(raw_adapters,list) else []
+    feed_counts = _feed_health_counts(exchanges, unified)
+    books = unified.get("books", {})
+    if not isinstance(books, dict):
+        books = {}
+    stale_after = _normalize_feed_stale_after(unified.get("stale_after_seconds", 3.0))
+    synchronized_book_count = sum(
+        1 for book in books.values()
+        if _is_fresh_synchronized_book(book, stale_after)
+    )
+    feed_errors=_feed_diagnostics_error_count(exchanges_raw)
     return {"timestamp":time.time(),"mode":"PUBLIC_MARKET_DATA_PAPER_ONLY",
         "live_execution_enabled":False,"primary_binance_demo_stream":primary,
         "unified_market_data":unified,"exchange_connections":exchanges,
-        "summary":{"exchange_adapter_count":len(exchanges.get("exchanges",[])),
-          "unified_book_count":len(unified.get("books",{})),
-          "synchronized_book_count":sum(1 for b in unified.get("books",{}).values() if b.get("synchronized") and not b.get("stale")),
-          "healthy_feed_count":sum(1 for e in exchanges.get("exchanges",[]) if e.get("connected") and e.get("last_message_age_seconds") is not None and e.get("last_message_age_seconds")<=unified.get("stale_after_seconds",3)),
-          "feed_errors":sum(1 for e in exchanges.get("exchanges",[]) if e.get("last_error")),
+        "summary":{"exchange_adapter_count":len(adapters),
+          "unified_book_count":len(books),
+          "synchronized_book_count":synchronized_book_count,
+          **feed_counts,
+          "feed_errors":feed_errors,
           "safety":"PUBLIC_FEEDS_ONLY; REAL_EXCHANGE_ORDERS_DISABLED"}}
 
 @app.get("/api/market-data/unified/status")

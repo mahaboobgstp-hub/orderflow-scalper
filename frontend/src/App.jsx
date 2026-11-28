@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { getMessageFeedState, getUnifiedFeedMessageState, getPrimaryBookState, getPrimaryBookDisplayLabel, getUnifiedBookState, normalizeFeedMonitorPayload, displayDiagnosticCounter } from "./feedFreshness.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "⌂" },
@@ -228,17 +229,14 @@ export default function App() {
     </>;
   }
   function renderMarketData() {
-    const payload=marketObs||{};
-    const summary=payload.summary||{};
-    const unified=payload.unified_market_data||{};
-    const adapterList=payload.exchange_connections?.exchanges||[];
-    const books=unified.books||{};
-    const primary=payload.primary_binance_demo_stream||{};
-    const primaryStale=primary.stale??(primary.last_event_age_seconds==null||primary.last_event_age_seconds>(primary.stale_after_seconds??3));
-    const healthy=(x)=>x.connected && x.last_message_age_seconds!=null && x.last_message_age_seconds<= (unified.stale_after_seconds||3);
+    const {payload,summary,unified,adapterList,books,exchangeStats,feeds,primary}=normalizeFeedMonitorPayload(marketObs);
+    const primaryBookState=getPrimaryBookState(primary);
+    const primaryBookFresh=primaryBookState==="HEALTHY"||primaryBookState==="FRESH (LEGACY)";
+    const messageState=(x)=>getMessageFeedState(x,unified.stale_after_seconds);
     return <>{header("Live Market & Feed Monitor","Read-only diagnostics: feed connectivity, freshness, book sync and integrity")}
       <div className="stats-grid">
-        {stat("Connected Feeds",summary.healthy_feed_count??0,"Fresh messages within stale threshold")}
+        {stat("Fresh Message Feeds",summary.fresh_message_feed_count??summary.healthy_feed_count??0,"Enabled/connected feeds with recent messages")}
+        {stat("Healthy Feeds",summary.healthy_feed_count??0,"Fresh synchronized book per feed")}
         {stat("Synchronized Books",summary.synchronized_book_count??0,"Fresh synchronized books")}
         {stat("Unified Books",summary.unified_book_count??0,"Book entries currently tracked")}
         {stat("Feed Errors",summary.feed_errors??0,"Adapters reporting errors")}
@@ -246,37 +244,65 @@ export default function App() {
       <div className="panel"><div className="panel-title"><h2>Safety & Runtime Boundary</h2><button className="btn small secondary" onClick={refreshAll}>Refresh</button></div>
         <div className="list-row"><b>Market data mode</b><span>{payload.mode||"Unknown"}</span></div>
         <div className="list-row"><b>Real exchange execution</b><span className="negative">Disabled</span></div>
-        <div className="list-row"><b>Primary Binance demo book</b><span>{primary.synchronized&&!primaryStale?"SYNCHRONIZED & FRESH":primary.synchronized&&primaryStale?"SYNCHRONIZED / STALE":primary.connected?"CONNECTED / WAITING FOR SYNC":"NOT CONNECTED"}</span></div>
+        <div className="list-row"><b>Primary Binance demo book</b><span>{getPrimaryBookDisplayLabel(primaryBookState)}</span></div>
         <div className="list-row"><b>Binance demo last update ID</b><span>{value(payload.primary_binance_demo_stream?.last_update_id)}</span></div>
-        <div className="list-row"><b>Primary stream freshness</b><span className={"status-chip "+(primaryStale?"bad":"good")}>{primaryStale?"STALE":"FRESH"} · {primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s age"}</span></div>
+        <div className="list-row"><b>Primary book freshness</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primaryBookState}</span></div>
+        <div className="list-row"><b>Last depth message age</b><span>{primary.last_event_age_seconds==null?"--":primary.last_event_age_seconds+"s"}</span></div>
+        <div className="list-row"><b>Applied book update age</b><span className={"status-chip "+(primaryBookFresh?"good":"bad")}>{primary.last_book_update_age_seconds==null?"--":primary.last_book_update_age_seconds+"s"}</span></div>
         <div className="list-row"><b>Connected for</b><span>{primary.connected_duration_seconds==null?"--":primary.connected_duration_seconds+"s"}</span></div>
+        <div className="list-row"><b>Last connection session</b><span>{typeof primary.last_connection_duration_seconds==="number"&&Number.isFinite(primary.last_connection_duration_seconds)&&primary.last_connection_duration_seconds>=0?primary.last_connection_duration_seconds+"s":"--"}</span></div>
         <div className="list-row"><b>Synchronized for</b><span>{primary.synchronized_duration_seconds==null?"--":primary.synchronized_duration_seconds+"s"}</span></div>
-        <div className="list-row"><b>Connection attempts / successes</b><span>{primary.connection_attempt_count??0} / {primary.successful_connection_count??0}</span></div>
-        <div className="list-row"><b>Reconnects / recoveries</b><span>{primary.reconnect_count??0} / {primary.recovery_count??0}</span></div>
+        <div className="list-row"><b>Connection attempts / successes</b><span>{displayDiagnosticCounter(primary,"connection_attempt_count")} / {displayDiagnosticCounter(primary,"successful_connection_count")}</span></div>
+        <div className="list-row"><b>Reconnects / recoveries</b><span>{displayDiagnosticCounter(primary,"reconnect_count")} / {displayDiagnosticCounter(primary,"recovery_count")}</span></div>
         <div className="list-row"><b>Last recovery</b><span>{primary.last_recovery_age_seconds==null?"Never":primary.last_recovery_age_seconds+"s ago"}</span></div>
-        <div className="list-row"><b>REST snapshots loaded</b><span>{primary.snapshot_count??0}</span></div>
+        <div className="list-row"><b>REST snapshots loaded</b><span>{displayDiagnosticCounter(primary,"snapshot_count")}</span></div>
+        <div className="list-row"><b>Snapshot depth cap</b><span>{primary.snapshot_limit??"--"} levels/side</span></div>
         <div className="list-row"><b>Last disconnect reason</b><span>{primary.last_disconnect_reason||"None recorded"}</span></div>
-        <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{payload.primary_binance_demo_stream?.sequence_gap_count??0}</span></div>
-        <div className="list-row"><b>Depth events received</b><span>{payload.primary_binance_demo_stream?.messages_received??0}</span></div>
+        <div className="list-row"><b>Sequence gaps</b><span className={payload.primary_binance_demo_stream?.sequence_gap_count?"negative":""}>{displayDiagnosticCounter(primary,"sequence_gap_count")}</span></div>
+        <div className="list-row"><b>Depth events received</b><span>{displayDiagnosticCounter(primary,"messages_received")}</span></div>
+        <div className="list-row"><b>Rejected depth messages</b><span>{displayDiagnosticCounter(primary,"invalid_depth_message_count")}</span></div>
+        <div className="list-row"><b>Depth buffer overflow recoveries</b><span className={primary.snapshot_buffer_overflow_count?"negative":""}>{displayDiagnosticCounter(primary,"snapshot_buffer_overflow_count")}</span></div>
+        <div className="list-row"><b>Primary stream errors</b><span className={primary.error_count>0?"negative":""}>{displayDiagnosticCounter(primary,"error_count")}</span></div>
         <div className="list-row"><b>Primary stream error</b><span>{payload.primary_binance_demo_stream?.last_error||"None reported"}</span></div>
         <div className="list-row"><b>Safety</b><span>{payload.summary?.safety||"PUBLIC FEEDS ONLY"}</span></div>
       </div>
       <div className="panel"><div className="panel-title"><h2>Exchange Feed Connections</h2></div>
-        {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=><div className="event-row full" key={x.exchange}>
-          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+(healthy(x)?"paper":"")}>{x.connected?"CONNECTED":"DISCONNECTED"}</span>
-          <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??0}</small>
-          <small>Error: {x.last_error||"None"}</small>
-        </div>)}
+        {adapterList.length===0?<div className="empty-state">No exchange feed diagnostics available. Connect to backend and refresh.</div>:adapterList.map(x=>{
+          const state=messageState(x);
+          const stateClass=state==="FRESH"?"paper":["STALE","DISCONNECTED"].includes(state)?"bad":"";
+          const connectedFor=typeof x.connected_duration_seconds==="number"&&Number.isFinite(x.connected_duration_seconds)&&x.connected_duration_seconds>=0?x.connected_duration_seconds+"s":"--";
+          const lastSession=typeof x.last_connection_duration_seconds==="number"&&Number.isFinite(x.last_connection_duration_seconds)&&x.last_connection_duration_seconds>=0?x.last_connection_duration_seconds+"s":"--";
+          return <div className="event-row full" key={x.exchange}>
+          <b>{String(x.exchange||"Exchange").toUpperCase()}</b><span className={"status-chip "+stateClass}>{state}</span>
+          <small>Enabled {String(x.enabled)} · Symbol {x.symbol} · Message age {x.last_message_age_seconds==null?"--":x.last_message_age_seconds+"s"} · Reconnects {x.reconnect_count??"--"}</small>
+          <small>Connection attempts / successes {x.connection_attempt_count??"--"} / {x.successful_connection_count??"--"} · Current uptime {connectedFor} · Last session {lastSession}</small>
+          <small>Errors {displayDiagnosticCounter(x,"error_count")} · Last error: {x.last_error||"None"}</small>
+        </div>;
+        })}
       </div>
       <div className="panel"><div className="panel-title"><h2>Unified Order Books</h2></div>
-        {Object.keys(books).length===0?<div className="empty-state">No normalized books received yet. This is a live status, not simulated sample data.</div>:Object.entries(books).map(([key,b])=><div className="decision-card" key={key}>
-          <div className="decision-head"><b>{key}</b><span className={"status-chip "+(b.synchronized&&!b.stale?"paper":"")}>{b.synchronized&&!b.stale?"SYNCED & FRESH":b.stale?"STALE":"UNSYNCHRONIZED"}</span></div>
+        {Object.keys(books).length===0?<div className="empty-state">No normalized books received yet. This is a live status, not simulated sample data.</div>:Object.entries(books).map(([key,b])=>{
+          const bookState=getUnifiedBookState(b,unified.stale_after_seconds);
+          const statusLabel=bookState==="HEALTHY"?"SYNCED & FRESH":bookState;
+          const statusClass="status-chip "+(bookState==="HEALTHY"?"paper":bookState==="STALE"||bookState==="UNHEALTHY"?"bad":"");
+          return <div className="decision-card" key={key}>
+          <div className="decision-head"><b>{key}</b><span className={statusClass}>{statusLabel}</span></div>
           <div className="decision-metrics"><span>Sequence <b>{value(b.sequence)}</b></span><span>Age <b>{b.age_seconds==null?"--":b.age_seconds+"s"}</b></span><span>Spread <b>{b.spread==null?"--":b.spread}</b></span><span>Top-10 Imbalance <b>{b.imbalance_top10==null?"--":(b.imbalance_top10*100).toFixed(1)+"%"}</b></span></div>
           <div className="decision-metrics"><span>Best Bid <b>{value(b.best_bid)}</b></span><span>Best Ask <b>{value(b.best_ask)}</b></span><span>Bid Depth <b>{b.bid_depth_top10??"--"}</b></span><span>Ask Depth <b>{b.ask_depth_top10??"--"}</b></span></div>
           <div className="decision-outcome">Integrity: {b.integrity_error||"No error reported"}</div>
-        </div>)}
+        </div>;
+        })}
       </div>
-      <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(unified.exchanges||{}).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
+      <div className="panel"><div className="panel-title"><h2>Per-Symbol Message Freshness</h2></div>
+        <div className="list-row"><b>Rejected symbol identity messages</b><span className={unified.invalid_symbol_message_count?"negative":""}>{unified.invalid_symbol_message_count??0}</span></div>
+        {Object.keys(feeds).length===0?<div className="empty-state">No per-symbol message activity has been recorded.</div>:Object.entries(feeds).map(([key,feed])=>{
+          const state=getUnifiedFeedMessageState(feed,unified.stale_after_seconds);
+          const stateClass=state==="FRESH"?"paper":state==="STALE"?"bad":"";
+          return <div className="list-row" key={key}><div><b>{key}</b><small>Messages {feed.messages_received??0} · Last message {feed.last_message_age_seconds==null?"--":feed.last_message_age_seconds+"s ago"}</small></div><span className={"status-chip "+stateClass}>{state}</span></div>;
+        })}
+        <p className="subtle">Message activity is tracked separately for each exchange-symbol pair; trade messages do not refresh book freshness.</p>
+      </div>
+      <div className="panel"><h2>Exchange Message Activity</h2>{Object.entries(exchangeStats).length===0?<div className="empty-state">No unified exchange messages recorded.</div>:Object.entries(unified.exchanges).map(([name,stats])=><div className="list-row" key={name}><b>{name.toUpperCase()}</b><span>Messages {stats.messages_received} · Last seen {stats.last_message_age_seconds==null?"--":stats.last_message_age_seconds+"s ago"}</span></div>)}
         <p className="subtle">This page refreshes with the existing polling cadence. Counts and timestamps are taken from backend diagnostics.</p>
       </div>
     </>;
