@@ -2,7 +2,8 @@ import asyncio
 import json
 import time
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
 
 from app.market_data.backend_stream import BinanceOrderBookStream, REST_BASE_URL, WEBSOCKET_BASE_URL
 from app.market_data.unified_engine import UnifiedMarketDataEngine
@@ -377,6 +378,63 @@ class BinanceInitialBridgeReconnectTests(unittest.IsolatedAsyncioTestCase):
         # For Futures, U=L+1 does not satisfy the documented U<=L<=u bridge.
         await self._run_two_connection_recovery(self._event(101, 101, pu=100))
 
+
+
+def test_lifespan_does_not_start_binance_depth_when_public_feed_disabled(monkeypatch):
+    async def run():
+        fake_database = SimpleNamespace(
+            start=AsyncMock(),
+            close=AsyncMock(),
+            write_heartbeat=AsyncMock(),
+            connected=False,
+        )
+        fake_repository = SimpleNamespace(
+            engine_state=AsyncMock(),
+            system_log=AsyncMock(),
+        )
+        fake_stream = MagicMock()
+        fake_stream.start = AsyncMock()
+        fake_stream.stop = AsyncMock()
+        fake_stream.get_status = AsyncMock(return_value={"last_error": "disabled"})
+        fake_stream.get_order_book = AsyncMock(return_value=None)
+        fake_manager = MagicMock()
+        fake_manager.start = AsyncMock()
+        fake_manager.stop = AsyncMock()
+        fake_worker = MagicMock()
+        fake_worker.restore_state = AsyncMock(return_value=False)
+        fake_worker.start = AsyncMock()
+        fake_worker.stop = AsyncMock()
+        fake_worker.risk_control_state = {"active": False}
+        fake_runtime = MagicMock()
+        fake_runtime.stop = AsyncMock()
+
+        monkeypatch.setattr(main, "database", fake_database)
+        monkeypatch.setattr(main, "repository", fake_repository)
+        monkeypatch.setattr(main, "settings", SimpleNamespace(
+            binance_public_enabled=False,
+            bybit_public_enabled=False,
+            delta_public_enabled=False,
+            bybit_public_symbol="BTCUSDT",
+            delta_public_symbol="BTCUSD",
+        ))
+        monkeypatch.setattr(main, "BinanceOrderBookStream", lambda symbol: fake_stream)
+        monkeypatch.setattr(main, "ExchangeConnectionManager", lambda adapters: fake_manager)
+        monkeypatch.setattr(main, "PaperPersistenceWorker", lambda repository: fake_worker)
+        monkeypatch.setattr(main, "ControlledPaperSession", lambda config: MagicMock())
+        monkeypatch.setattr(main, "NineLayerDecisionEngine", lambda config: MagicMock())
+        monkeypatch.setattr(main, "AutonomousPaperRuntime", lambda *args, **kwargs: fake_runtime)
+        monkeypatch.setattr(main, "set_runtime", lambda runtime: None)
+        monkeypatch.setattr(main, "set_persistence_enqueue", lambda enqueue: None)
+
+        async with main.lifespan(main.app):
+            fake_stream.start.assert_not_awaited()
+            fake_manager.start.assert_awaited_once()
+            book = main.app.state.unified_market_data.get_book("binance", "BTCUSDT")
+            assert book["synchronized"] is False
+            assert book["stale"] is True
+            assert book["integrity_error"] == "Binance public depth feed disabled by configuration"
+
+    asyncio.run(run())
 
 if __name__ == "__main__":
     unittest.main()
